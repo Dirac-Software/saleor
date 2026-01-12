@@ -1,0 +1,31 @@
+services:
+  # for the db, use the local dirac db from the dirac repo. We start a redis instance here. Mailpit is for testing emails in dev
+  saleor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    network_mode: host
+    command: uvicorn saleor.asgi:application --host=0.0.0.0 --port=9000 --workers=2 --lifespan=off --ws=none --no-server-header --no-access-log --timeout-keep-alive=35 --timeout-graceful-shutdown=30 --limit-max-requests=10000
+    env_file:
+    - .env
+
+  cache:
+    image: valkey/valkey:8.1-alpine
+    restart: unless-stopped
+    volumes:
+      - saleor-cache:/data
+    ports:
+      - 6379:6379
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - 1025:1025 # SMTP Server
+      - 8025:8025 # Mailpit UI
+    restart: unless-stopped
+
+volumes:
+  saleor-cache:
+    driver: local

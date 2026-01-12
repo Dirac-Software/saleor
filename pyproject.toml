@@ -151,8 +151,8 @@ build-schema.cmd = "python manage.py get_graphql_schema"
 build-schema.capture_stdout = "saleor/graphql/schema.graphql"
 build-schema.help = "Build GraphQL schema to saleor/graphql/schema.graphql file"
 
-migrate.cmd = "python manage.py migrate"
-migrate.help = "Run database migrations"
+migrate.shell = "DATABASE_URL=${SUPERUSER_DATABASE_URL:-$DATABASE_URL} python manage.py migrate"
+migrate.help = "Run database migrations (uses SUPERUSER_DATABASE_URL if set, otherwise DATABASE_URL)"
 
 make-migrations.cmd = "python manage.py makemigrations"
 make-migrations.help = "Create new migrations based on changes in models"

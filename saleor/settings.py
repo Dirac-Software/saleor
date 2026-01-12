@@ -327,6 +327,8 @@ INSTALLED_APPS = [
     "saleor.app",
     "saleor.thumbnail",
     "saleor.schedulers",
+    # Dirac ops - custom app for permission management
+    "dirac_ops",
     # External apps
     "django_measurement",
     "mptt",

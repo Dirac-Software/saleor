@@ -1,0 +1,14 @@
+name: CD
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send CGI to update server
+        run: |
+          curl --fail-with-body -u github:${{secrets.CGI_HTTP_BASIC_AUTH_PASSWORD}} https://github-deploy.prod.dirac.software/cgi-bin/deploy/saleor.cgi
