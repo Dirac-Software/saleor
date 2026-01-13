@@ -20,3 +20,12 @@ This migration runs as superuser (via SUPERUSER_DATABASE_URL) and automatically 
 
 # Deployment
 I added a `compose.yaml` which specifies how we deploy, and a `.github/workflows/cd.yml` for our CD. We will use the existing CI.
+
+
+# Apps
+```bash
+uv run python manage.py install_app https://my-app-is-hosted-here/ --activate
+```
+Then you can use the dashboard to configure.
+
+An annoying thing: In order to use the dashboard to configure you must use either localhost OR https, but to run docker containers without network-mode host you can't use localhost and I often use the my-device.tail473fa.ts.net workaround to get to localhost. This is hard.
