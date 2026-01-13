@@ -10,6 +10,25 @@ services:
     command: uvicorn saleor.asgi:application --host=0.0.0.0 --port=9000 --workers=2 --lifespan=off --ws=none --no-server-header --no-access-log --timeout-keep-alive=35 --timeout-graceful-shutdown=30 --limit-max-requests=10000
     env_file:
     - .env
+    profiles:
+      - dev
+      - prod
+
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app
+    network_mode: host
+    command: sh -c "celery -A saleor --app=saleor.celeryconf:app worker --loglevel=info & celery -A saleor --app=saleor.celeryconf:app beat --loglevel=info"
+    env_file:
+      - .env
+    depends_on:
+      - cache
+    profiles:
+      - dev
+      - prod
 
   cache:
     image: valkey/valkey:8.1-alpine
@@ -18,6 +37,9 @@ services:
       - saleor-cache:/data
     ports:
       - 6379:6379
+    profiles:
+      - dev
+      - prod
 
   mailpit:
     image: axllent/mailpit
@@ -25,6 +47,8 @@ services:
       - 1025:1025 # SMTP Server
       - 8025:8025 # Mailpit UI
     restart: unless-stopped
+    profiles:
+      - dev
 
 volumes:
   saleor-cache:
