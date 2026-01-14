@@ -828,7 +828,7 @@ class ProductVariant(ChannelContextType[models.ProductVariant]):
 
     @staticmethod
     def resolve_weight(root: ChannelContext[models.ProductVariant], _info):
-        return convert_weight_to_default_weight_unit(root.node.weight)
+        return convert_weight_to_default_weight_unit(root.node.get_weight())
 
     @staticmethod
     @traced_resolver

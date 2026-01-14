@@ -100,7 +100,6 @@ def resolve_get_pack_allocation(
     from ...checkout.pack_utils import get_pack_for_product
     from ...core.db.connection import allow_writer
     from ...product.models import Product
-    from .mutations.utils import get_checkout
     from .types import PackAllocation
 
     # Get product and channel
@@ -121,7 +120,12 @@ def resolve_get_pack_allocation(
         # Get current quantity in checkout
         current_qty = 0
         if checkout_id:
-            checkout = get_checkout(None, info, id=checkout_id)  # type: ignore[arg-type]
+            from ...checkout.models import Checkout
+
+            _, checkout_pk = from_global_id_or_error(checkout_id, "Checkout")
+            checkout = Checkout.objects.using(
+                get_database_connection_name(info.context)
+            ).get(pk=checkout_pk)
             current_qty = sum(
                 line.quantity
                 for line in checkout.lines.all()
