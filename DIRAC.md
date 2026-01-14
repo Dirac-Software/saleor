@@ -29,3 +29,8 @@ uv run python manage.py install_app https://my-app-is-hosted-here/ --activate
 Then you can use the dashboard to configure.
 
 An annoying thing: In order to use the dashboard to configure you must use either localhost OR https, but to run docker containers without network-mode host you can't use localhost and I often use the my-device.tail473fa.ts.net workaround to get to localhost. This is hard.
+
+# Packs
+For some product, the user is NOT able to choose the makeup of variants (almost always sizes). Instead we use [Hamilton's method](https://en.wikipedia.org/wiki/Mathematics_of_apportionment) to ensure even distribution across variants.
+We expose `getPackAllocation` and `checkoutAddPack`. We use the `minimum-order-quantity` attribute on a product to ensure the minimum pack has been ordered.
+Note the traditional add and update checkout graphQL endpoints are still exposed. To fix this we would need to add a config changeable through the dashboard for whether a channel uses packs or not. Since this requires migrations and code changes that will make merging future solear releases harder, we leave it.

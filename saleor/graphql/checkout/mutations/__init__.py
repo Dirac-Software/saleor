@@ -1,3 +1,4 @@
+from .checkout_add_pack import CheckoutAddPack
 from .checkout_add_promo_code import CheckoutAddPromoCode
 from .checkout_billing_address_update import CheckoutBillingAddressUpdate
 from .checkout_complete import CheckoutComplete
@@ -19,6 +20,7 @@ from .checkout_shipping_method_update import CheckoutShippingMethodUpdate
 from .order_create_from_checkout import OrderCreateFromCheckout
 
 __all__ = [
+    "CheckoutAddPack",
     "CheckoutAddPromoCode",
     "CheckoutBillingAddressUpdate",
     "CheckoutComplete",

@@ -81,3 +81,92 @@ def resolve_checkout(info, token, id):
         )
 
     return CheckoutByTokenLoader(info.context).load(token).then(with_checkout)
+
+
+@traced_resolver
+def resolve_get_pack_allocation(
+    _root,
+    info,
+    *,
+    product_id,
+    pack_size,
+    channel_slug,
+    checkout_id=None,
+):
+    """Resolve pack allocation preview with validation."""
+    from ...attribute.models import Attribute
+    from ...attribute.models.product import AssignedProductAttributeValue
+    from ...channel.models import Channel
+    from ...checkout.pack_utils import get_pack_for_product
+    from ...core.db.connection import allow_writer
+    from ...product.models import Product
+    from .mutations.utils import get_checkout
+    from .types import PackAllocation
+
+    # Get product and channel
+    _, product_pk = from_global_id_or_error(product_id, "Product")
+
+    with allow_writer():
+        product = Product.objects.using(get_database_connection_name(info.context)).get(
+            pk=product_pk
+        )
+        channel = Channel.objects.using(get_database_connection_name(info.context)).get(
+            slug=channel_slug
+        )
+
+        # Get pack allocation
+        pack_allocation = get_pack_for_product(product, pack_size, channel)
+        pack_qty = sum(qty for _, qty in pack_allocation)
+
+        # Get current quantity in checkout
+        current_qty = 0
+        if checkout_id:
+            checkout = get_checkout(None, info, id=checkout_id)  # type: ignore[arg-type]
+            current_qty = sum(
+                line.quantity
+                for line in checkout.lines.all()
+                if line.variant.product_id == product.id
+            )
+
+        # Get minimum-order-quantity attribute value
+        min_required = None
+        shortfall = 0
+        can_add = True
+        message = None
+
+        try:
+            attribute = Attribute.objects.get(slug="minimum-order-quantity")
+            # Check if this attribute is assigned to this product type
+            if attribute.product_types.filter(id=product.product_type_id).exists():
+                # Get the assigned value for this product
+                assigned_value = (
+                    AssignedProductAttributeValue.objects.filter(
+                        product=product, value__attribute=attribute
+                    )
+                    .select_related("value")
+                    .first()
+                )
+                if assigned_value:
+                    min_required = int(assigned_value.value.name)
+                    total_qty = current_qty + pack_qty
+                    shortfall = max(0, min_required - total_qty)
+                    can_add = shortfall == 0
+
+                    if not can_add:
+                        message = f"Add {shortfall} more items to meet minimum order of {min_required}"
+        except Attribute.DoesNotExist:
+            pass
+
+        return PackAllocation(
+            allocation=[
+                {"variant": v, "quantity": q, "channel_slug": channel.slug}
+                for v, q in pack_allocation
+            ],
+            can_add=can_add,
+            current_quantity=current_qty,
+            pack_quantity=pack_qty,
+            total_quantity=current_qty + pack_qty,
+            minimum_required=min_required,
+            shortfall=shortfall,
+            message=message,
+        )

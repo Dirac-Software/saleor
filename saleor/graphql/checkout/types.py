@@ -1795,3 +1795,65 @@ class CheckoutCountableConnection(CountableConnection):
     class Meta:
         doc_category = DOC_CATEGORY_CHECKOUT
         node = Checkout
+
+
+class PackAllocationVariant(graphene.ObjectType):
+    """Single variant allocation in a pack."""
+
+    variant = graphene.Field(
+        "saleor.graphql.product.types.ProductVariant",
+        required=True,
+        description="The product variant.",
+    )
+    quantity = graphene.Int(
+        required=True,
+        description="Quantity of this variant in the pack.",
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_CHECKOUT
+
+    @staticmethod
+    def resolve_variant(root, _info):
+        from ..core.context import ChannelContext
+
+        return ChannelContext(node=root["variant"], channel_slug=root["channel_slug"])
+
+
+class PackAllocation(graphene.ObjectType):
+    """Pack allocation preview with validation."""
+
+    allocation = NonNullList(
+        PackAllocationVariant,
+        description="List of variants and quantities in the pack.",
+        required=True,
+    )
+    can_add = graphene.Boolean(
+        required=True,
+        description="Whether the pack can be added to checkout.",
+    )
+    current_quantity = graphene.Int(
+        required=True,
+        description="Current quantity of this product in checkout.",
+    )
+    pack_quantity = graphene.Int(
+        required=True,
+        description="Quantity that would be added by this pack.",
+    )
+    total_quantity = graphene.Int(
+        required=True,
+        description="Total quantity after adding pack.",
+    )
+    minimum_required = graphene.Int(
+        description="Minimum order quantity required (null if no minimum).",
+    )
+    shortfall = graphene.Int(
+        required=True,
+        description="Number of items short of minimum (0 if meets minimum).",
+    )
+    message = graphene.String(
+        description="Validation message for the user.",
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_CHECKOUT
