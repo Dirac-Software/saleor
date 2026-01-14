@@ -17,6 +17,7 @@ from ..core.scalars import UUID
 from ..payment.mutations import CheckoutPaymentCreate
 from .filters import CheckoutFilterInput
 from .mutations import (
+    CheckoutAddPack,
     CheckoutAddPromoCode,
     CheckoutBillingAddressUpdate,
     CheckoutComplete,
@@ -37,12 +38,18 @@ from .mutations import (
     CheckoutShippingMethodUpdate,
     OrderCreateFromCheckout,
 )
-from .resolvers import resolve_checkout, resolve_checkout_lines, resolve_checkouts
+from .resolvers import (
+    resolve_checkout,
+    resolve_checkout_lines,
+    resolve_checkouts,
+    resolve_get_pack_allocation,
+)
 from .sorters import CheckoutSortingInput
 from .types import (
     Checkout,
     CheckoutCountableConnection,
     CheckoutLineCountableConnection,
+    PackAllocation,
 )
 
 
@@ -96,10 +103,38 @@ class CheckoutQueries(graphene.ObjectType):
         ],
         doc_category=DOC_CATEGORY_CHECKOUT,
     )
+    get_pack_allocation = BaseField(
+        PackAllocation,
+        description="Get pack allocation preview with validation.",
+        product_id=graphene.Argument(
+            graphene.ID,
+            required=True,
+            description="Product ID to create pack from.",
+        ),
+        pack_size=graphene.Argument(
+            graphene.Int,
+            required=True,
+            description="Size of the pack.",
+        ),
+        channel_slug=graphene.Argument(
+            graphene.String,
+            required=True,
+            description="Channel slug for stock availability.",
+        ),
+        checkout_id=graphene.Argument(
+            graphene.ID,
+            description="Optional checkout ID to check current quantity.",
+        ),
+        doc_category=DOC_CATEGORY_CHECKOUT,
+    )
 
     @staticmethod
     def resolve_checkout(_root, info: ResolveInfo, *, token=None, id=None):
         return resolve_checkout(info, token, id)
+
+    @staticmethod
+    def resolve_get_pack_allocation(_root, info: ResolveInfo, **kwargs):
+        return resolve_get_pack_allocation(_root, info, **kwargs)
 
     @staticmethod
     def resolve_checkouts(_root, info: ResolveInfo, *, channel=None, **kwargs):
@@ -120,6 +155,7 @@ class CheckoutQueries(graphene.ObjectType):
 
 
 class CheckoutMutations(graphene.ObjectType):
+    checkout_add_pack = CheckoutAddPack.Field()
     checkout_add_promo_code = CheckoutAddPromoCode.Field()
     checkout_billing_address_update = CheckoutBillingAddressUpdate.Field()
     checkout_complete = CheckoutComplete.Field()
