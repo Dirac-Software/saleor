@@ -85,6 +85,9 @@ dependencies = [
     "django-storages[google]~=1.11",
     "python-magic>=0.4.27,<0.5 ; sys_platform != 'win32'",
     "python-magic-bin>=0.4.14,<0.5 ; sys_platform == 'win32'",
+    "pandas>=2.3.3",
+    "attrs>=25.4.0",
+    "openpyxl>=3.1.5,<4",
 ]
 
 [project.urls]
@@ -101,7 +104,6 @@ dev = [
     "fakeredis~=2.26",
     "freezegun>=1,<2",
     "mypy-extensions>=1.1.0,<2",
-    "openpyxl>=3.1.5,<4",
     "pre-commit~=4.0",
     "pytest>=8.3.2,<9",
     "pytest-asyncio>=1.0.0,<2",
