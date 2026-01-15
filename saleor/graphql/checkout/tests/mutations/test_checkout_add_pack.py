@@ -250,3 +250,185 @@ def test_checkout_add_pack_insufficient_stock(
     lines, _ = fetch_checkout_lines(checkout)
     total_qty = calculate_checkout_quantity(lines)
     assert total_qty == 3
+
+
+def test_checkout_add_pack_with_minimum_order_quantity_below_available(
+    user_api_client, checkout, product_with_two_variants
+):
+    """Test that effective minimum is used when available < minimum order quantity."""
+    # given
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    checkout_id = to_global_id_or_none(checkout)
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    # Set stock: 15 items total
+    for stock in variants[0].stocks.all():
+        stock.quantity = 5
+        stock.save()
+    for stock in variants[1].stocks.all():
+        stock.quantity = 10
+        stock.save()
+
+    # Set minimum order quantity to 20 (higher than available)
+    from .....attribute.models import Attribute, AttributeValue
+    from .....attribute.models.product import AssignedProductAttributeValue
+
+    attribute, _ = Attribute.objects.get_or_create(
+        slug="minimum-order-quantity",
+        defaults={
+            "name": "Minimum Order Quantity",
+            "type": "PRODUCT_TYPE",
+            "input_type": "DROPDOWN",
+        },
+    )
+    attribute.product_types.add(product.product_type)
+
+    value, _ = AttributeValue.objects.get_or_create(
+        attribute=attribute, name="20", defaults={"slug": "20"}
+    )
+
+    AssignedProductAttributeValue.objects.create(product=product, value=value)
+
+    # Request pack of 15 (all available)
+    pack_size = 15
+
+    variables = {
+        "id": checkout_id,
+        "productId": product_id,
+        "packSize": pack_size,
+    }
+
+    # when
+    response = user_api_client.post_graphql(MUTATION_CHECKOUT_ADD_PACK, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["checkoutAddPack"]
+    assert not data["errors"]
+
+    # Should succeed because effective minimum is min(20, 15) = 15
+    checkout.refresh_from_db()
+    lines, _ = fetch_checkout_lines(checkout)
+    total_qty = calculate_checkout_quantity(lines)
+    assert total_qty == 15
+
+
+def test_checkout_add_pack_with_minimum_order_quantity_fails_below_effective(
+    user_api_client, checkout, product_with_two_variants
+):
+    """Test that validation fails when pack size < effective minimum."""
+    # given
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    checkout_id = to_global_id_or_none(checkout)
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    # Set stock: 15 items total
+    for stock in variants[0].stocks.all():
+        stock.quantity = 5
+        stock.save()
+    for stock in variants[1].stocks.all():
+        stock.quantity = 10
+        stock.save()
+
+    # Set minimum order quantity to 20 (higher than available)
+    from .....attribute.models import Attribute, AttributeValue
+    from .....attribute.models.product import AssignedProductAttributeValue
+
+    attribute, _ = Attribute.objects.get_or_create(
+        slug="minimum-order-quantity",
+        defaults={
+            "name": "Minimum Order Quantity",
+            "type": "PRODUCT_TYPE",
+            "input_type": "DROPDOWN",
+        },
+    )
+    attribute.product_types.add(product.product_type)
+
+    value, _ = AttributeValue.objects.get_or_create(
+        attribute=attribute, name="20", defaults={"slug": "20"}
+    )
+
+    AssignedProductAttributeValue.objects.create(product=product, value=value)
+
+    # Request pack of 10 (less than effective minimum of 15)
+    pack_size = 10
+
+    variables = {
+        "id": checkout_id,
+        "productId": product_id,
+        "packSize": pack_size,
+    }
+
+    # when
+    response = user_api_client.post_graphql(MUTATION_CHECKOUT_ADD_PACK, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["checkoutAddPack"]
+    errors = data["errors"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == CheckoutErrorCode.INSUFFICIENT_STOCK.name
+    assert "15" in errors[0]["message"]  # Effective minimum
+    assert "Add 5 more" in errors[0]["message"]
+
+
+def test_checkout_add_pack_with_minimum_order_quantity_sufficient_stock(
+    user_api_client, checkout, product_with_two_variants
+):
+    """Test that minimum validation applies normally when stock is sufficient."""
+    # given
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    checkout_id = to_global_id_or_none(checkout)
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    # Set stock: 100 items total (more than minimum)
+    for stock in variants[0].stocks.all():
+        stock.quantity = 40
+        stock.save()
+    for stock in variants[1].stocks.all():
+        stock.quantity = 60
+        stock.save()
+
+    # Set minimum order quantity to 20
+    from .....attribute.models import Attribute, AttributeValue
+    from .....attribute.models.product import AssignedProductAttributeValue
+
+    attribute, _ = Attribute.objects.get_or_create(
+        slug="minimum-order-quantity",
+        defaults={
+            "name": "Minimum Order Quantity",
+            "type": "PRODUCT_TYPE",
+            "input_type": "DROPDOWN",
+        },
+    )
+    attribute.product_types.add(product.product_type)
+
+    value, _ = AttributeValue.objects.get_or_create(
+        attribute=attribute, name="20", defaults={"slug": "20"}
+    )
+
+    AssignedProductAttributeValue.objects.create(product=product, value=value)
+
+    # Request pack of 10 (less than minimum of 20)
+    pack_size = 10
+
+    variables = {
+        "id": checkout_id,
+        "productId": product_id,
+        "packSize": pack_size,
+    }
+
+    # when
+    response = user_api_client.post_graphql(MUTATION_CHECKOUT_ADD_PACK, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["checkoutAddPack"]
+    errors = data["errors"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == CheckoutErrorCode.INSUFFICIENT_STOCK.name
+    assert "20" in errors[0]["message"]  # Full minimum requirement
+    assert "Add 10 more" in errors[0]["message"]

@@ -1847,9 +1847,12 @@ class PackAllocation(graphene.ObjectType):
     minimum_required = graphene.Int(
         description="Minimum order quantity required (null if no minimum).",
     )
+    effective_minimum = graphene.Int(
+        description="Effective minimum considering available stock (min of minimum_required and available stock).",
+    )
     shortfall = graphene.Int(
         required=True,
-        description="Number of items short of minimum (0 if meets minimum).",
+        description="Number of items short of effective minimum (0 if meets minimum).",
     )
     message = graphene.String(
         description="Validation message for the user.",

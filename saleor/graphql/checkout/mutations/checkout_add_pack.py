@@ -91,6 +91,8 @@ class CheckoutAddPack(BaseMutation):
         product,
         current_quantity: int,
         pack_quantity: int,
+        channel,
+        country_code: str,
     ):
         """Validate minimum order quantity requirement."""
         if not assigned_attr:
@@ -98,14 +100,32 @@ class CheckoutAddPack(BaseMutation):
 
         # Get attribute value from AssignedProductAttributeValue
         min_required = int(assigned_attr.value.name)
+
+        # Calculate total available stock across all variants
+        from ....warehouse.availability import get_available_quantity
+
+        variants = product.variants.all()
+        total_available = 0
+
+        for variant in variants:
+            available = get_available_quantity(
+                variant,
+                country_code,
+                channel.slug,
+                check_reservations=True,
+            )
+            total_available += available
+
+        # Use effective minimum (min of requirement and availability)
+        effective_minimum = min(min_required, total_available)
         total_quantity = current_quantity + pack_quantity
 
-        if total_quantity < min_required:
-            shortfall = min_required - total_quantity
+        if total_quantity < effective_minimum:
+            shortfall = effective_minimum - total_quantity
             raise ValidationError(
                 {
                     "pack_size": ValidationError(
-                        f"Minimum order quantity for {product.name} is {min_required}. "
+                        f"Minimum order quantity for {product.name} is {effective_minimum}. "
                         f"Current total would be {total_quantity}. "
                         f"Add {shortfall} more items.",
                         code=CheckoutErrorCode.INSUFFICIENT_STOCK.value,
@@ -179,9 +199,21 @@ class CheckoutAddPack(BaseMutation):
         except Attribute.DoesNotExist:
             pass
 
+        # Determine country code for stock availability check
+        country_code = (
+            checkout.shipping_address.country.code
+            if checkout.shipping_address
+            else checkout.channel.default_country.code
+        )
+
         # Validate minimum order quantity
         cls.validate_minimum_order_quantity(
-            assigned_attr, product, current_qty, pack_qty
+            assigned_attr,
+            product,
+            current_qty,
+            pack_qty,
+            checkout.channel,
+            country_code,
         )
 
         # Prepare checkout lines data

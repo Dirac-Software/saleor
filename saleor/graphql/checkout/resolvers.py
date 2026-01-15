@@ -134,6 +134,7 @@ def resolve_get_pack_allocation(
 
         # Get minimum-order-quantity attribute value
         min_required = None
+        effective_minimum = None
         shortfall = 0
         can_add = True
         message = None
@@ -152,12 +153,31 @@ def resolve_get_pack_allocation(
                 )
                 if assigned_value:
                     min_required = int(assigned_value.value.name)
+
+                    # Calculate total available stock across all variants
+                    from ...warehouse.availability import get_available_quantity
+
+                    country_code = channel.default_country.code
+                    variants = product.variants.all()
+                    total_available = 0
+
+                    for variant in variants:
+                        available = get_available_quantity(
+                            variant,
+                            country_code,
+                            channel.slug,
+                            check_reservations=True,
+                        )
+                        total_available += available
+
+                    # Use effective minimum (min of requirement and availability)
+                    effective_minimum = min(min_required, total_available)
                     total_qty = current_qty + pack_qty
-                    shortfall = max(0, min_required - total_qty)
+                    shortfall = max(0, effective_minimum - total_qty)
                     can_add = shortfall == 0
 
                     if not can_add:
-                        message = f"Add {shortfall} more items to meet minimum order of {min_required}"
+                        message = f"Add {shortfall} more items to meet minimum order of {effective_minimum}"
         except Attribute.DoesNotExist:
             pass
 
@@ -171,6 +191,7 @@ def resolve_get_pack_allocation(
             pack_quantity=pack_qty,
             total_quantity=current_qty + pack_qty,
             minimum_required=min_required,
+            effective_minimum=effective_minimum,
             shortfall=shortfall,
             message=message,
         )

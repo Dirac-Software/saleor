@@ -29,6 +29,7 @@ query getPackAllocation(
     packQuantity
     totalQuantity
     minimumRequired
+    effectiveMinimum
     shortfall
     message
   }
@@ -210,3 +211,179 @@ def test_get_pack_allocation_proportional(
     # 10/50 and 40/50 -> 2 and 8
     assert variant_quantities[variant_0_id] == 2
     assert variant_quantities[variant_1_id] == 8
+
+
+def test_get_pack_allocation_with_effective_minimum_below_available(
+    user_api_client, product_with_two_variants, channel_USD
+):
+    """Test that effective minimum is returned when available < minimum order quantity."""
+    # given
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    # Set stock: 15 items total
+    for stock in variants[0].stocks.all():
+        stock.quantity = 5
+        stock.save()
+    for stock in variants[1].stocks.all():
+        stock.quantity = 10
+        stock.save()
+
+    # Set minimum order quantity to 20 (higher than available)
+    from ....attribute.models import Attribute, AttributeValue
+    from ....attribute.models.product import AssignedProductAttributeValue
+
+    attribute, _ = Attribute.objects.get_or_create(
+        slug="minimum-order-quantity",
+        defaults={
+            "name": "Minimum Order Quantity",
+            "type": "PRODUCT_TYPE",
+            "input_type": "DROPDOWN",
+        },
+    )
+    attribute.product_types.add(product.product_type)
+
+    value, _ = AttributeValue.objects.get_or_create(
+        attribute=attribute, name="20", defaults={"slug": "20"}
+    )
+
+    AssignedProductAttributeValue.objects.create(product=product, value=value)
+
+    # Request pack of 15 (all available)
+    variables = {
+        "productId": product_id,
+        "packSize": 15,
+        "channelSlug": channel_USD.slug,
+    }
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_PACK_ALLOCATION, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["getPackAllocation"]
+
+    assert data["canAdd"] is True
+    assert data["minimumRequired"] == 20
+    assert data["effectiveMinimum"] == 15  # min(20, 15)
+    assert data["shortfall"] == 0
+    assert data["message"] is None
+
+
+def test_get_pack_allocation_with_effective_minimum_fails_below(
+    user_api_client, product_with_two_variants, channel_USD
+):
+    """Test that validation fails when pack size < effective minimum."""
+    # given
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    # Set stock: 15 items total
+    for stock in variants[0].stocks.all():
+        stock.quantity = 5
+        stock.save()
+    for stock in variants[1].stocks.all():
+        stock.quantity = 10
+        stock.save()
+
+    # Set minimum order quantity to 20 (higher than available)
+    from ....attribute.models import Attribute, AttributeValue
+    from ....attribute.models.product import AssignedProductAttributeValue
+
+    attribute, _ = Attribute.objects.get_or_create(
+        slug="minimum-order-quantity",
+        defaults={
+            "name": "Minimum Order Quantity",
+            "type": "PRODUCT_TYPE",
+            "input_type": "DROPDOWN",
+        },
+    )
+    attribute.product_types.add(product.product_type)
+
+    value, _ = AttributeValue.objects.get_or_create(
+        attribute=attribute, name="20", defaults={"slug": "20"}
+    )
+
+    AssignedProductAttributeValue.objects.create(product=product, value=value)
+
+    # Request pack of 10 (less than effective minimum of 15)
+    variables = {
+        "productId": product_id,
+        "packSize": 10,
+        "channelSlug": channel_USD.slug,
+    }
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_PACK_ALLOCATION, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["getPackAllocation"]
+
+    assert data["canAdd"] is False
+    assert data["minimumRequired"] == 20
+    assert data["effectiveMinimum"] == 15  # min(20, 15)
+    assert data["shortfall"] == 5
+    assert "Add 5 more items" in data["message"]
+    assert "minimum order of 15" in data["message"]
+
+
+def test_get_pack_allocation_with_minimum_sufficient_stock(
+    user_api_client, product_with_two_variants, channel_USD
+):
+    """Test that minimum validation applies normally when stock is sufficient."""
+    # given
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    # Set stock: 100 items total (more than minimum)
+    for stock in variants[0].stocks.all():
+        stock.quantity = 40
+        stock.save()
+    for stock in variants[1].stocks.all():
+        stock.quantity = 60
+        stock.save()
+
+    # Set minimum order quantity to 20
+    from ....attribute.models import Attribute, AttributeValue
+    from ....attribute.models.product import AssignedProductAttributeValue
+
+    attribute, _ = Attribute.objects.get_or_create(
+        slug="minimum-order-quantity",
+        defaults={
+            "name": "Minimum Order Quantity",
+            "type": "PRODUCT_TYPE",
+            "input_type": "DROPDOWN",
+        },
+    )
+    attribute.product_types.add(product.product_type)
+
+    value, _ = AttributeValue.objects.get_or_create(
+        attribute=attribute, name="20", defaults={"slug": "20"}
+    )
+
+    AssignedProductAttributeValue.objects.create(product=product, value=value)
+
+    # Request pack of 10 (less than minimum of 20)
+    variables = {
+        "productId": product_id,
+        "packSize": 10,
+        "channelSlug": channel_USD.slug,
+    }
+
+    # when
+    response = user_api_client.post_graphql(QUERY_GET_PACK_ALLOCATION, variables)
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["getPackAllocation"]
+
+    assert data["canAdd"] is False
+    assert data["minimumRequired"] == 20
+    assert data["effectiveMinimum"] == 20  # min(20, 100)
+    assert data["shortfall"] == 10
+    assert "Add 10 more items" in data["message"]
+    assert "minimum order of 20" in data["message"]

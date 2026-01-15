@@ -1072,6 +1072,7 @@ class Command(BaseCommand):
             slug=slug,
             product_type=product_type_map[product_data.category],
             category=category_map[product_data.category],
+            search_index_dirty=True,  # Mark for search indexing
         )
         return product
 
@@ -1118,7 +1119,10 @@ class Command(BaseCommand):
             product_code_value, _ = AttributeValue.objects.get_or_create(
                 attribute=product_code_attr,
                 name=product_data.product_code,
-                defaults={"slug": product_code_slug},
+                defaults={
+                    "slug": product_code_slug,
+                    "plain_text": product_data.product_code,
+                },
             )
 
         AssignedProductAttributeValue.objects.create(
