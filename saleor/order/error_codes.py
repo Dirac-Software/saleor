@@ -39,6 +39,9 @@ class OrderErrorCode(Enum):
     NON_EDITABLE_GIFT_LINE = "non_editable_gift_line"
     NON_REMOVABLE_GIFT_LINE = "non_removable_gift_line"
     MISSING_ADDRESS_DATA = "missing_address_data"
+    VAT_INVALID_FORMAT = "vat_invalid_format"
+    VAT_INVALID = "vat_invalid"
+    VAT_SERVICE_UNAVAILABLE = "vat_service_unavailable"
 
 
 class OrderGrantRefundCreateErrorCode(Enum):
@@ -90,6 +93,9 @@ class OrderBulkCreateErrorCode(Enum):
     ORDER_LINE_FULFILLMENT_LINE_MISMATCH = "order_line_fulfillment_line_mismatch"
     METADATA_KEY_REQUIRED = "metadata_key_required"
     INCORRECT_CURRENCY = "incorrect_currency"
+    VAT_INVALID_FORMAT = "vat_invalid_format"
+    VAT_INVALID = "vat_invalid"
+    VAT_SERVICE_UNAVAILABLE = "vat_service_unavailable"
 
 
 class OrderNoteAddErrorCode(Enum):

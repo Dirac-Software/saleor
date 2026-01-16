@@ -9,8 +9,8 @@ from ..core.http_client import HTTPClient
 
 logger = logging.getLogger(__name__)
 
-# VIES API endpoint
-VIES_API_URL = "https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-number"
+# VIES API endpoint base URL (country and VAT number will be appended to path)
+VIES_API_BASE_URL = "https://ec.europa.eu/taxation_customs/vies/rest-api/ms"
 
 # Cache settings (hardcoded as per requirements)
 VIES_TIMEOUT_SECONDS = 5
@@ -113,11 +113,9 @@ def validate_vat_vies(
     if vat.startswith(country_code):
         vat_number = vat[len(country_code) :]
 
-    # Prepare VIES API request
-    params = {
-        "countryCode": country_code,
-        "vatNumber": vat_number,
-    }
+    # Build VIES API URL with country and VAT number in path
+    # Format: /ms/{country}/vat/{vatno}
+    api_url = f"{VIES_API_BASE_URL}/{country_code}/vat/{vat_number}"
 
     logger.info(
         "Calling VIES API for VAT validation",
@@ -127,15 +125,16 @@ def validate_vat_vies(
     try:
         # Call VIES API using hardened HTTP client
         response = HTTPClient.send_request(
-            "GET", VIES_API_URL, params=params, timeout=timeout, allow_redirects=False
+            "GET", api_url, timeout=timeout, allow_redirects=False
         )
         response.raise_for_status()
 
         # Parse response
         data = response.json()
 
+        # The API returns 'isValid' (camelCase) in the response
         result = {
-            "valid": data.get("valid", False),
+            "valid": data.get("isValid", data.get("valid", False)),
             "name": data.get("name", ""),
             "address": data.get("address", ""),
         }

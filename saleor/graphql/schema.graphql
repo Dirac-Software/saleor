@@ -12394,6 +12394,9 @@ enum OrderErrorCode @doc(category: "Orders") {
   NON_EDITABLE_GIFT_LINE
   NON_REMOVABLE_GIFT_LINE
   MISSING_ADDRESS_DATA
+  VAT_INVALID_FORMAT
+  VAT_INVALID
+  VAT_SERVICE_UNAVAILABLE
 }
 
 enum AddressTypeEnum {
@@ -20068,6 +20071,9 @@ enum WarehouseErrorCode @doc(category: "Products") {
   NOT_FOUND
   REQUIRED
   UNIQUE
+  VAT_INVALID_FORMAT
+  VAT_INVALID
+  VAT_SERVICE_UNAVAILABLE
 }
 
 input WarehouseCreateInput @doc(category: "Products") {
@@ -20609,6 +20615,9 @@ enum ShopErrorCode {
   NOT_FOUND
   REQUIRED
   UNIQUE
+  VAT_INVALID_FORMAT
+  VAT_INVALID
+  VAT_SERVICE_UNAVAILABLE
 }
 
 input StaffNotificationRecipientInput {
@@ -25663,6 +25672,9 @@ enum OrderBulkCreateErrorCode {
   ORDER_LINE_FULFILLMENT_LINE_MISMATCH
   METADATA_KEY_REQUIRED
   INCORRECT_CURRENCY
+  VAT_INVALID_FORMAT
+  VAT_INVALID
+  VAT_SERVICE_UNAVAILABLE
 }
 
 input OrderBulkCreateInput @doc(category: "Orders") {
@@ -28156,6 +28168,9 @@ enum CheckoutErrorCode @doc(category: "Checkout") {
   NON_REMOVABLE_GIFT_LINE
   SHIPPING_CHANGE_FORBIDDEN
   MISSING_ADDRESS_DATA
+  VAT_INVALID_FORMAT
+  VAT_INVALID
+  VAT_SERVICE_UNAVAILABLE
 }
 
 """

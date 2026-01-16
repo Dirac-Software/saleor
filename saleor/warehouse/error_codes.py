@@ -8,6 +8,9 @@ class WarehouseErrorCode(str, Enum):
     NOT_FOUND = "not_found"
     REQUIRED = "required"
     UNIQUE = "unique"
+    VAT_INVALID_FORMAT = "vat_invalid_format"
+    VAT_INVALID = "vat_invalid"
+    VAT_SERVICE_UNAVAILABLE = "vat_service_unavailable"
 
 
 class StockErrorCode(str, Enum):
