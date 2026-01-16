@@ -116,18 +116,41 @@ class CheckoutAddPack(BaseMutation):
             )
             total_available += available
 
-        # Use effective minimum (min of requirement and availability)
-        effective_minimum = min(min_required, total_available)
+        # Calculate what would remain after this order
         total_quantity = current_quantity + pack_quantity
+        remaining_after_order = total_available - total_quantity
+
+        # Determine effective minimum based on what would remain
+        if total_available < min_required:
+            # Can't meet MOQ with available stock, must take all available
+            effective_minimum = total_available
+            insufficient_remaining = False
+        elif remaining_after_order > 0 and remaining_after_order < min_required:
+            # Would leave insufficient stock - must take everything
+            effective_minimum = total_available
+            insufficient_remaining = True
+        else:
+            # Either takes everything or leaves sufficient stock
+            effective_minimum = min_required
+            insufficient_remaining = False
 
         if total_quantity < effective_minimum:
             shortfall = effective_minimum - total_quantity
+            if insufficient_remaining:
+                error_message = (
+                    f"Cannot leave less than {min_required} items remaining. "
+                    f"Add {shortfall} more to order all {total_available} available."
+                )
+            else:
+                error_message = (
+                    f"Minimum order quantity for {product.name} is {effective_minimum}. "
+                    f"Current total would be {total_quantity}. "
+                    f"Add {shortfall} more items."
+                )
             raise ValidationError(
                 {
                     "pack_size": ValidationError(
-                        f"Minimum order quantity for {product.name} is {effective_minimum}. "
-                        f"Current total would be {total_quantity}. "
-                        f"Add {shortfall} more items.",
+                        error_message,
                         code=CheckoutErrorCode.INSUFFICIENT_STOCK.value,
                     )
                 }

@@ -170,14 +170,35 @@ def resolve_get_pack_allocation(
                         )
                         total_available += available
 
-                    # Use effective minimum (min of requirement and availability)
-                    effective_minimum = min(min_required, total_available)
+                    # Calculate what would remain after this order
                     total_qty = current_qty + pack_qty
+                    remaining_after_order = total_available - total_qty
+
+                    # Determine effective minimum based on what would remain
+                    if total_available < min_required:
+                        # Can't meet MOQ with available stock, must take all available
+                        effective_minimum = total_available
+                        insufficient_remaining = False
+                    elif (
+                        remaining_after_order > 0
+                        and remaining_after_order < min_required
+                    ):
+                        # Would leave insufficient stock - must take everything
+                        effective_minimum = total_available
+                        insufficient_remaining = True
+                    else:
+                        # Either takes everything or leaves sufficient stock
+                        effective_minimum = min_required
+                        insufficient_remaining = False
+
                     shortfall = max(0, effective_minimum - total_qty)
                     can_add = shortfall == 0
 
                     if not can_add:
-                        message = f"Add {shortfall} more items to meet minimum order of {effective_minimum}"
+                        if insufficient_remaining:
+                            message = f"Cannot leave less than {min_required} items remaining. Add {shortfall} more to order all {total_available} available."
+                        else:
+                            message = f"Add {shortfall} more items to meet minimum order of {effective_minimum}"
         except Attribute.DoesNotExist:
             pass
 
