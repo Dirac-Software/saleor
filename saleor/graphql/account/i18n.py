@@ -16,6 +16,36 @@ from ...permission.enums import (
 from ...permission.utils import all_permissions_required
 from ..core import ResolveInfo
 
+EU_COUNTRIES = (
+    "AT",
+    "BE",
+    "BG",
+    "HR",
+    "CY",
+    "CZ",
+    "DK",
+    "EE",
+    "FI",
+    "FR",
+    "DE",
+    "GR",
+    "HU",
+    "IE",
+    "IT",
+    "LV",
+    "LT",
+    "LU",
+    "MT",
+    "NL",
+    "PL",
+    "PT",
+    "RO",
+    "SK",
+    "SI",
+    "ES",
+    "SE",
+)
+
 SKIP_ADDRESS_VALIDATION_PERMISSION_MAP: dict[str, list[BasePermissionEnum]] = {
     "addressCreate": [AccountPermissions.MANAGE_USERS],
     "addressUpdate": [AccountPermissions.MANAGE_USERS],
@@ -279,10 +309,9 @@ class I18nMixin:
 
         # VAT Validation (only if not skipping validation)
         if not address_data.get("skip_validation"):
-            vat_number = cls._extract_vat_from_metadata(address_data)
             country_code = address_data.get("country")
-
-            if country_code:
+            if country_code and country_code in EU_COUNTRIES:
+                vat_number = cls._extract_vat_from_metadata(address_data)
                 cls._validate_vat_number(vat_number, country_code, address_type)
 
         if not instance:
