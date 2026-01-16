@@ -38,6 +38,9 @@ class AccountErrorCode(Enum):
     ACCOUNT_NOT_CONFIRMED = "account_not_confirmed"
     LOGIN_ATTEMPT_DELAYED = "login_attempt_delayed"
     UNKNOWN_IP_ADDRESS = "unknown_ip_address"
+    VAT_INVALID_FORMAT = "vat_invalid_format"
+    VAT_INVALID = "vat_invalid"
+    VAT_SERVICE_UNAVAILABLE = "vat_service_unavailable"
 
 
 class CustomerBulkUpdateErrorCode(Enum):

@@ -149,6 +149,100 @@ class I18nMixin:
         return errors_dict
 
     @classmethod
+    def _extract_vat_from_metadata(cls, address_data: dict) -> str | None:
+        """Extract VAT number from address metadata.
+
+        Args:
+            address_data: Dictionary containing address information
+
+        Returns:
+            VAT number string if found in metadata, None otherwise
+
+        """
+        metadata = address_data.get("metadata", [])
+        if isinstance(metadata, list):
+            for item in metadata:
+                if item.get("key") == "vat_number":
+                    return item.get("value")
+        elif isinstance(metadata, dict):
+            return metadata.get("vat_number")
+        return None
+
+    @classmethod
+    def _validate_vat_number(
+        cls,
+        vat_number: str | None,
+        country_code: str,
+        address_type: str | None,
+    ) -> None:
+        """Validate VAT number via VIES API.
+
+        This method validates VAT numbers for ALL addresses (all countries),
+        not just EU countries. It uses the VIES API for validation.
+
+        Args:
+            vat_number: VAT number from address metadata (may be None)
+            country_code: Two-letter country code
+            address_type: Type of address (billing/shipping) for error messages
+
+        Raises:
+            ValidationError: If VAT is missing (required for all addresses),
+                           if VIES validation fails, or if VIES API is unavailable
+
+        """
+        import requests
+
+        from ...account.error_codes import AccountErrorCode
+        from ...account.vat_validation import (
+            normalize_vat_number,
+            validate_vat_vies,
+        )
+
+        params = {"address_type": address_type} if address_type else {}
+
+        # VAT is required for all addresses (as per requirements)
+        if not vat_number:
+            raise ValidationError(
+                {
+                    "vat_number": ValidationError(
+                        "VAT number is required.",
+                        code=AccountErrorCode.REQUIRED.value,
+                        params=params,
+                    )
+                }
+            )
+
+        # Normalize VAT number (strip whitespace, uppercase)
+        normalized_vat = normalize_vat_number(vat_number)
+
+        # Validate via VIES only - no manual format checks
+        try:
+            vies_result = validate_vat_vies(normalized_vat, country_code)
+
+            if not vies_result.get("valid"):
+                raise ValidationError(
+                    {
+                        "vat_number": ValidationError(
+                            "VAT number could not be verified with VIES.",
+                            code=AccountErrorCode.VAT_INVALID.value,
+                            params=params,
+                        )
+                    }
+                ) from None
+        except (requests.RequestException, requests.Timeout):
+            # VIES API unavailable - reject per user requirement (strict mode)
+            raise ValidationError(
+                {
+                    "vat_number": ValidationError(
+                        "VAT validation service is temporarily unavailable. "
+                        "Please try again later.",
+                        code=AccountErrorCode.VAT_SERVICE_UNAVAILABLE.value,
+                        params=params,
+                    )
+                }
+            ) from None
+
+    @classmethod
     def validate_address(
         cls,
         address_data: dict,
@@ -182,6 +276,14 @@ class I18nMixin:
             enable_normalization=enable_normalization,
         )
         address_data = address_form.cleaned_data
+
+        # VAT Validation (only if not skipping validation)
+        if not address_data.get("skip_validation"):
+            vat_number = cls._extract_vat_from_metadata(address_data)
+            country_code = address_data.get("country")
+
+            if country_code:
+                cls._validate_vat_number(vat_number, country_code, address_type)
 
         if not instance:
             instance = Address()

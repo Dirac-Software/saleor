@@ -174,6 +174,7 @@ def address(db):  # pylint: disable=W0613
         postal_code="53-601",
         country="PL",
         phone="+48713988102",
+        metadata={"vat_number": "PL1234567890"},
     )
 
 
@@ -190,6 +191,7 @@ def address_with_areas(db):
         phone="+48713988102",
         country_area="test_country_area",
         city_area="test_city_area",
+        metadata={"vat_number": "PL1234567890"},
     )
 
 
@@ -203,6 +205,7 @@ def address_other_country():
         postal_code="13377",
         country="IS",
         phone="+40123123123",
+        metadata={"vat_number": "IS1234567890"},
     )
 
 
@@ -217,6 +220,7 @@ def address_usa():
         country_area="CA",
         country="US",
         phone="",
+        metadata={"vat_number": "US1234567890"},
     )
 
 
@@ -233,7 +237,10 @@ def graphql_address_data():
         "city": "Wrocław",
         "countryArea": "",
         "phone": "+48321321888",
-        "metadata": [{"key": "public", "value": "public_value"}],
+        "metadata": [
+            {"key": "public", "value": "public_value"},
+            {"key": "vat_number", "value": "PL1234567890"},
+        ],
     }
 
 
