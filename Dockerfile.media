@@ -11,6 +11,6 @@ RUN apt-get update && apt-get install -y wget ca-certificates \
 
 RUN mkdir -p /media
 
-EXPOSE 8080
+EXPOSE 9010
 
-CMD ["miniserve", "/media", "-p", "8080", "--header", "Access-Control-Allow-Origin: *", "--header", "Cache-Control: public, max-age=2592000"]
+CMD ["miniserve", "/media", "-p", "9010", "--header", "Access-Control-Allow-Origin: *", "--header", "Cache-Control: public, max-age=2592000"]
