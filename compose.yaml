@@ -67,7 +67,7 @@ services:
       # - export_files/ (user exports, sensitive)
       # - invoices/ (order invoices, sensitive)
     ports:
-      - 8080:8080
+      - 8080:8081
     restart: unless-stopped
     profiles:
       - dev
