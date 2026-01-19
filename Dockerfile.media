@@ -1,0 +1,16 @@
+FROM debian:bookworm-slim
+
+# Download pre-built miniserve binary
+RUN apt-get update && apt-get install -y wget ca-certificates \
+    && wget https://github.com/svenstaro/miniserve/releases/download/v0.27.1/miniserve-0.27.1-x86_64-unknown-linux-gnu -O /usr/local/bin/miniserve \
+    && chmod +x /usr/local/bin/miniserve \
+    && apt-get remove -y wget \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /media
+
+EXPOSE 8080
+
+CMD ["miniserve", "/media", "-p", "8080", "--header", "Access-Control-Allow-Origin: *", "--header", "Cache-Control: public, max-age=2592000"]

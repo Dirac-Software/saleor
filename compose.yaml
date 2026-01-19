@@ -50,6 +50,19 @@ services:
     profiles:
       - dev
 
+  media-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.media
+    volumes:
+      - ./media:/media:ro
+    ports:
+      - 8080:8080
+    restart: unless-stopped
+    profiles:
+      - dev
+      - prod
+
 volumes:
   saleor-cache:
     driver: local
