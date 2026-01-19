@@ -2,6 +2,7 @@ from django.conf import settings
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db import models
 from django.db.models import JSONField
+from django.urls import reverse
 from django.utils.timezone import now
 
 from ..app.models import App
@@ -38,7 +39,9 @@ class Invoice(ModelWithMetadata, Job):
     @property
     def url(self):
         if self.invoice_file:
-            return build_absolute_uri(self.invoice_file.url)
+            # Generate secure URL through Django view instead of direct file URL
+            invoice_path = reverse("serve-invoice", kwargs={"invoice_id": self.pk})
+            return build_absolute_uri(invoice_path)
         return self.external_url
 
     @url.setter

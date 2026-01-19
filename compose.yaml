@@ -55,7 +55,17 @@ services:
       context: .
       dockerfile: Dockerfile.media
     volumes:
-      - ./media:/media:ro
+      - ./media/products:/media/products:ro
+      - ./media/thumbnails:/media/thumbnails:ro
+      - ./media/user-avatars:/media/user-avatars:ro
+      - ./media/category-backgrounds:/media/category-backgrounds:ro
+      - ./media/collection-backgrounds:/media/collection-backgrounds:ro
+      - ./media/app-brand-data:/media/app-brand-data:ro
+      - ./media/app-installation-brand-data:/media/app-installation-brand-data:ro
+      # Explicitly exclude private directories (served through Django with auth):
+      # - payloads/ (webhook data, never accessed via HTTP)
+      # - export_files/ (user exports, sensitive)
+      # - invoices/ (order invoices, sensitive)
     ports:
       - 8080:8080
     restart: unless-stopped

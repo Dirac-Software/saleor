@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from django.urls import reverse
+
 from ..core.notification.utils import get_site_context
 from ..core.notify import NotifyEventType, NotifyHandler
 from ..core.utils import build_absolute_uri
@@ -30,9 +32,11 @@ def send_export_download_link_notification(export_file: "ExportFile", data_type:
     """Call PluginManager.notify to trigger the notification for success export."""
 
     def _generate_payload():
+        # Generate secure URL through Django view instead of direct file URL
+        csv_path = reverse("serve-export-file", kwargs={"file_id": export_file.pk})
         payload = {
             "export": get_default_export_payload(export_file),
-            "csv_link": build_absolute_uri(export_file.content_file.url),
+            "csv_link": build_absolute_uri(csv_path),
             "recipient_email": export_file.user.email if export_file.user else None,
             "data_type": data_type,
             **get_site_context(),

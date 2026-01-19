@@ -13,6 +13,7 @@ services:
       - cache
     volumes:
       - ..:/app
+      - saleor-media:/app/media
 
   dashboard:
     image: ghcr.io/saleor/saleor-dashboard:3.20.5
@@ -46,8 +47,20 @@ services:
       - 8025:8025 # Mailpit UI
     restart: unless-stopped
 
+  media-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile.media
+    ports:
+      - 8080:8080
+    volumes:
+      - saleor-media:/media:ro
+    restart: unless-stopped
+
 volumes:
   saleor-db:
     driver: local
   saleor-cache:
+    driver: local
+  saleor-media:
     driver: local
