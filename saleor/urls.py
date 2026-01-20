@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .core.views import jwks
 from .graphql.api import backend, schema
 from .graphql.views import GraphQLView
-from .media_views import serve_export_file, serve_invoice
+from .media_views import serve_export_file, serve_export_file_signed, serve_invoice
 from .plugins.views import (
     handle_global_plugin_webhook,
     handle_plugin_per_channel_webhook,
@@ -57,6 +57,12 @@ urlpatterns = [
         r"^media/export_files/(?P<file_id>\d+)/$",
         serve_export_file,
         name="serve-export-file",
+    ),
+    # Signed temporary URL for export files (no authentication required)
+    re_path(
+        r"^media/export_files/(?P<signed_id>[^/]+)/$",
+        serve_export_file_signed,
+        name="serve-export-file-signed",
     ),
     re_path(
         r"^media/invoices/(?P<invoice_id>\d+)/$",

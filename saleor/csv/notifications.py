@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from django.core.signing import TimestampSigner
 from django.urls import reverse
 
 from ..core.notification.utils import get_site_context
@@ -32,8 +33,10 @@ def send_export_download_link_notification(export_file: "ExportFile", data_type:
     """Call PluginManager.notify to trigger the notification for success export."""
 
     def _generate_payload():
-        # Generate secure URL through Django view instead of direct file URL
-        csv_path = reverse("serve-export-file", kwargs={"file_id": export_file.pk})
+        # Generate signed temporary URL (valid for 7 days)
+        signer = TimestampSigner()
+        signed_id = signer.sign(str(export_file.pk))
+        csv_path = reverse("serve-export-file-signed", kwargs={"signed_id": signed_id})
         payload = {
             "export": get_default_export_payload(export_file),
             "csv_link": build_absolute_uri(csv_path),

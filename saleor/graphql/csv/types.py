@@ -1,4 +1,6 @@
 import graphene
+from django.core.signing import TimestampSigner
+from django.urls import reverse
 
 from ...core.utils import build_absolute_uri
 from ...csv import models
@@ -92,7 +94,11 @@ class ExportFile(ModelObjectType[models.ExportFile]):
         content_file = root.content_file
         if not content_file:
             return None
-        return build_absolute_uri(content_file.url)
+        # Return signed temporary URL (valid for 7 days)
+        signer = TimestampSigner()
+        signed_id = signer.sign(str(root.pk))
+        csv_path = reverse("serve-export-file-signed", kwargs={"signed_id": signed_id})
+        return build_absolute_uri(csv_path)
 
     @staticmethod
     def resolve_user(root: models.ExportFile, info: ResolveInfo):

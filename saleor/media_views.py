@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import FileResponse, Http404, HttpResponse
 from django.views.decorators.http import require_http_methods
 
@@ -34,6 +35,40 @@ def serve_export_file(request, file_id):
 
     if not (is_owner or is_staff):
         return HttpResponse("Forbidden", status=403)
+
+    if not export_file.content_file:
+        raise Http404("File not available")
+
+    response = FileResponse(
+        export_file.content_file.open("rb"),
+        as_attachment=True,
+    )
+
+    # Set content type
+    response["Content-Type"] = "text/csv"
+
+    return response
+
+
+@require_http_methods(["GET", "HEAD"])
+def serve_export_file_signed(request, signed_id):
+    """Serve export file with signed URL - no authentication required."""
+    signer = TimestampSigner()
+
+    try:
+        # Validate signature and check expiration (7 days = 604800 seconds)
+        file_id = signer.unsign(signed_id, max_age=604800)
+    except SignatureExpired:
+        return HttpResponse("Link expired", status=410)
+    except BadSignature:
+        return HttpResponse("Invalid link", status=400)
+
+    try:
+        export_file = ExportFile.objects.using(
+            settings.DATABASE_CONNECTION_REPLICA_NAME
+        ).get(pk=file_id)
+    except ExportFile.DoesNotExist:
+        raise Http404("Export file not found") from None
 
     if not export_file.content_file:
         raise Http404("File not available")
