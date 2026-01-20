@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
 
@@ -408,7 +409,11 @@ def handle_channel_data(
     for field, lookup in fields.items():
         if field == "channel_pk":
             continue
-        channel_data[field] = data.get(lookup, None)
+        value = data.get(lookup, None)
+        # Convert timezone-aware datetimes to timezone-naive for Excel compatibility
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            value = value.replace(tzinfo=None)
+        channel_data[field] = value
     result_data = add_channel_info_to_data(
         pk,
         channel_data,
