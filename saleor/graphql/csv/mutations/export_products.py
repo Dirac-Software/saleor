@@ -36,6 +36,22 @@ class ExportInfoInput(BaseInputObjectType):
         ProductFieldEnum,
         description="List of product fields witch should be exported.",
     )
+    embed_images = graphene.Boolean(
+        description=(
+            "If True, embed images directly in Excel cells as image objects. "
+            "If False or not provided, images will be exported as clickable URLs. "
+            "Only applies to XLSX exports with PRODUCT_MEDIA or VARIANT_MEDIA fields."
+        ),
+        default_value=False,
+    )
+    compress_variants = graphene.Boolean(
+        description=(
+            "If True, compress all product variants into a single row with "
+            "format 'Size[Quantity], Size[Quantity]'. "
+            "If False or not provided, each variant gets its own row (default behavior)."
+        ),
+        default_value=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_PRODUCTS
@@ -111,6 +127,14 @@ class ExportProducts(BaseExportMutation):
         fields = export_info_input.get("fields")
         if fields:
             export_info["fields"] = fields
+
+        # Include embed_images parameter
+        embed_images = export_info_input.get("embed_images", False)
+        export_info["embed_images"] = embed_images
+
+        # Include compress_variants parameter
+        compress_variants = export_info_input.get("compress_variants", False)
+        export_info["compress_variants"] = compress_variants
 
         for field, graphene_type in [
             ("attributes", Attribute),

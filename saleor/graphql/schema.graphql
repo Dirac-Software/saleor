@@ -27986,6 +27986,16 @@ input ExportInfoInput @doc(category: "Products") {
 
   """List of product fields witch should be exported."""
   fields: [ProductFieldEnum!]
+
+  """
+  If True, embed images directly in Excel cells as image objects. If False or not provided, images will be exported as clickable URLs. Only applies to XLSX exports with PRODUCT_MEDIA or VARIANT_MEDIA fields.
+  """
+  embedImages: Boolean = false
+
+  """
+  If True, compress all product variants into a single row with format 'Size[Quantity], Size[Quantity]'. If False or not provided, each variant gets its own row (default behavior).
+  """
+  compressVariants: Boolean = false
 }
 
 enum ProductFieldEnum @doc(category: "Products") {

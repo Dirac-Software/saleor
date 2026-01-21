@@ -1,4 +1,5 @@
 import datetime
+import logging
 import uuid
 from tempfile import NamedTemporaryFile
 from typing import IO, TYPE_CHECKING, Any
@@ -14,8 +15,12 @@ from ...giftcard.models import GiftCard
 from ...product.models import Product
 from .. import FileTypes
 from ..notifications import send_export_download_link_notification
+from .image_embedding import embed_images_in_excel
 from .product_headers import get_product_export_fields_and_headers_info
 from .products_data import get_products_data
+from .variant_compression import get_products_data_compressed
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -46,15 +51,59 @@ def export_products(
 
     temporary_file = create_file_with_headers(file_headers, delimiter, file_type)
 
-    export_products_in_batches(
-        queryset,
-        export_info,
-        set(export_fields),
-        data_headers,
-        delimiter,
-        temporary_file,
+    # Check if we should compress variants
+    compress_variants = export_info.get("compress_variants", False)
+
+    if compress_variants:
+        # Export with compressed variants (one row per product)
+        export_products_compressed(
+            queryset,
+            export_info,
+            data_headers,
+            delimiter,
+            temporary_file,
+            file_type,
+        )
+    else:
+        # Export with expanded variants (one row per variant)
+        export_products_in_batches(
+            queryset,
+            export_info,
+            set(export_fields),
+            data_headers,
+            delimiter,
+            temporary_file,
+            file_type,
+        )
+
+    # Embed images in Excel file if requested
+    embed_images = export_info.get("embed_images", False)
+    logger.info(
+        "Image embedding: embed_images=%s, file_type=%s, file_headers=%s",
+        embed_images,
         file_type,
+        file_headers,
     )
+
+    if embed_images and file_type == FileTypes.XLSX:
+        # Identify which columns contain images
+        image_columns = []
+        if "product media" in file_headers:
+            image_columns.append("product media")
+        # Only include variant media if NOT compressing variants
+        # (variant media doesn't make sense when there's one row per product)
+        if "variant media" in file_headers and not compress_variants:
+            image_columns.append("variant media")
+
+        logger.info("Image columns to embed: %s", image_columns)
+
+        # Embed images if there are any image columns
+        if image_columns:
+            logger.info("Starting image embedding for %s", temporary_file.name)
+            embed_images_in_excel(temporary_file.name, image_columns)
+            logger.info("Image embedding completed")
+        else:
+            logger.warning("No image columns found to embed")
 
     save_csv_file_in_export_file(export_file, temporary_file, file_name)
     temporary_file.close()
@@ -217,6 +266,61 @@ def export_products_in_batches(
         )
         export_data = get_products_data(
             product_batch, export_fields, attributes, warehouses, channels
+        )
+
+        append_to_file(export_data, headers, temporary_file, file_type, delimiter)
+
+
+def export_products_compressed(
+    queryset: "QuerySet",
+    export_info: dict[str, list],
+    headers: list[str],
+    delimiter: str,
+    temporary_file: Any,
+    file_type: str,
+):
+    """Export products with compressed variants (one row per product)."""
+    from collections import ChainMap
+
+    from . import ProductExportFields
+
+    warehouses = export_info.get("warehouses")
+    attributes = export_info.get("attributes")
+    channels = export_info.get("channels")
+    requested_fields = export_info.get("fields", [])
+
+    # Build export_fields set from requested fields
+    fields_mapping = dict(
+        ChainMap(*reversed(ProductExportFields.HEADERS_TO_FIELDS_MAPPING.values()))
+    )
+    export_fields_set = set()
+    if requested_fields:
+        for field in requested_fields:
+            if field in fields_mapping:
+                export_fields_set.add(fields_mapping[field])
+
+    for batch_pks in queryset_in_batches(queryset, BATCH_SIZE):
+        product_batch = (
+            Product.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME)
+            .filter(pk__in=batch_pks)
+            .prefetch_related(
+                "attributevalues",
+                "variants",
+                "collections",
+                "media",
+                "product_type",
+                "category",
+            )
+        )
+
+        # Use compressed data function
+        export_data = get_products_data_compressed(
+            product_batch,
+            export_fields_set,  # Pass proper export fields
+            attributes,
+            warehouses,
+            channels,
+            requested_fields,
         )
 
         append_to_file(export_data, headers, temporary_file, file_type, delimiter)

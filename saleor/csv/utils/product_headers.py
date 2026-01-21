@@ -20,8 +20,18 @@ def get_product_export_fields_and_headers_info(
     Headers contains product, variant, attribute and warehouse headers.
     """
     export_fields, file_headers = get_product_export_fields_and_headers(export_info)
+
+    # Add compressed variant field if requested
+    compress_variants = export_info.get("compress_variants", False)
+    if compress_variants:
+        # Add the compressed variants field
+        export_fields.append("variants__size_quantity")
+        file_headers.append("Size[Quantity]")
+
     attributes_headers = get_attributes_headers(export_info)
-    warehouses_headers = get_warehouses_headers(export_info)
+    warehouses_headers = (
+        get_warehouses_headers(export_info) if not compress_variants else []
+    )
     channels_headers = get_channels_headers(export_info)
 
     data_headers = (
@@ -50,7 +60,24 @@ def get_product_export_fields_and_headers(
         ChainMap(*reversed(ProductExportFields.HEADERS_TO_FIELDS_MAPPING.values()))
     )
 
+    compress_variants = export_info.get("compress_variants", False)
+
+    # Variant-specific fields that should be excluded when compressing variants
+    variant_specific_fields = {
+        "variant id",
+        "variant sku",
+        "variant weight",
+        "variant media",
+        "variant is preorder",
+        "variant preorder global threshold",
+        "variant preorder end date",
+    }
+
     for field in fields:
+        # Skip variant-specific fields when compressing variants
+        if compress_variants and field in variant_specific_fields:
+            continue
+
         lookup_field = fields_mapping[field]
         export_fields.append(lookup_field)
         file_headers.append(field)
