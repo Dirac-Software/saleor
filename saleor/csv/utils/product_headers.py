@@ -21,12 +21,14 @@ def get_product_export_fields_and_headers_info(
     """
     export_fields, file_headers = get_product_export_fields_and_headers(export_info)
 
-    # Add compressed variant field if requested
+    # Add compressed variant fields if requested
     compress_variants = export_info.get("compress_variants", False)
     if compress_variants:
-        # Add the compressed variants field
+        # Add the compressed variants field and total quantity
         export_fields.append("variants__size_quantity")
         file_headers.append("Size[Quantity]")
+        export_fields.append("variants__total_quantity")
+        file_headers.append("Total Quantity")
 
     attributes_headers = get_attributes_headers(export_info)
     warehouses_headers = (

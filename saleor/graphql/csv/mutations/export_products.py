@@ -52,6 +52,15 @@ class ExportInfoInput(BaseInputObjectType):
         ),
         default_value=False,
     )
+    price_list_format = graphene.Boolean(
+        description=(
+            "If True, format the export as a price list with clean column names "
+            "(Image, Code, Description, Category, Sizes, Brand, Qty, RRP, Price). "
+            "Removes technical columns and applies standard layout. "
+            "Only applies to XLSX exports."
+        ),
+        default_value=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_PRODUCTS
@@ -135,6 +144,10 @@ class ExportProducts(BaseExportMutation):
         # Include compress_variants parameter
         compress_variants = export_info_input.get("compress_variants", False)
         export_info["compress_variants"] = compress_variants
+
+        # Include price_list_format parameter
+        price_list_format = export_info_input.get("price_list_format", False)
+        export_info["price_list_format"] = price_list_format
 
         for field, graphene_type in [
             ("attributes", Attribute),

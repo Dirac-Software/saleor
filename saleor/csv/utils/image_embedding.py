@@ -16,14 +16,18 @@ from ...core.http_client import HTTPClient
 logger = logging.getLogger(__name__)
 
 
-def convert_image_to_png(image_data: Any) -> BytesIO:
-    """Convert any image format to PNG (which openpyxl supports).
+def convert_image_to_png(image_data: Any, max_size: int = 400) -> BytesIO:
+    """Convert and compress any image format for Excel embedding.
+
+    Resizes images to max_size (maintaining aspect ratio) and converts to
+    JPEG format with quality=85 for optimal file size.
 
     Args:
         image_data: BytesIO object or file path
+        max_size: Maximum width/height in pixels (default: 400)
 
     Returns:
-        BytesIO object containing PNG image
+        BytesIO object containing compressed JPEG image
 
     """
     # Open image with PIL
@@ -31,6 +35,12 @@ def convert_image_to_png(image_data: Any) -> BytesIO:
         img = PILImage.open(image_data)
     else:
         img = PILImage.open(image_data)
+
+    # Resize image to reduce file size while maintaining aspect ratio
+    if img.width > max_size or img.height > max_size:
+        # Use thumbnail to resize maintaining aspect ratio
+        img.thumbnail((max_size, max_size), PILImage.Resampling.LANCZOS)
+        logger.info("Resized image from original size to %sx%s", img.width, img.height)
 
     # Convert to RGB if necessary (for transparency handling)
     if img.mode in ("RGBA", "LA", "P"):
@@ -48,22 +58,23 @@ def convert_image_to_png(image_data: Any) -> BytesIO:
     else:
         final_img = img
 
-    # Save as PNG to BytesIO
+    # Save as JPEG to BytesIO with compression for smaller file size
+    # JPEG is much more efficient than PNG for photos
     output = BytesIO()
-    final_img.save(output, format="PNG")
+    final_img.save(output, format="JPEG", quality=85, optimize=True)
     output.seek(0)
     return output
 
 
 def download_and_convert_image(image_url: str, timeout: int = 15) -> BytesIO | None:
-    """Download an image from a URL and convert it to PNG format.
+    """Download an image from a URL and convert/compress it.
 
     Args:
         image_url: URL of the image to download
         timeout: Request timeout in seconds
 
     Returns:
-        BytesIO object containing PNG image, or None if download fails
+        BytesIO object containing compressed image, or None if download fails
 
     """
     try:
@@ -77,13 +88,13 @@ def download_and_convert_image(image_url: str, timeout: int = 15) -> BytesIO | N
 
 
 def load_local_image(image_path: str) -> BytesIO | None:
-    """Load a local image file and convert it to PNG format.
+    """Load a local image file and convert/compress it.
 
     Args:
         image_path: Local file path to the image
 
     Returns:
-        BytesIO object containing PNG image, or None if load fails
+        BytesIO object containing compressed image, or None if load fails
 
     """
     try:

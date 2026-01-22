@@ -2,11 +2,12 @@ import datetime
 import logging
 import uuid
 from tempfile import NamedTemporaryFile
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, cast
 
 import petl as etl
 from django.conf import settings
 from django.utils import timezone
+from openpyxl import load_workbook
 
 from ...core.db.connection import allow_writer
 from ...core.utils.batches import queryset_in_batches
@@ -21,6 +22,30 @@ from .products_data import get_products_data
 from .variant_compression import get_products_data_compressed
 
 logger = logging.getLogger(__name__)
+
+
+def convert_ids_to_proper_type(ids: list[str]) -> list[uuid.UUID | int]:
+    """Convert string IDs to UUID or int based on format.
+
+    Args:
+        ids: List of string IDs
+
+    Returns:
+        List of converted IDs (UUID or int)
+
+    """
+    converted: list[uuid.UUID | int] = []
+    for id_value in ids:
+        if isinstance(id_value, str):
+            # Try to convert to UUID, fall back to int
+            try:
+                converted.append(uuid.UUID(id_value))
+            except ValueError:
+                converted.append(int(id_value))
+        else:
+            converted.append(id_value)
+    return converted
+
 
 if TYPE_CHECKING:
     from django.db.models import QuerySet
@@ -104,6 +129,16 @@ def export_products(
             logger.info("Image embedding completed")
         else:
             logger.warning("No image columns found to embed")
+
+    # Format currency columns in Excel file
+    if file_type == FileTypes.XLSX and export_info.get("channels"):
+        logger.info("Applying currency formatting to price columns")
+        format_currency_columns(temporary_file.name, export_info)
+
+    # Apply price list formatting if requested
+    if file_type == FileTypes.XLSX and export_info.get("price_list_format"):
+        logger.info("Applying price list formatting")
+        format_as_price_list(temporary_file.name, export_info)
 
     save_csv_file_in_export_file(export_file, temporary_file, file_name)
     temporary_file.close()
@@ -225,6 +260,291 @@ def parse_input(data: Any) -> dict[str, str | dict]:
     return data
 
 
+def format_as_price_list(excel_path: str, export_info: dict[str, list]) -> None:
+    """Post-process Excel export into price list format.
+
+    - Renames columns to clean names
+    - Removes technical columns (IDs, internal fields)
+    - Reorders columns to standard layout
+    - Formats RRP with currency symbol
+
+    Args:
+        excel_path: Path to the Excel file
+        export_info: Export info containing channel IDs and attributes
+
+    """
+    from ...channel.models import Channel
+
+    wb = load_workbook(excel_path)
+    ws = wb.active
+
+    # Get current headers
+    headers = [cell.value for cell in ws[1]]
+
+    # Column renaming map
+    RENAME_MAP = {
+        "product media": "Image",
+        "name": "Description",
+        "category": "Category",
+        "variants__size_quantity": "Sizes",
+        "variants__total_quantity": "Qty",
+    }
+
+    # Add attribute renames (look for patterns)
+    for _i, header in enumerate(headers):
+        if header:
+            header_str = str(header)
+            header_lower = header_str.lower()
+            # Rename attribute columns (case-insensitive, handle both hyphens and spaces)
+            if (
+                "product code" in header_lower or "product-code" in header_lower
+            ) and "(product attribute)" in header_lower:
+                RENAME_MAP[header] = "Product Code"
+            elif "brand" in header_lower and "(product attribute)" in header_lower:
+                RENAME_MAP[header] = "Brand"
+            elif "rrp" in header_lower and "(product attribute)" in header_lower:
+                RENAME_MAP[header] = "RRP"
+
+    # Get channel info for price column renaming
+    channel_ids = export_info.get("channels")
+    channel_slug = None
+    currency_code = None
+
+    if channel_ids:
+        converted_channel_ids = convert_ids_to_proper_type(channel_ids)
+        channels = Channel.objects.using(
+            settings.DATABASE_CONNECTION_REPLICA_NAME
+        ).filter(pk__in=converted_channel_ids)
+        if channels.exists():
+            channel = channels.first()
+            if channel:
+                channel_slug = channel.slug
+                currency_code = channel.currency_code
+
+    # Rename price columns (remove channel prefix)
+    if channel_slug:
+        for _i, header in enumerate(headers):
+            if header:
+                header_str = str(header)
+                # Rename "{channel} (channel price amount)" to "Price"
+                if f"{channel_slug} (channel price amount)" == header_str:
+                    RENAME_MAP[header] = "Price"
+
+    # Columns to remove (by substring match)
+    REMOVE_PATTERNS = [
+        "id",  # Product/variant IDs
+        "product type",
+        "(channel variant currency code)",
+        "(channel variant cost price)",
+        "(channel published)",
+        "(channel publication date)",  # Added
+        "(channel published at)",  # Added
+        "(channel searchable)",
+        "(channel available for purchase)",
+        "(channel product currency code)",
+        "(channel variant preorder quantity threshold)",
+    ]
+
+    # Standard column order (columns that exist will be reordered to this)
+    COLUMN_ORDER = [
+        "Image",
+        "Product Code",
+        "Description",
+        "Category",
+        "Sizes",
+        "Brand",
+        "Qty",
+        "RRP",
+        "Price",
+    ]
+
+    # Step 1: Rename columns
+    for cell in ws[1]:
+        if cell.value in RENAME_MAP:
+            cell.value = RENAME_MAP[cell.value]
+
+    # Step 2: Remove unwanted columns
+    headers_after_rename = [cell.value for cell in ws[1]]
+    columns_to_delete = []
+
+    for idx, header in enumerate(headers_after_rename, start=1):
+        if header:
+            header_str = str(header)
+            # Check if header matches any remove pattern
+            if any(pattern in header_str for pattern in REMOVE_PATTERNS):
+                columns_to_delete.append(idx)
+
+    # Delete columns in reverse order to maintain indices
+    for col_idx in sorted(columns_to_delete, reverse=True):
+        ws.delete_cols(col_idx, 1)
+
+    # Step 3: Reorder columns to standard layout
+    final_headers = [cell.value for cell in ws[1]]
+    current_order = {header: idx for idx, header in enumerate(final_headers, start=1)}
+
+    # Build new column order based on what exists
+    new_order = []
+    for col_name in COLUMN_ORDER:
+        if col_name in current_order:
+            new_order.append((col_name, current_order[col_name]))
+
+    # Add any remaining columns not in COLUMN_ORDER (at the end)
+    for header, idx in current_order.items():
+        if header not in COLUMN_ORDER:
+            new_order.append((header, idx))
+
+    # Reorder by moving columns
+    # This is complex in openpyxl, so we'll create a new sheet with correct order
+
+    new_ws = wb.create_sheet("PriceList")
+
+    # Copy headers in new order
+    for new_col, (col_name, old_col) in enumerate(new_order, start=1):
+        new_ws.cell(row=1, column=new_col).value = col_name
+
+        # Copy all data for this column
+        for row_num in range(2, ws.max_row + 1):
+            old_cell = ws.cell(row=row_num, column=old_col)
+            new_cell = new_ws.cell(row=row_num, column=new_col)
+            new_cell.value = old_cell.value
+            # Copy number format if it exists
+            if old_cell.number_format:
+                new_cell.number_format = old_cell.number_format
+
+    # Delete old sheet and rename new one
+    wb.remove(ws)
+    new_ws.title = "Sheet"
+
+    # Step 4: Format RRP column with currency (if exists)
+    headers_final = [cell.value for cell in new_ws[1]]
+    logger.info(
+        "RRP formatting check: currency_code=%s, headers=%s",
+        currency_code,
+        headers_final,
+    )
+
+    if currency_code and "RRP" in headers_final:
+        # Currency formats
+        CURRENCY_FORMATS = {
+            "GBP": "[$£-809]#,##0.00",
+            "USD": "[$$-409]#,##0.00",
+            "EUR": "[$€-407]#,##0.00",
+            "JPY": "[$¥-411]#,##0",
+            "CNY": "[$¥-804]#,##0.00",
+            "INR": "[$₹-439]#,##0.00",
+            "AUD": "[$A$-C09]#,##0.00",
+            "CAD": "[$C$-1009]#,##0.00",
+        }
+
+        number_format = CURRENCY_FORMATS.get(currency_code, "#,##0.00")
+        logger.info("Applying currency format %s to RRP column", number_format)
+
+        # Find RRP column
+        rrp_col = headers_final.index("RRP") + 1
+        formatted_count = 0
+        for row in range(2, new_ws.max_row + 1):
+            cell = new_ws.cell(row=row, column=rrp_col)
+            if cell.value is not None:
+                # Convert to float if it's a string
+                try:
+                    if isinstance(cell.value, str):
+                        cell.value = float(cell.value)
+                    cell.number_format = number_format
+                    formatted_count += 1
+                except (ValueError, TypeError):
+                    # Keep original value if conversion fails
+                    logger.warning(
+                        "Could not convert RRP value to number: %s", cell.value
+                    )
+
+        logger.info("Formatted %s RRP cells with currency", formatted_count)
+
+    wb.save(excel_path)
+    logger.info("Applied price list formatting to export")
+
+
+def format_currency_columns(excel_path: str, export_info: dict[str, list]) -> None:
+    """Format price columns in Excel with currency symbols based on channel currency.
+
+    Args:
+        excel_path: Path to the Excel file
+        export_info: Export info containing channel IDs
+
+    """
+    from ...channel.models import Channel
+
+    channel_ids = export_info.get("channels")
+    if not channel_ids:
+        return
+
+    # Convert channel IDs to proper type
+    converted_channel_ids = convert_ids_to_proper_type(channel_ids)
+
+    # Get channel currencies
+    channels = Channel.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME).filter(
+        pk__in=converted_channel_ids
+    )
+
+    # Currency code to Excel number format mapping
+    CURRENCY_FORMATS = {
+        "GBP": "[$£-809]#,##0.00",
+        "USD": "[$$-409]#,##0.00",
+        "EUR": "[$€-407]#,##0.00",
+        "JPY": "[$¥-411]#,##0",
+        "CNY": "[$¥-804]#,##0.00",
+        "INR": "[$₹-439]#,##0.00",
+        "AUD": "[$A$-C09]#,##0.00",
+        "CAD": "[$C$-1009]#,##0.00",
+        "CHF": "[$CHF-807]#,##0.00",
+        "SEK": "[$kr-41D]#,##0.00",
+        "NOK": "[$kr-414]#,##0.00",
+        "DKK": "[$kr-406]#,##0.00",
+        "PLN": "[$zł-415]#,##0.00",
+    }
+
+    # Load workbook
+    wb = load_workbook(excel_path)
+    ws = wb.active
+
+    # Get headers
+    headers = [cell.value for cell in ws[1]]
+
+    # Track total columns formatted
+    total_columns_formatted = 0
+
+    # Find price-related columns for each channel
+    for channel in channels:
+        currency_code = channel.currency_code
+        channel_slug = channel.slug
+        number_format = CURRENCY_FORMATS.get(currency_code, "#,##0.00")
+
+        # Find columns that contain price amounts for this channel
+        price_columns = []
+        for idx, header in enumerate(headers):
+            if header and channel_slug in str(header):
+                # Match patterns like "default (channel price amount)"
+                if "price amount" in str(header).lower():
+                    price_columns.append(idx + 1)  # 1-indexed
+                # Also format cost price
+                elif "cost price" in str(header).lower():
+                    price_columns.append(idx + 1)
+
+        # Apply formatting to these columns
+        for col_idx in price_columns:
+            for row in range(2, ws.max_row + 1):  # Skip header
+                cell = ws.cell(row=row, column=col_idx)
+                if cell.value is not None:
+                    cell.number_format = number_format
+
+        total_columns_formatted += len(price_columns)
+
+    # Save workbook
+    wb.save(excel_path)
+    logger.info(
+        "Applied currency formatting to %s price columns", total_columns_formatted
+    )
+
+
 def create_file_with_headers(file_headers: list[str], delimiter: str, file_type: str):
     table = etl.wrap([file_headers])
 
@@ -268,7 +588,13 @@ def export_products_in_batches(
             product_batch, export_fields, attributes, warehouses, channels
         )
 
-        append_to_file(export_data, headers, temporary_file, file_type, delimiter)
+        append_to_file(
+            cast(list[dict[str, str | bool | float | int | None]], export_data),
+            headers,
+            temporary_file,
+            file_type,
+            delimiter,
+        )
 
 
 def export_products_compressed(
@@ -361,7 +687,7 @@ def export_voucher_codes_in_batches(
 
 
 def append_to_file(
-    export_data: list[dict[str, str | bool]],
+    export_data: list[dict[str, str | bool | float | int | None]],
     headers: list[str],
     temporary_file: Any,
     file_type: str,
