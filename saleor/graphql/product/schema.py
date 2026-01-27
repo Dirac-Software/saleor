@@ -72,6 +72,8 @@ from .mutations import (
     CollectionUpdate,
     ProductCreate,
     ProductDelete,
+    ProductIngestionFileUpload,
+    ProductIngestionIngest,
     ProductMediaCreate,
     ProductMediaDelete,
     ProductMediaReorder,
@@ -749,3 +751,6 @@ class ProductMutations(graphene.ObjectType):
 
     variant_media_assign = VariantMediaAssign.Field()
     variant_media_unassign = VariantMediaUnassign.Field()
+
+    product_ingestion_upload_file = ProductIngestionFileUpload.Field()
+    product_ingestion_ingest = ProductIngestionIngest.Field()

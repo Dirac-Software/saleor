@@ -2,6 +2,69 @@
 
 As we are self hosting this, several changes have had to be made.
 
+# Dropshipping
+TODO: Mark warehouses as non-Dirac IN CODE, update the shipping app.
+
+We will not own lots of the stock we sell. We use **Warehouses** to account for this. On reception of a new deal sheet from a new supplier we will want to process the stock and potentially put it on the website BEFORE it arrives in the Dirac Warehouse (perhaps one day this will be _one_ of the Dirac warehouses). We will do this by adding the products to a new warehouse. This reflects reality, we don't own the stock so it is in fact in a different warehouse, and as such it is easy to let our code reflect this:
+- If some products for an online order are not in a Dirac warehouse the shipping calculator should handle this and extend the time to deliver.
+- We should apply different ingest rules to a non-Dirac warehouse and a Dirac warehouse: Updating products for a non-Dirac warehouse typically means replacing, whereas at Dirac it normally means adding.
+
+CLEARLY it is integral not to leak the warehouse that stock has come from to the frontend and this should be checked - the warehouses are our customer list.
+
+The complexity is in these questions:
+- What happens when we purchase stock from a supplier and as such the physical goods move from the non-Dirac warehouse to the Dirac warehouse?
+
+## Non-Dirac -> Dirac
+If a product line has already been sold (an order exists for it) then we should NOT move the stock to the Dirac warehouse. Although at present the stock will stop in at Dirac before being sent on it's way the products will not stay there, and if we keep the products as part of the warehouse they were part of we can be sure to prevent double-counting.
+If we purchase a product line that has not already been sold on, then it SHOULD be moved to the Dirac warehouse and will live there. There is at present no built in support for this, but it is pretty simple.
+
+## Accounting
+We will NOT be including the buy price in Saleor product data at the moment. We don't actually know buy price of goods we haven't purchased as we may be able to get reduced prices at certain quantities and factoring in shipping can lead to changes known only _after_ we list the stock. We should do our acconting when we receive invoices for stock. We will know the cost of shipping and the cost of goods and tarriffs.
+
+## Dirac Warehouse Functionality
+It will be possible to add some functionality for all _dirac_ warehouses so that we can store where each product lives. Let's kick this down the line until we have some products!
+
+## Example Flow
+1. We receive a deal sheet from a new/existing supplier
+2. We use Claude + Dirac functionality to process RRP, convert sheets to the right form, remove unnecessary products.
+3. We have a sheet that can be linearly mapped to:
+```
+ list[
+	 Product{
+	 product_code
+	 description (name)
+	 brand
+	 quantities
+	 sizes
+	 price
+	 RRP
+	 currency (has to be GBP)
+	 weight
+	 image_url(s)
+	}
+]
+Config {
+	show_on_website
+	warehouse_to_use
+    ...
+}
+```
+4. Follow the ingest products flow on the dashboard.
+IF new supplier:
+    - Add a new non-Dirac warehouse for this supplier
+    - Mark this warehouse as serving our channel + all shipping zones
+    - Allocate all products to this warehouse
+IF existing supplier:
+    - Allocate these products to the corresponding warehouse
+** there are some subtleties to do with adding / updating stock, changing product prices on merge, see the code **
+5. Mark as 'show on web' or not (whether this deal can be displayed
+6. wait until we have enough interst/orders to procure the stock. These orders remain in the pending state and we update shipping terms to reflect that Non-Dirac goods take longer (TODO)
+7. TODO: Ingest the invoice and fulfill all orders that can be fulfilled. Cancel / amend orders as necessary.
+8. On arrival of goods at Dirac warehouse: NO CHANGE for the products to be sent in orders, just process and send ASAP. For goods we will hold, assign a SKU and move them from non-Dirac -> Dirac warehouse.
+
+
+
+
 # Database
 We don't want to run as postgres (or superuser). We therefore have a `SUPERUSER_DATABASE_URL` in our .env and the `pyproject.toml` includes:
 ```toml
