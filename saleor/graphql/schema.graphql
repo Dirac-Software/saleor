@@ -16383,6 +16383,26 @@ type Mutation {
   ): VariantMediaUnassign @doc(category: "Products")
 
   """
+  Upload and analyze an Excel file for product ingestion. Returns file ID and available columns for mapping configuration. 
+  
+  Requires one of the following permissions: MANAGE_PRODUCTS.
+  """
+  productIngestionUploadFile(
+    """Fields required to upload Excel file for analysis."""
+    input: ProductIngestionFileUploadInput!
+  ): ProductIngestionFileUpload @doc(category: "Products")
+
+  """
+  Ingest products from uploaded Excel file. Creates new products and variants, updates existing ones. Handles stock, pricing, attributes, and channel listings. 
+  
+  Requires one of the following permissions: MANAGE_PRODUCTS.
+  """
+  productIngestionIngest(
+    """Configuration for product ingestion."""
+    input: ProductIngestionConfigInput!
+  ): ProductIngestionIngest @doc(category: "Products")
+
+  """
   Captures the authorized payment amount. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -21362,6 +21382,16 @@ enum ProductErrorCode @doc(category: "Products") {
   PRODUCT_NOT_ASSIGNED_TO_CHANNEL
   UNSUPPORTED_MEDIA_PROVIDER
   PREORDER_VARIANT_CANNOT_BE_DEACTIVATED
+  SHEET_INTEGRITY_ERROR
+  SIZE_QTY_UNPARSEABLE
+  CURRENCY_INCOMPATIBLE
+  DUPLICATE_PRODUCTS
+  MISSING_DATABASE_SETUP
+  DUPLICATE_PRODUCT_NAMES
+  MISSING_REQUIRED_FIELDS
+  COLUMN_MAPPING_INVALID
+  FILE_NOT_FOUND
+  FILE_EXPIRED
 }
 
 input ProductAttributeAssignInput @doc(category: "Products") {
@@ -23445,6 +23475,155 @@ type VariantMediaUnassign @doc(category: "Products") {
   media: ProductMedia
   productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [ProductError!]!
+}
+
+"""
+Upload and analyze an Excel file for product ingestion. Returns file ID and available columns for mapping configuration. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type ProductIngestionFileUpload @doc(category: "Products") {
+  """
+  Unique identifier for the uploaded file. Use this in ProductIngestionIngest.
+  """
+  fileId: ID
+
+  """List of column names found in the Excel sheet."""
+  availableColumns: [String]
+
+  """Number of data rows in the sheet (excluding header)."""
+  rowCount: Int
+
+  """List of all sheet names in the Excel file."""
+  sheetNames: [String]
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+input ProductIngestionFileUploadInput @doc(category: "Products") {
+  """Excel file to upload for product ingestion (.xlsx or .xls)."""
+  file: Upload!
+
+  """Name of the sheet to read from the Excel file."""
+  sheetName: String = "Sheet1"
+
+  """Row number containing column headers (0-indexed)."""
+  headerRow: Int = 0
+}
+
+"""
+Ingest products from uploaded Excel file. Creates new products and variants, updates existing ones. Handles stock, pricing, attributes, and channel listings. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type ProductIngestionIngest @doc(category: "Products") {
+  """Whether the ingestion completed successfully."""
+  success: Boolean
+
+  """Number of products created."""
+  createdProductsCount: Int
+
+  """Number of products updated."""
+  updatedProductsCount: Int
+
+  """Number of products skipped (exist in other warehouses)."""
+  skippedProductsCount: Int
+
+  """Total number of product variants created."""
+  totalVariantsCreated: Int
+
+  """Total number of product variants updated."""
+  totalVariantsUpdated: Int
+
+  """Name of the warehouse products were ingested into."""
+  warehouseName: String
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+input ProductIngestionConfigInput @doc(category: "Products") {
+  """File ID from ProductIngestionFileUpload mutation."""
+  fileId: ID!
+
+  """Name of the warehouse to ingest products into."""
+  warehouseName: String!
+
+  """Full address of the warehouse."""
+  warehouseAddress: String!
+
+  """ISO2 country code for the warehouse (e.g., 'GB', 'AE', 'US')."""
+  warehouseCountry: String!
+
+  """Name of the sheet to read."""
+  sheetName: String = "Sheet1"
+
+  """Row number containing column headers (0-indexed)."""
+  headerRow: Int = 0
+
+  """Mapping of Excel columns to product fields."""
+  columnMapping: SpreadsheetColumnMappingInput!
+
+  """
+  If true, products won't be visible on storefront (wholesale/internal only).
+  """
+  notForWeb: Boolean = false
+
+  """Default currency if prices don't have currency symbols."""
+  defaultCurrency: String
+
+  """If true, validate and process but don't save changes."""
+  dryRun: Boolean = false
+
+  """
+  If true, raise error on duplicate products in Excel. If false, merge duplicates.
+  """
+  errorOnDuplicatesInSheet: Boolean = false
+
+  """
+  How to handle stock for existing products: REPLACE (overwrite) or ADD (increment).
+  """
+  stockUpdateMode: StockUpdateModeEnum
+
+  """Minimum order quantity to assign to all products."""
+  minimumOrderQuantity: Int!
+
+  """Confirmation that 'Price' column contains sale price excluding VAT."""
+  confirmPriceInterpretation: Boolean!
+}
+
+input SpreadsheetColumnMappingInput @doc(category: "Products") {
+  """Column name containing product codes."""
+  code: String
+
+  """Column name containing brand names."""
+  brand: String
+
+  """Column name containing product descriptions/names."""
+  description: String
+
+  """Column name containing category names."""
+  category: String
+
+  """Column name containing sizes with quantities (e.g., '8[5], 9[3]')."""
+  sizes: String
+
+  """Column name containing recommended retail prices."""
+  rrp: String
+
+  """Column name containing sale prices (excluding VAT)."""
+  price: String
+
+  """Column name containing product weights (in grams)."""
+  weight: String
+
+  """Column name containing image URLs."""
+  image: String
+}
+
+"""Stock update mode for existing products."""
+enum StockUpdateModeEnum {
+  REPLACE
+  ADD
 }
 
 """

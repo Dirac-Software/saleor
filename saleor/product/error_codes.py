@@ -22,6 +22,17 @@ class ProductErrorCode(Enum):
     PRODUCT_NOT_ASSIGNED_TO_CHANNEL = "product_not_assigned_to_channel"
     UNSUPPORTED_MEDIA_PROVIDER = "unsupported_media_provider"
     PREORDER_VARIANT_CANNOT_BE_DEACTIVATED = "preorder_variant_cannot_be_deactivated"
+    # Product ingestion error codes
+    SHEET_INTEGRITY_ERROR = "sheet_integrity_error"
+    SIZE_QTY_UNPARSEABLE = "size_qty_unparseable"
+    CURRENCY_INCOMPATIBLE = "currency_incompatible"
+    DUPLICATE_PRODUCTS = "duplicate_products"
+    MISSING_DATABASE_SETUP = "missing_database_setup"
+    DUPLICATE_PRODUCT_NAMES = "duplicate_product_names"
+    MISSING_REQUIRED_FIELDS = "missing_required_fields"
+    COLUMN_MAPPING_INVALID = "column_mapping_invalid"
+    FILE_NOT_FOUND = "file_not_found"
+    FILE_EXPIRED = "file_expired"
 
 
 class CollectionErrorCode(Enum):

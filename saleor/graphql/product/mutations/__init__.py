@@ -16,6 +16,7 @@ from .product import (
     ProductMediaUpdate,
     ProductUpdate,
 )
+from .product_ingestion import ProductIngestionFileUpload, ProductIngestionIngest
 from .product_type import ProductTypeCreate, ProductTypeDelete, ProductTypeUpdate
 from .product_variant import (
     ProductVariantCreate,
@@ -48,6 +49,8 @@ __all__ = [
     "ProductMediaReorder",
     "ProductMediaUpdate",
     "ProductUpdate",
+    "ProductIngestionFileUpload",
+    "ProductIngestionIngest",
     "ProductVariantCreate",
     "ProductVariantDelete",
     "ProductVariantPreorderDeactivate",
