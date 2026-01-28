@@ -23,6 +23,7 @@ from ..email_common import (
 from ..models import EmailTemplate, PluginConfiguration
 from . import constants
 from .notify_events import (
+    send_contact_form_submission,
     send_csv_export_failed,
     send_csv_export_success,
     send_set_staff_password_email,
@@ -40,6 +41,7 @@ def get_admin_event_map():
         AdminNotifyEvent.ACCOUNT_STAFF_RESET_PASSWORD: send_staff_reset_password,
         AdminNotifyEvent.CSV_EXPORT_SUCCESS: send_csv_export_success,
         AdminNotifyEvent.CSV_EXPORT_FAILED: send_csv_export_failed,
+        AdminNotifyEvent.CONTACT_FORM_SUBMISSION: send_contact_form_submission,
     }
 
 
@@ -89,6 +91,14 @@ class AdminEmailPlugin(BasePlugin):
         },
         {
             "name": constants.CSV_EXPORT_FAILED_TEMPLATE_FIELD,
+            "value": DEFAULT_EMAIL_VALUE,
+        },
+        {
+            "name": constants.CONTACT_FORM_SUBMISSION_SUBJECT_FIELD,
+            "value": constants.CONTACT_FORM_SUBMISSION_DEFAULT_SUBJECT,
+        },
+        {
+            "name": constants.CONTACT_FORM_SUBMISSION_TEMPLATE_FIELD,
             "value": DEFAULT_EMAIL_VALUE,
         },
     ] + DEFAULT_EMAIL_CONFIGURATION
@@ -143,6 +153,16 @@ class AdminEmailPlugin(BasePlugin):
             "type": ConfigurationTypeField.MULTILINE,
             "help_text": DEFAULT_TEMPLATE_HELP_TEXT,
             "label": "CSV export failed template",
+        },
+        constants.CONTACT_FORM_SUBMISSION_SUBJECT_FIELD: {
+            "type": ConfigurationTypeField.STRING,
+            "help_text": DEFAULT_SUBJECT_HELP_TEXT,
+            "label": "Contact form submission subject",
+        },
+        constants.CONTACT_FORM_SUBMISSION_TEMPLATE_FIELD: {
+            "type": ConfigurationTypeField.MULTILINE,
+            "help_text": DEFAULT_TEMPLATE_HELP_TEXT,
+            "label": "Contact form submission template",
         },
     }
     CONFIG_STRUCTURE.update(deepcopy(DEFAULT_EMAIL_CONFIG_STRUCTURE))
