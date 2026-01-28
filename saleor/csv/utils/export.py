@@ -8,6 +8,7 @@ import petl as etl
 from django.conf import settings
 from django.utils import timezone
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from ...core.db.connection import allow_writer
 from ...core.utils.batches import queryset_in_batches
@@ -410,6 +411,73 @@ def format_as_price_list(excel_path: str, export_info: dict[str, list]) -> None:
             # Copy number format if it exists
             if old_cell.number_format:
                 new_cell.number_format = old_cell.number_format
+
+    # Copy row dimensions (heights) from old sheet to new sheet
+    for row_num, row_dim in ws.row_dimensions.items():
+        if row_dim.height:
+            new_ws.row_dimensions[row_num].height = row_dim.height
+
+    # Copy column dimensions (widths) - need to map old columns to new columns
+    for new_col, (_col_name, old_col) in enumerate(new_order, start=1):
+        old_col_letter = get_column_letter(old_col)
+        new_col_letter = get_column_letter(new_col)
+        if old_col_letter in ws.column_dimensions:
+            old_col_dim = ws.column_dimensions[old_col_letter]
+            if old_col_dim.width:
+                new_ws.column_dimensions[new_col_letter].width = old_col_dim.width
+
+    # Copy images from old sheet to new sheet
+    # Images need to be repositioned to match the new column order
+    if hasattr(ws, "_images") and ws._images:
+        logger.info("Copying %s images to reformatted sheet", len(ws._images))
+        from io import BytesIO
+
+        from openpyxl.drawing.image import Image as XLImage
+
+        for img in ws._images:
+            # Get the anchor (cell reference) of the image
+            anchor = img.anchor
+            if hasattr(anchor, "_from"):
+                # Get the column index from the image anchor
+                old_col_idx = anchor._from.col + 1  # openpyxl uses 0-indexed columns
+                row_idx = anchor._from.row + 1  # openpyxl uses 0-indexed rows
+
+                # Find the new column index for this old column
+                new_col_idx = None
+                for new_col, (_col_name, old_col) in enumerate(new_order, start=1):
+                    if old_col == old_col_idx:
+                        new_col_idx = new_col
+                        break
+
+                # If we found a matching column, copy the image to the new position
+                if new_col_idx:
+                    new_col_letter = get_column_letter(new_col_idx)
+                    new_anchor = f"{new_col_letter}{row_idx}"
+
+                    # Create a new image instance with the same data
+                    # Use the image's _data() method to get the raw image bytes
+                    try:
+                        img_bytes = BytesIO(img._data())
+                        new_img = XLImage(img_bytes)
+                        new_img.width = img.width
+                        new_img.height = img.height
+                        new_img.anchor = new_anchor
+
+                        # Add to new worksheet
+                        new_ws.add_image(new_img)
+                        logger.debug(
+                            "Copied image from %s%s to %s",
+                            get_column_letter(old_col_idx),
+                            row_idx,
+                            new_anchor,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to copy image from %s%s: %s",
+                            get_column_letter(old_col_idx),
+                            row_idx,
+                            e,
+                        )
 
     # Delete old sheet and rename new one
     wb.remove(ws)
