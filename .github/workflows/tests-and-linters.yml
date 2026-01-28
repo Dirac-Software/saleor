@@ -25,7 +25,7 @@ on:
 env:
   BENCH_PATH: ./queries-results.json
   CACHE_URL: "redis://cache:6379/0"
-  DATABASE_URL: "postgres://saleor:saleor@postgres:5432/saleor"
+  DATABASE_URL: "postgres://postgres:saleor@postgres:5432/saleor"
   SECRET_KEY: ci-test
 
 # Will group same workflow in the PR. Once new commit is pushed, old workflow will be cancelled
@@ -45,7 +45,7 @@ jobs:
         image: library/postgres:15-alpine
         env:
           POSTGRES_PASSWORD: saleor
-          POSTGRES_USER: saleor
+          POSTGRES_USER: postgres
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
