@@ -53,6 +53,10 @@ class WarehouseCreateInput(WarehouseInput):
         + DEPRECATED_IN_3X_INPUT
         + " Providing the zone ids will raise a ValidationError.",
     )
+    is_owned = graphene.Boolean(
+        description="Determine if the warehouse is owned by Dirac.",
+        required=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_PRODUCTS
@@ -73,6 +77,10 @@ class WarehouseUpdateInput(WarehouseInput):
         description="Visibility of warehouse stocks.",
         required=False,
     )
+    is_owned = graphene.Boolean(
+        description="Determine if the warehouse is owned by Dirac.",
+        required=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_PRODUCTS
@@ -85,6 +93,9 @@ class Warehouse(ModelObjectType[models.Warehouse]):
     email = graphene.String(required=True, description="Warehouse email.")
     is_private = graphene.Boolean(
         required=True, description="Determine if the warehouse is private."
+    )
+    is_owned = graphene.Boolean(
+        required=True, description="Determine if the warehouse is owned by Dirac."
     )
     address = graphene.Field(
         "saleor.graphql.account.types.Address",

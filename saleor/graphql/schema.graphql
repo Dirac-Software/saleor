@@ -3474,6 +3474,9 @@ type Warehouse implements Node & ObjectWithMetadata @doc(category: "Products") {
   """Determine if the warehouse is private."""
   isPrivate: Boolean!
 
+  """Determine if the warehouse is owned by Dirac."""
+  isOwned: Boolean!
+
   """Address of the warehouse."""
   address: Address!
 
@@ -20114,6 +20117,9 @@ input WarehouseCreateInput @doc(category: "Products") {
 
   """Shipping zones supported by the warehouse."""
   shippingZones: [ID!] @deprecated(reason: "Providing the zone ids will raise a ValidationError.")
+
+  """Determine if the warehouse is owned by Dirac."""
+  isOwned: Boolean
 }
 
 """
@@ -20148,6 +20154,9 @@ input WarehouseUpdateInput @doc(category: "Products") {
 
   """Visibility of warehouse stocks."""
   isPrivate: Boolean
+
+  """Determine if the warehouse is owned by Dirac."""
+  isOwned: Boolean
 }
 
 """

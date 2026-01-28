@@ -285,6 +285,10 @@ class Warehouse(ModelWithMetadata, ModelWithExternalReference):
     id = models.UUIDField(default=uuid.uuid4, primary_key=True)
     name = models.CharField(max_length=250)
     slug = models.SlugField(max_length=255, unique=True, allow_unicode=True)
+    # is_owned indicates that the stock belongs to Dirac and as such is tracked at the
+    # unit level and accounting restrictions apply. If is_owned=False, this table is not
+    # the source of truth as the true inventory can change from under our feet.
+    is_owned = models.BooleanField(default=False)
     channels = models.ManyToManyField(
         Channel, related_name="warehouses", through=ChannelWarehouse
     )

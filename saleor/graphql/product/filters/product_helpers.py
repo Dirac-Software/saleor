@@ -24,7 +24,6 @@ from ...utils.filters import (
     filter_where_range_field_with_conditions,
 )
 from ...warehouse import types as warehouse_types
-from .. import types as product_types
 from ..enums import (
     StockAvailability,
 )
@@ -145,6 +144,8 @@ def filter_products_by_stock_availability(qs, stock_availability, channel_slug):
 
 def filter_categories(qs, _, value):
     if value:
+        from .. import types as product_types
+
         _, category_pks = resolve_global_ids_to_primary_keys(
             value, product_types.Category
         )
@@ -155,6 +156,8 @@ def filter_categories(qs, _, value):
 def filter_product_types(qs, _, value):
     if not value:
         return qs
+    from .. import types as product_types
+
     _, product_type_pks = resolve_global_ids_to_primary_keys(
         value, product_types.ProductType
     )
@@ -181,6 +184,8 @@ def filter_has_preordered_variants(qs, _, value):
 
 def filter_collections(qs, _, value):
     if value:
+        from .. import types as product_types
+
         _, collection_pks = resolve_global_ids_to_primary_keys(
             value, product_types.Collection
         )
