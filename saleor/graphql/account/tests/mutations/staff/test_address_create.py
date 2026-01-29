@@ -57,10 +57,16 @@ def test_create_address_mutation(
     data = content["data"]["addressCreate"]
     assert data["address"]["city"] == "DUMMY"
     assert data["address"]["country"]["code"] == "PL"
-    assert data["address"]["metadata"] == [{"key": "public", "value": "public_value"}]
+    assert data["address"]["metadata"] == [
+        {"key": "public", "value": "public_value"},
+        {"key": "vat_number", "value": "PL1234567890"},
+    ]
     address_obj = Address.objects.get(city="DUMMY")
 
-    assert address_obj.metadata == {"public": "public_value"}
+    assert address_obj.metadata == {
+        "public": "public_value",
+        "vat_number": "PL1234567890",
+    }
     assert address_obj.user_addresses.first() == customer_user
     assert address_obj.validation_skipped is False
     assert data["user"]["id"] == user_id
@@ -206,4 +212,7 @@ def test_create_address_skip_validation(
     new_address = Address.objects.last()
     assert new_address.postal_code == wrong_postal_code
     assert new_address.validation_skipped is True
-    assert new_address.metadata == {"public": "public_value"}
+    assert new_address.metadata == {
+        "public": "public_value",
+        "vat_number": "PL1234567890",
+    }

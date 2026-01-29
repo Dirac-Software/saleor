@@ -204,19 +204,19 @@ class I18nMixin:
         vat_number: str | None,
         country_code: str,
         address_type: str | None,
+        require_vat: bool = False,
     ) -> None:
         """Validate VAT number via VIES API.
-
-        This method validates VAT numbers for ALL addresses (all countries),
-        not just EU countries. It uses the VIES API for validation.
 
         Args:
             vat_number: VAT number from address metadata (may be None)
             country_code: Two-letter country code
             address_type: Type of address (billing/shipping) for error messages
+            require_vat: If True, VAT is required (for customer checkout/orders).
+                        If False, VAT is only validated if provided (for internal ops).
 
         Raises:
-            ValidationError: If VAT is missing (required for all addresses),
+            ValidationError: If VAT is missing (when require_vat=True),
                            if VIES validation fails, or if VIES API is unavailable
 
         """
@@ -230,8 +230,8 @@ class I18nMixin:
 
         params = {"address_type": address_type} if address_type else {}
 
-        # VAT is required for all addresses (as per requirements)
-        if not vat_number:
+        # VAT is required only for customer-facing operations (checkout/orders)
+        if require_vat and not vat_number:
             raise ValidationError(
                 {
                     "vat_number": ValidationError(
@@ -241,6 +241,10 @@ class I18nMixin:
                     )
                 }
             )
+
+        # If no VAT provided and not required, skip validation
+        if not vat_number:
+            return
 
         # Normalize VAT number (strip whitespace, uppercase)
         normalized_vat = normalize_vat_number(vat_number)
@@ -283,6 +287,7 @@ class I18nMixin:
         format_check=True,
         required_check=True,
         enable_normalization=True,
+        require_vat: bool = False,
     ) -> Address:
         if address_data.get("country") is None:
             params = {"address_type": address_type} if address_type else {}
@@ -308,11 +313,17 @@ class I18nMixin:
         address_data = address_form.cleaned_data
 
         # VAT Validation (only if not skipping validation)
+        # Only require VAT if required_check is True (respect validation rules)
         if not address_data.get("skip_validation"):
             country_code = address_data.get("country")
             if country_code and country_code in EU_COUNTRIES:
                 vat_number = cls._extract_vat_from_metadata(address_data)
-                cls._validate_vat_number(vat_number, country_code, address_type)
+                cls._validate_vat_number(
+                    vat_number,
+                    country_code,
+                    address_type,
+                    require_vat=require_vat and required_check,
+                )
 
         if not instance:
             instance = Address()

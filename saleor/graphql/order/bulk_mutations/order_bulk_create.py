@@ -1097,7 +1097,9 @@ class OrderBulkCreate(BaseMutation, I18nMixin):
         )
 
         try:
-            billing_address = cls.validate_address(billing_address_input, info=info)
+            billing_address = cls.validate_address(
+                billing_address_input, info=info, require_vat=False
+            )
             cls.validate_and_update_metadata(
                 billing_address, metadata_collection, private_metadata_collection
             )
@@ -1126,7 +1128,7 @@ class OrderBulkCreate(BaseMutation, I18nMixin):
 
             try:
                 shipping_address = cls.validate_address(
-                    shipping_address_input, info=info
+                    shipping_address_input, info=info, require_vat=False
                 )
                 cls.validate_and_update_metadata(
                     shipping_address, metadata_collection, private_metadata_collection

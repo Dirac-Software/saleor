@@ -1,11 +1,10 @@
 """Tests for product ingestion GraphQL mutations."""
 
-from unittest.mock import patch
-
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from .....product.error_codes import ProductErrorCode
+from ....tests.utils import assert_no_permission, get_multipart_request_body
 
 # GraphQL mutations
 PRODUCT_INGESTION_UPLOAD_FILE_MUTATION = """
@@ -60,16 +59,16 @@ def test_product_ingestion_upload_file_requires_permission(api_client, excel_fil
     """Test that upload file mutation requires MANAGE_PRODUCTS permission."""
     # given
     variables = {
-        "file": None,  # GraphQL Upload scalar
+        "file": None,
         "sheetName": "Sheet1",
         "headerRow": 0,
     }
 
     # when
-    response = api_client.post_graphql(
-        PRODUCT_INGESTION_UPLOAD_FILE_MUTATION,
-        variables,
+    body = get_multipart_request_body(
+        PRODUCT_INGESTION_UPLOAD_FILE_MUTATION, variables, excel_file, "0"
     )
+    response = api_client.post_multipart(body)
 
     # then
     assert_no_permission(response)
@@ -92,19 +91,25 @@ def test_product_ingestion_upload_file_invalid_file_type(
     }
 
     # when
-    with patch(
-        "saleor.graphql.product.mutations.product_ingestion.product_ingestion_upload_file.save_uploaded_file"
-    ):
-        # Mock the file validation to actually check the file
-        response = staff_api_client.post_multipart(
-            PRODUCT_INGESTION_UPLOAD_FILE_MUTATION,
-            {"file": invalid_file},
-            variables,
-        )
+    body = get_multipart_request_body(
+        PRODUCT_INGESTION_UPLOAD_FILE_MUTATION, variables, invalid_file, "0"
+    )
+    response = staff_api_client.post_multipart(body)
 
     # then - should fail validation
     content = response.json()
-    assert content["data"]["productIngestionUploadFile"] is None
+    data = content["data"]["productIngestionUploadFile"]
+    assert data is not None
+    assert data["fileId"] is None
+
+    # Check that we got an error about invalid file type
+    product_errors = data["productErrors"]
+    assert len(product_errors) > 0
+    assert any(
+        error["code"] == ProductErrorCode.INVALID.name
+        and "excel" in error["message"].lower()
+        for error in product_errors
+    )
 
 
 def test_product_ingestion_ingest_requires_permission(api_client):
@@ -212,10 +217,3 @@ def test_product_ingestion_ingest_invalid_moq(
     assert len(errors) > 0
     assert errors[0]["code"] == ProductErrorCode.INVALID.name
     assert "minimum order quantity" in errors[0]["message"].lower()
-
-
-def assert_no_permission(response):
-    """Assert no permission error."""
-    content = response.json()
-    assert "errors" in content
-    assert any("permission" in str(error).lower() for error in content["errors"])

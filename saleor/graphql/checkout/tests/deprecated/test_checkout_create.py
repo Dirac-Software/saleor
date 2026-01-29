@@ -62,7 +62,6 @@ def test_checkout_create(api_client, stock, graphql_address_data, channel_USD):
     content = get_graphql_content(response)["data"]["checkoutCreate"]
 
     # then
-    stored_metadata = {"public": "public_value"}
     assert (
         content["checkout"]["shippingAddress"]["metadata"]
         == graphql_address_data["metadata"]
@@ -74,7 +73,8 @@ def test_checkout_create(api_client, stock, graphql_address_data, channel_USD):
 
     checkout = Checkout.objects.get(email=test_email)
 
-    assert checkout.billing_address.metadata == stored_metadata
-    assert checkout.shipping_address.metadata == stored_metadata
+    stored_metadata_with_vat = {"public": "public_value", "vat_number": "PL1234567890"}
+    assert checkout.billing_address.metadata == stored_metadata_with_vat
+    assert checkout.shipping_address.metadata == stored_metadata_with_vat
 
     assert content["created"] is True

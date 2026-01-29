@@ -48,11 +48,17 @@ def test_customer_update_own_address(
     response = user_api_client.post_graphql(query, variables)
     content = get_graphql_content(response)
     data = content["data"]["accountAddressUpdate"]
-    assert data["address"]["metadata"] == [{"key": "public", "value": "public_value"}]
+    assert data["address"]["metadata"] == [
+        {"key": "public", "value": "public_value"},
+        {"key": "vat_number", "value": "PL1234567890"},
+    ]
     assert data["address"]["city"] == address_data["city"].upper()
     address_obj.refresh_from_db()
     assert address_obj.city == address_data["city"].upper()
-    assert address_obj.metadata == {"public": "public_value"}
+    assert address_obj.metadata == {
+        "public": "public_value",
+        "vat_number": "PL1234567890",
+    }
     assert address_obj.validation_skipped is False
     user.refresh_from_db()
     assert generate_address_search_document_value(address_obj) in user.search_document

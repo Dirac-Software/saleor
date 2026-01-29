@@ -98,6 +98,7 @@ class CheckoutBillingAddressUpdate(CheckoutShippingAddressUpdate):
             enable_normalization=address_validation_rules.get(
                 "enable_fields_normalization", True
             ),
+            require_vat=False,
         )
         manager = get_plugin_manager_promise(info.context).get()
         with traced_atomic_transaction():

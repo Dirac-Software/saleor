@@ -54,13 +54,16 @@ def test_customer_create_address(user_api_client, graphql_address_data):
     content = get_graphql_content(response)
     data = content["data"][mutation_name]
 
-    assert data["address"]["metadata"] == [{"key": "public", "value": "public_value"}]
+    assert data["address"]["metadata"] == [
+        {"key": "public", "value": "public_value"},
+        {"key": "vat_number", "value": "PL1234567890"},
+    ]
     assert data["address"]["city"] == graphql_address_data["city"].upper()
 
     user.refresh_from_db()
 
     address = user.addresses.exclude(id__in=user_addresses_ids).first()
-    assert address.metadata == {"public": "public_value"}
+    assert address.metadata == {"public": "public_value", "vat_number": "PL1234567890"}
     assert address.validation_skipped is False
     assert user.addresses.count() == user_addresses_count + 1
     assert (

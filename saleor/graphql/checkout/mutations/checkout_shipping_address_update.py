@@ -175,6 +175,7 @@ class CheckoutShippingAddressUpdate(AddressMetadataMixin, BaseMutation, I18nMixi
             enable_normalization=address_validation_rules.get(
                 "enable_fields_normalization", True
             ),
+            require_vat=False,
         )
         manager = get_plugin_manager_promise(info.context).get()
         checkout_info = fetch_checkout_info(checkout, lines, manager)

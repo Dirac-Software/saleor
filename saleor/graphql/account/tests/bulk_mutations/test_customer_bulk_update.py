@@ -96,7 +96,7 @@ def test_customers_bulk_update_using_ids(
     # then
     customer_1.refresh_from_db()
     customer_2.refresh_from_db()
-    stored_metadata = {"public": "public_value"}
+    stored_metadata = {"public": "public_value", "vat_number": "PL1234567890"}
     assert not data["results"][0]["errors"]
     assert not data["results"][1]["errors"]
     assert data["count"] == 2

@@ -354,22 +354,26 @@ def test_prepare_products_relations_data_sets_published_dates(
 
     assert usd_listing.published_at
     assert pln_listing.published_at
+    # Convert timezone-aware datetimes to timezone-naive for comparison
+    usd_published_at_naive = usd_listing.published_at.replace(tzinfo=None)
+    pln_published_at_naive = pln_listing.published_at.replace(tzinfo=None)
+
     assert (
         single_result.get(f"{channel_USD.slug} (channel published at)")
-        == usd_listing.published_at
+        == usd_published_at_naive
     )
     assert (
         single_result.get(f"{channel_USD.slug} (channel publication date)")
-        == usd_listing.published_at
+        == usd_published_at_naive
     )
 
     assert (
         single_result.get(f"{channel_PLN.slug} (channel published at)")
-        == pln_listing.published_at
+        == pln_published_at_naive
     )
     assert (
         single_result.get(f"{channel_PLN.slug} (channel publication date)")
-        == pln_listing.published_at
+        == pln_published_at_naive
     )
 
 
