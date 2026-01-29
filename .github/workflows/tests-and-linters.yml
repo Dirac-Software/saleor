@@ -140,6 +140,11 @@ jobs:
         run: |
           uv sync --locked
 
+      # Install semgrep separately to avoid dependency conflicts with opentelemetry
+      - name: Install semgrep
+        run: |
+          pip install semgrep==1.89.0
+
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pre-commit

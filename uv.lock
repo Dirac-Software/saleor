@@ -8,6 +8,9 @@ supported-markers = [
     "platform_python_implementation != 'PyPy'",
 ]
 
+[options]
+prerelease-mode = "allow"
+
 [[package]]
 name = "adyen"
 version = "4.0.0"
@@ -2741,9 +2744,9 @@ requires-dist = [
     { name = "oauthlib", specifier = "~=3.1" },
     { name = "openpyxl", specifier = ">=3.1.5,<4" },
     { name = "opentelemetry-api", specifier = ">=1.32.1,<2" },
-    { name = "opentelemetry-distro", extras = ["otlp"], specifier = ">=0.53b1,<0.54" },
+    { name = "opentelemetry-distro", extras = ["otlp"], specifier = ">=0.53b1,<1" },
     { name = "opentelemetry-sdk", specifier = ">=1.32.1,<2" },
-    { name = "opentelemetry-semantic-conventions", specifier = ">=0.53b1,<0.54" },
+    { name = "opentelemetry-semantic-conventions", specifier = ">=0.53b1,<1" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "petl", specifier = "==1.7.17" },
     { name = "phonenumberslite", specifier = ">=9.0.7,<10" },
