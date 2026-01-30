@@ -352,3 +352,40 @@ class ShippingMethodTranslation(Translation):
             "name": self.name,
             "description": self.description,
         }
+
+
+class Shipment(models.Model):
+    """
+    Represents a Movement of a collection of units from A to B.
+    This model is for accounting + inventory, not for the website to create
+    arbritrarily.
+
+    Need some input on tariffs plus duties etc. This is ugly because the costs need
+    to belong to a unit (unless we keep the hts code on the product and then
+    calculate at runtime) but are actually related to a shipment. We want to avoid
+    creating a ShipmentItem that is actually just a Unit.
+    """
+
+    # we use this for accountancy so we CANNOT cascade EVER - we need permanent
+    # records of shipments and inventory etc.
+    source = models.ForeignKey(
+        "account.Address", related_name="outbound_shipments", on_delete=models.DO_NOTHING
+    )
+    destination = models.ForeignKey(
+        "account.Address", related_name="inbound_shipments", on_delete=models.DO_NOTHING
+    )
+    invoice = models.ForeignKey(
+        "invoice.Invoice",
+        related_name="shipments",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    # for an inbound shipment we need this
+    arrived_at = models.DateTimeField(null=True)
+    # for an outbound shipment we need this
+    departed_at = models.DateTimeField(null=True)
+
+    # does this matter, do people care?
+    delivery_method = models.CharField(null=True)
+    tracking_number = models.CharField(null=True)

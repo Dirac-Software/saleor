@@ -793,6 +793,13 @@ class Fulfillment(ModelWithMetadata):
         default=FulfillmentStatus.FULFILLED,
         choices=FulfillmentStatus.CHOICES,
     )
+    shipment = models.ForeignKey(
+        "shipping.Shipment",
+        on_delete=models.DO_NOTHING,
+        null=True,
+        related_name="fulfillments",
+    )
+    # delete as duplicated from shipment? Or make a property?
     tracking_number = models.CharField(max_length=255, default="", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
