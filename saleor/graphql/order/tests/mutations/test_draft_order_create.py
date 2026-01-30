@@ -224,7 +224,7 @@ def test_draft_order_create_with_voucher_entire_order(
     content = get_graphql_content(response)
 
     assert not content["data"]["draftOrderCreate"]["errors"]
-    stored_metadata = {"public": "public_value"}
+    stored_metadata = {"public": "public_value", "vat_number": "PL1234567890"}
     data = content["data"]["draftOrderCreate"]["order"]
     assert data["status"] == OrderStatus.DRAFT.upper()
     assert data["voucher"]["code"] == voucher.code
@@ -525,7 +525,7 @@ def test_draft_order_create_with_voucher_code(
 
     # then
     assert not content["data"]["draftOrderCreate"]["errors"]
-    stored_metadata = {"public": "public_value"}
+    stored_metadata = {"public": "public_value", "vat_number": "PL1234567890"}
     data = content["data"]["draftOrderCreate"]["order"]
     assert data["status"] == OrderStatus.DRAFT.upper()
     assert data["voucher"]["code"] == voucher.code

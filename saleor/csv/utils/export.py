@@ -274,10 +274,36 @@ def format_as_price_list(excel_path: str, export_info: dict[str, list]) -> None:
         export_info: Export info containing channel IDs and attributes
 
     """
+    from io import BytesIO
+
+    from openpyxl.drawing.image import Image as XLImage
+
     from ...channel.models import Channel
 
     wb = load_workbook(excel_path)
     ws = wb.active
+
+    # Extract images BEFORE any transformations
+    # Store them by row number so we can reinsert them later
+    images_by_row = {}
+    if hasattr(ws, "_images") and ws._images:
+        logger.info("Extracting %s images before reformatting", len(ws._images))
+        for img in ws._images:
+            try:
+                anchor = img.anchor
+                if hasattr(anchor, "_from"):
+                    row_idx = anchor._from.row + 1  # Convert to 1-indexed
+                    # Store image data and dimensions
+                    img_bytes = img._data()
+                    images_by_row[row_idx] = {
+                        "data": img_bytes,
+                        "width": img.width,
+                        "height": img.height,
+                    }
+                    logger.debug("Extracted image from row %s", row_idx)
+            except Exception as e:
+                logger.warning("Failed to extract image: %s", e)
+        logger.info("Extracted %s images from sheet", len(images_by_row))
 
     # Get current headers
     headers = [cell.value for cell in ws[1]]
@@ -426,62 +452,50 @@ def format_as_price_list(excel_path: str, export_info: dict[str, list]) -> None:
             if old_col_dim.width:
                 new_ws.column_dimensions[new_col_letter].width = old_col_dim.width
 
-    # Copy images from old sheet to new sheet
-    # Images need to be repositioned to match the new column order
-    if hasattr(ws, "_images") and ws._images:
-        logger.info("Copying %s images to reformatted sheet", len(ws._images))
-        from io import BytesIO
-
-        from openpyxl.drawing.image import Image as XLImage
-
-        for img in ws._images:
-            # Get the anchor (cell reference) of the image
-            anchor = img.anchor
-            if hasattr(anchor, "_from"):
-                # Get the column index from the image anchor
-                old_col_idx = anchor._from.col + 1  # openpyxl uses 0-indexed columns
-                row_idx = anchor._from.row + 1  # openpyxl uses 0-indexed rows
-
-                # Find the new column index for this old column
-                new_col_idx = None
-                for new_col, (_col_name, old_col) in enumerate(new_order, start=1):
-                    if old_col == old_col_idx:
-                        new_col_idx = new_col
-                        break
-
-                # If we found a matching column, copy the image to the new position
-                if new_col_idx:
-                    new_col_letter = get_column_letter(new_col_idx)
-                    new_anchor = f"{new_col_letter}{row_idx}"
-
-                    # Create a new image instance with the same data
-                    # Use the image's _data() method to get the raw image bytes
-                    try:
-                        img_bytes = BytesIO(img._data())
-                        new_img = XLImage(img_bytes)
-                        new_img.width = img.width
-                        new_img.height = img.height
-                        new_img.anchor = new_anchor
-
-                        # Add to new worksheet
-                        new_ws.add_image(new_img)
-                        logger.debug(
-                            "Copied image from %s%s to %s",
-                            get_column_letter(old_col_idx),
-                            row_idx,
-                            new_anchor,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to copy image from %s%s: %s",
-                            get_column_letter(old_col_idx),
-                            row_idx,
-                            e,
-                        )
-
     # Delete old sheet and rename new one
     wb.remove(ws)
     new_ws.title = "Sheet"
+
+    # Now reinsert the images into the correct column (Image column)
+    # Find the "Image" column in the new sheet
+    new_headers = [cell.value for cell in new_ws[1]]
+    image_col_idx = None
+    for idx, header in enumerate(new_headers, start=1):
+        if header == "Image":
+            image_col_idx = idx
+            break
+
+    if image_col_idx and images_by_row:
+        logger.info(
+            "Reinserting %s images into column %s (Image)",
+            len(images_by_row),
+            get_column_letter(image_col_idx),
+        )
+        image_col_letter = get_column_letter(image_col_idx)
+
+        for row_idx, img_data in images_by_row.items():
+            try:
+                # Create new image from stored data
+                img_bytes = BytesIO(img_data["data"])
+                new_img = XLImage(img_bytes)
+                new_img.width = img_data["width"]
+                new_img.height = img_data["height"]
+
+                # Anchor to the Image column at the same row
+                new_anchor = f"{image_col_letter}{row_idx}"
+                new_img.anchor = new_anchor
+
+                # Add to worksheet
+                new_ws.add_image(new_img)
+                logger.debug("Inserted image at %s", new_anchor)
+            except Exception as e:
+                logger.warning("Failed to insert image at row %s: %s", row_idx, e)
+
+        logger.info("Successfully reinserted images")
+    elif images_by_row and not image_col_idx:
+        logger.warning(
+            "Images were extracted but 'Image' column not found in new sheet"
+        )
 
     # Step 4: Format RRP column with currency (if exists)
     headers_final = [cell.value for cell in new_ws[1]]

@@ -74,9 +74,13 @@ def test_mutation_update_warehouse(
     warehouse_data = content["data"]["updateWarehouse"]["warehouse"]
 
     assert warehouse_data["address"]["metadata"] == [
-        {"key": "public", "value": "public_value"}
+        {"key": "public", "value": "public_value"},
+        {"key": "vat_number", "value": "PL1234567890"},
     ]
-    assert warehouse.address.metadata == {"public": "public_value"}
+    assert warehouse.address.metadata == {
+        "public": "public_value",
+        "vat_number": "PL1234567890",
+    }
     assert warehouse.address.validation_skipped is False
     assert not (warehouse.name == warehouse_old_name)
     assert warehouse.name == "New name"

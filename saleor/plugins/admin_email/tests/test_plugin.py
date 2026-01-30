@@ -24,6 +24,7 @@ from ..constants import (
     STAFF_PASSWORD_RESET_TEMPLATE_FIELD,
 )
 from ..notify_events import (
+    send_contact_form_submission,
     send_csv_export_failed,
     send_csv_export_success,
     send_set_staff_password_email,
@@ -40,6 +41,7 @@ def test_event_map():
         NotifyEventType.CSV_EXPORT_SUCCESS: send_csv_export_success,
         NotifyEventType.CSV_EXPORT_FAILED: send_csv_export_failed,
         NotifyEventType.ACCOUNT_STAFF_RESET_PASSWORD: send_staff_reset_password,
+        NotifyEventType.CONTACT_FORM_SUBMISSION: send_contact_form_submission,
     }
 
 

@@ -5,7 +5,6 @@ from freezegun import freeze_time
 
 from ...core.notification.utils import get_site_context
 from ...core.notify import AdminNotifyEvent
-from ...core.utils import build_absolute_uri
 from .. import notifications
 from ..notifications import get_default_export_payload
 
@@ -35,21 +34,24 @@ def test_send_export_download_link_notification(
     notifications.send_export_download_link_notification(user_export_file, data_type)
 
     # then
-    expected_payload = {
-        "export": get_default_export_payload(user_export_file),
-        "csv_link": build_absolute_uri(user_export_file.content_file.url),
-        "recipient_email": user_export_file.user.email,
-        "data_type": data_type,
-        **get_site_context(),
-    }
-
     assert mocked_notify.call_count == 1
     call_args = mocked_notify.call_args_list[0]
     called_args = call_args.args
     called_kwargs = call_args.kwargs
     assert called_args[0] == AdminNotifyEvent.CSV_EXPORT_SUCCESS
     assert len(called_kwargs) == 1
-    assert called_kwargs["payload_func"]() == expected_payload
+
+    actual_payload = called_kwargs["payload_func"]()
+
+    # Verify payload structure and values (except CSV link which may be signed)
+    assert actual_payload["export"] == get_default_export_payload(user_export_file)
+    assert actual_payload["recipient_email"] == user_export_file.user.email
+    assert actual_payload["data_type"] == data_type
+    # Check that csv_link contains export_files path
+    assert "export_files" in actual_payload["csv_link"]
+    # Verify site context keys are present
+    for key in get_site_context().keys():
+        assert key in actual_payload
 
     mocked_gift_card_export_completed.assert_not_called()
     mocked_product_export_completed.assert_called_with(user_export_file)

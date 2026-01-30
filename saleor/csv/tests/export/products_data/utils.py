@@ -105,6 +105,8 @@ def add_stocks_to_expected_data(data, variant, warehouse_ids, pk=None):
 
 
 def add_channel_to_expected_product_data(data, product, channel_ids, pk=None):
+    from datetime import datetime
+
     for channel_listing in product.channel_listings.all():
         if str(channel_listing.channel.pk) in channel_ids:
             channel_slug = channel_listing.channel.slug
@@ -121,6 +123,9 @@ def add_channel_to_expected_product_data(data, product, channel_ids, pk=None):
                     value = getattr(channel_listing, "currency")
                 else:
                     value = getattr(channel_listing, lookup)
+                # Convert timezone-aware datetimes to timezone-naive for Excel compatibility
+                if isinstance(value, datetime) and value.tzinfo is not None:
+                    value = value.replace(tzinfo=None)
                 if pk:
                     data[pk][header] = value
                 else:

@@ -1742,3 +1742,26 @@ def tax_configuration_avatax_plugin(channel_USD):
     tc.tax_app_id = "plugin:avatax"
     tc.save()
     return tc
+
+
+@pytest.fixture(autouse=True)
+def mock_vat_validation(monkeypatch):
+    """Mock VAT validation to avoid network calls in tests.
+
+    This fixture automatically mocks all calls to validate_vat_vies()
+    to return valid results without making actual network calls to VIES API.
+    This prevents SocketConnectBlockedError in tests.
+    """
+
+    def mock_validate_vat_vies(vat: str, country_code: str, timeout: int = 5) -> dict:
+        """Mock VIES validation that always returns valid."""
+        return {
+            "valid": True,
+            "name": "Test Company",
+            "address": "Test Address",
+        }
+
+    monkeypatch.setattr(
+        "saleor.account.vat_validation.validate_vat_vies",
+        mock_validate_vat_vies,
+    )

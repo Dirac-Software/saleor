@@ -200,6 +200,7 @@ class CheckoutComplete(BaseMutation, I18nMixin):
                         required_check=True,
                         enable_normalization=True,
                         instance=shipping_address,
+                        require_vat=False,
                     )
                 if shipping_address_data != shipping_address.as_data():
                     shipping_address.save()
@@ -222,6 +223,7 @@ class CheckoutComplete(BaseMutation, I18nMixin):
                 required_check=True,
                 enable_normalization=True,
                 instance=billing_address,
+                require_vat=False,
             )
         if billing_address_data != billing_address.as_data():
             billing_address.save()

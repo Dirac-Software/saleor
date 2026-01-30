@@ -130,8 +130,14 @@ def test_logged_customer_update_addresses(user_api_client, graphql_address_data)
     assert user.default_shipping_address.first_name == new_first_name
     assert user.search_document
 
-    assert user.default_billing_address.metadata == {"public": "public_value"}
-    assert user.default_shipping_address.metadata == {"public": "public_value"}
+    assert user.default_billing_address.metadata == {
+        "public": "public_value",
+        "vat_number": "PL1234567890",
+    }
+    assert user.default_shipping_address.metadata == {
+        "public": "public_value",
+        "vat_number": "PL1234567890",
+    }
 
     assert user.default_billing_address.validation_skipped is False
     assert user.default_shipping_address.validation_skipped is False

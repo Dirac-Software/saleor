@@ -533,6 +533,7 @@ def test_customer_create_webhook_event_triggered(
     address_data = convert_dict_keys_to_camel_case(address.as_data())
     address_data.pop("privateMetadata")
     address_data.pop("validationSkipped")
+    address_data.pop("metadata")
 
     variables = {
         "email": email,
@@ -577,6 +578,7 @@ def test_customer_create_race_condition(
     address_data = convert_dict_keys_to_camel_case(address.as_data())
     address_data.pop("privateMetadata")
     address_data.pop("validationSkipped")
+    address_data.pop("metadata")
 
     variables = {
         "shipping": address_data,

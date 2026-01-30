@@ -309,6 +309,7 @@ class CheckoutCreate(DeprecatedModelMutation, I18nMixin):
                     "enable_fields_normalization", True
                 ),
                 info=info,
+                require_vat=False,
             )
         return None
 
@@ -331,6 +332,7 @@ class CheckoutCreate(DeprecatedModelMutation, I18nMixin):
                     "enable_fields_normalization", True
                 ),
                 info=info,
+                require_vat=False,
             )
         return None
 

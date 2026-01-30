@@ -109,8 +109,13 @@ def test_export_products_mutation(
     data = content["data"]["exportProducts"]
     export_file_data = data["exportFile"]
 
+    expected_export_info = {
+        "embed_images": False,
+        "compress_variants": False,
+        "price_list_format": False,
+    }
     export_products_mock.assert_called_once_with(
-        ANY, called_data, {}, FileTypeEnum.CSV.value
+        ANY, called_data, expected_export_info, FileTypeEnum.CSV.value
     )
 
     assert not data["errors"]
@@ -157,8 +162,13 @@ def test_export_products_mutation_by_app(
     data = content["data"]["exportProducts"]
     export_file_data = data["exportFile"]
 
+    expected_export_info = {
+        "embed_images": False,
+        "compress_variants": False,
+        "price_list_format": False,
+    }
     export_products_mock.assert_called_once_with(
-        ANY, {"all": ""}, {}, FileTypeEnum.CSV.value
+        ANY, {"all": ""}, expected_export_info, FileTypeEnum.CSV.value
     )
 
     assert not data["errors"]
@@ -222,7 +232,13 @@ def test_export_products_mutation_ids_scope(
     ) = export_products_mock.call_args
 
     assert set(call_args[1]["ids"]) == pks
-    assert call_args[2] == {"fields": [ProductFieldEnum.NAME.value]}
+    expected_export_info = {
+        "fields": [ProductFieldEnum.NAME.value],
+        "embed_images": False,
+        "compress_variants": False,
+        "price_list_format": False,
+    }
+    assert call_args[2] == expected_export_info
     assert call_args[3] == FileTypeEnum.XLSX.value
 
     assert not data["errors"]
@@ -351,12 +367,16 @@ def test_export_products_mutation_with_warehouse_and_attribute_ids(
     ) = export_products_mock.call_args
 
     assert set(call_args[1]["ids"]) == pks
-    assert call_args[2] == {
+    expected_export_info = {
         "fields": [ProductFieldEnum.NAME.value],
         "warehouses": warehouse_pks,
         "attributes": attribute_pks,
         "channels": channel_pks,
+        "embed_images": False,
+        "compress_variants": False,
+        "price_list_format": False,
     }
+    assert call_args[2] == expected_export_info
     assert call_args[3] == FileTypeEnum.CSV.value
 
     assert not data["errors"]

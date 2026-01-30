@@ -268,7 +268,7 @@ def test_draft_order_update_with_voucher_entire_order(
     data = content["data"]["draftOrderUpdate"]
     assert data["order"]["voucher"]["code"] == voucher.code
     assert data["order"]["voucherCode"] == voucher.code
-    stored_metadata = {"public": "public_value"}
+    stored_metadata = {"public": "public_value", "vat_number": "PL1234567890"}
 
     assert (
         data["order"]["billingAddress"]["metadata"] == graphql_address_data["metadata"]
@@ -3593,6 +3593,11 @@ def test_draft_order_update_address_not_changed_save_flag_changed(
     address_input.pop("privateMetadata")
     skip_validation = address_input.pop("validationSkipped")
     address_input["skipValidation"] = skip_validation
+    # Convert metadata dict to GraphQL format (array of key-value objects)
+    if "metadata" in address_input and isinstance(address_input["metadata"], dict):
+        address_input["metadata"] = [
+            {"key": k, "value": v} for k, v in address_input["metadata"].items()
+        ]
 
     input = {
         "billingAddress": address_input,
