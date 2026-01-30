@@ -1,3 +1,4 @@
+from .contact_form_submit import ContactFormSubmit
 from .gift_card_settings_update import GiftCardSettingsUpdate
 from .order_settings_update import OrderSettingsUpdate
 from .refund_reason_reference_type_clear import RefundReasonReferenceTypeClear
@@ -11,6 +12,7 @@ from .staff_notification_recipient_delete import StaffNotificationRecipientDelet
 from .staff_notification_recipient_update import StaffNotificationRecipientUpdate
 
 __all__ = [
+    "ContactFormSubmit",
     "GiftCardSettingsUpdate",
     "OrderSettingsUpdate",
     "RefundSettingsUpdate",

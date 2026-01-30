@@ -14,6 +14,7 @@ from ..core.fields import PermissionsField
 from ..site.dataloaders import load_site_callback
 from ..translations.mutations import ShopSettingsTranslate
 from .mutations import (
+    ContactFormSubmit,
     GiftCardSettingsUpdate,
     OrderSettingsUpdate,
     RefundReasonReferenceTypeClear,
@@ -94,6 +95,8 @@ class ShopQueries(graphene.ObjectType):
 
 
 class ShopMutations(graphene.ObjectType):
+    contact_form_submit = ContactFormSubmit.Field()
+
     staff_notification_recipient_create = StaffNotificationRecipientCreate.Field()
     staff_notification_recipient_update = StaffNotificationRecipientUpdate.Field()
     staff_notification_recipient_delete = StaffNotificationRecipientDelete.Field()

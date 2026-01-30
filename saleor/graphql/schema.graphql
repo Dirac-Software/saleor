@@ -15354,6 +15354,12 @@ type Mutation {
     stocks: [StockBulkUpdateInput!]!
   ): StockBulkUpdate @doc(category: "Products") @webhookEventsInfo(asyncEvents: [PRODUCT_VARIANT_STOCK_UPDATED], syncEvents: [])
 
+  """Submit a contact form enquiry. Sends an email to staff members."""
+  contactFormSubmit(
+    """Fields for the contact form"""
+    input: ContactFormInput!
+  ): ContactFormSubmit @doc(category: "Shop")
+
   """
   Creates a new staff notification recipient. 
   
@@ -20610,6 +20616,41 @@ input StockBulkUpdateInput @doc(category: "Products") {
 
   """Quantity of items available for sell."""
   quantity: Int!
+}
+
+"""Submit a contact form enquiry. Sends an email to staff members."""
+type ContactFormSubmit @doc(category: "Shop") {
+  """Whether the submission was successful"""
+  success: Boolean!
+  errors: [ContactFormError!]!
+}
+
+type ContactFormError {
+  """Name of the field that caused the error"""
+  field: String
+
+  """Error message for the field"""
+  message: String!
+}
+
+input ContactFormInput {
+  """Business name"""
+  businessName: String
+
+  """Contact person name"""
+  contactName: String
+
+  """Contact email address"""
+  email: String
+
+  """Phone number"""
+  phone: String
+
+  """Order number (if applicable)"""
+  orderNumber: String
+
+  """Enquiry message"""
+  enquiry: String
 }
 
 """

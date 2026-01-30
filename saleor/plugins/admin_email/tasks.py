@@ -83,3 +83,17 @@ def send_staff_password_reset_email_task(
         subject=subject,
         template_str=template,
     )
+
+
+@app.task(compression="zlib")
+def send_contact_form_email_task(
+    recipient_list: list, payload: dict, config: dict, subject, template
+):
+    email_config = EmailConfig(**config)
+    send_email(
+        config=email_config,
+        recipient_list=recipient_list,
+        subject=subject,
+        template_str=template,
+        context=payload,
+    )
