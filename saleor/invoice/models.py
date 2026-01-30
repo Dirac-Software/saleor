@@ -29,6 +29,16 @@ class Invoice(ModelWithMetadata, Job):
         null=True,
         on_delete=models.SET_NULL,
     )
+    deal = models.OneToOneField(
+        "inventory.Deal",
+        related_name="invoice",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    xero_invoice_id = models.CharField(
+        max_length=255, null=True, blank=True, unique=True
+    )
     number = models.CharField(max_length=255, null=True)
     created = models.DateTimeField(null=True)
     external_url = models.URLField(null=True, max_length=2048)
