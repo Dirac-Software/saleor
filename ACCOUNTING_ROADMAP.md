@@ -2,6 +2,11 @@
 # Intro
 This doc assumes that the data model is completed. It lays out the features and applications required and priority to get them done.
 
+# Ramble
+We track payments by recording the Xero invoice we need to listen to. This is a huge simplification and ensures Xero is a source of truth.
+
+We try and keep disagreggation of costs explicit and wherever it is a little vague we try to keep it at runtime (eg. for shipments when attributing costs by weight).
+
 # Features
 ## Deal sheet ingestion
 *** low priority ***

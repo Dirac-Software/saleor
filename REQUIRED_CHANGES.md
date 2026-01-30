@@ -12,6 +12,10 @@
 
 6. Sometimes goods may be collected
 
+7. Go over VAT cases with James
+
+8. Need country of origin for goods
+
 # Changes
 - We can use the Proforma _or_ an order slip to add units. We can't rely on the invoice as much as I hoped (1).
 
