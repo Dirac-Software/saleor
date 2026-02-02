@@ -78,6 +78,12 @@ When the bill for a shipment comes in, we firstly allocate the duties and tariff
 item using its HS code.
 Then we take the weight of each item and allocate shipment cost by weight.
 
+
+# System Design Thoughts
+- If people need to do things in 2 places they won't
+- If we don't require country_of_origin, hs_code at ingest then they won't get done (but
+  this slows us down to getting a sale)
+
 """
 
 
