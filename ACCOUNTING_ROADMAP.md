@@ -3,17 +3,17 @@
 This doc assumes that the data model is completed. It lays out the features and applications required and priority to get them done.
 
 # Ramble
-We track payments by recording the Xero invoice we need to listen to. This is a huge simplification and ensures Xero is a source of truth.
+We track payments by recording the Xero invoice we need to listen to. This is a huge simplification from tracking payment increments and timestamps and ensures Xero is a source of truth.
 
-We try and keep disagreggation of costs explicit and wherever it is a little vague we try to keep it at runtime (eg. for shipments when attributing costs by weight).
+We try and keep disagreggation of costs explicit and wherever it is a little vague we try to keep it at runtime (eg. for shipments when attributing costs by weight), so that our data stores don't need to be changed.
 
 # Features
 ## Deal sheet ingestion
 *** low priority ***
 The ingestion of products into non-owned warehouses has been completed but we need to consider / ensure.
 - Cannot ingest products to an Owned warehouse
-- How will we account for multiple different sell prices in the ingest
-- Require HS Code and UK tax code.
+- How will we account for multiple different sell prices in the ingest - record the sell price + outbound cost, but inbound shipping cost not included.
+- Require HS Code and UK tax code and country of origin at point of ingest.
 
 ## Manual Order Creation
 *** low priority ***
@@ -24,15 +24,22 @@ Sometimes the sell price will be very different to what has been given on the sh
 *** low priority ***
 - Shipping calculator gives accurate estimates of shipping cost
 - All products sell_prices given without shipping
-- On export of price list shipping cost can be optionally calculated and added to the sell price per unit.
+- On export of price list shipping cost can be optionally calculated and added to the sell price per unit. TODO: this is unclear - is it included or not.
 - Requires HTS code and Duties. Mostly manual work, how do we do this in a calculator reliably?
 
 ## Stock table is client to Unit model for an Owned Warehouse
 - The Stock record for an owned warehouse has quantity updated via trigger to be equal to the sum of unconsumed Units for some Variant. Need to consider non_owned stock arriving at Dirac - need to allocate immediately to orders right.
 - Any GraphQL query cannot allow mutation of Stock from an owned warehouse.
 
+### Implementation
+- On change to any unit where Unit.variant=Stock.variant run a trigger to sum availables.
+- Search and remove write access to GraphQL.
+
 ## Deal Invoice Ingestion
-Given some Deal Invoice in Xero, get it (use the API) then  process it into the correct Variant and create the Units.
+Given some Deal Invoice or Order Slip, ingest it into the Unit table, consuming stock for orders. We automatically update the Stock table.
+
+## Final Deal Invoice Ingestion
+A page that allows adding a Xero final invoice to a pre-existing deal. Also a page with outstanding deals. Verify invoice and perhaps give a dropdown using the Xero API. Do we need to sync the customer to Xero person?
 
 ## Accepting stock at an Owned Warehouse
 We expect a deal invoice must be ingested before the stock arrives.

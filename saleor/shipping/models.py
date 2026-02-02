@@ -369,18 +369,50 @@ class Shipment(models.Model):
     # we use this for accountancy so we CANNOT cascade EVER - we need permanent
     # records of shipments and inventory etc.
     source = models.ForeignKey(
-        "account.Address", related_name="outbound_shipments", on_delete=models.DO_NOTHING
+        "account.Address",
+        related_name="outbound_shipments",
+        on_delete=models.DO_NOTHING,
     )
     destination = models.ForeignKey(
         "account.Address", related_name="inbound_shipments", on_delete=models.DO_NOTHING
     )
-    invoice = models.ForeignKey(
+
+    # these are estimates until a shipping invoice is final. Do we need to store the
+    # estimates in a separate place
+    # we get these by manually breaking down an invoice
+    shipping_cost = MoneyField(
+        amount_field="shipping_cost_amount", currency_field="currency"
+    )
+    # reclaimed. Can we assume it is always reclaimed?
+    shipping_cost_vat = MoneyField(
+        amount_field="shipping_cost_vat_amount", currency_field="currency"
+    )
+
+    # instead of using a duties invoice
+    duties_cost = MoneyField(
+        amount_field="duties_cost_amount", currency_field="currency"
+    )
+
+    shipping_invoice = models.ForeignKey(
         "invoice.Invoice",
         related_name="shipments",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
     )
+
+    # this has never been in prod. It has been included as an indicator that
+    # we _dont_ use duties invoices to get duties cost! We use the hs code + country
+    # of origin and buy price instead.
+
+    # duties_invoice = models.ForeignKey(
+    #     "invoice.Invoice",
+    #     related_name="duties",
+    #     null=True,
+    #     blank=True,
+    #     on_delete=models.SET_NULL,
+    # )
+
     # for an inbound shipment we need this
     arrived_at = models.DateTimeField(null=True)
     # for an outbound shipment we need this
@@ -388,4 +420,6 @@ class Shipment(models.Model):
 
     # does this matter, do people care?
     delivery_method = models.CharField(null=True)
+
+    # we can propogate this up to the order.
     tracking_number = models.CharField(null=True)

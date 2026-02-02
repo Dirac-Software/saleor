@@ -1,8 +1,10 @@
 from django.db import models
-from ..product.models import ProductVariant
-from ..warehouse.models import Warehouse
-from ..shipping.models import Shipment
+
 from ..order.models import OrderLine
+from ..product.models import ProductVariant
+from ..shipping.models import Shipment
+from ..warehouse.models import Warehouse
+from ..core.db.fields import MoneyField
 
 """
 # Order Context
@@ -88,20 +90,34 @@ Then we take the weight of each item and allocate shipment cost by weight.
 
 
 class Deal(models.Model):
-    """
-    Products come into this world through a deal, which is an invoice from a supplier we
+    """Products come into this world through a deal, which is an invoice from a supplier we
     have received for some products.
 
     The Invoice stores the one to one field to the deal and as such this doesn't
     really store that much information.
+
+    If we have a final invoice (or any invoice from Xero) then we can judge the Deal
+    to be somewhat finalised.
+
+    The shipment this deal comes on is on the Unit. This is an easier way of doing
+    the many-to-many relationship between Shipment <-> Deal as it already has the
+    constraint that a Unit exists once.
     """
 
-    pass
+    # TODO: add a check constraint that the warehouse is_owned=False.
+
+    # this must be a non-owned warehouse. This is the same thing as the supplier. It
+    # allows us to correctly reduce the Stock in a non-owned warehouse to prevent
+    # double counting (the stock moves to an owned warehouse)
+
+    # we can't null this because stock must come from somewhere, and we expect that
+    # the ProductVariants already exist for the units, which means that the variants
+    # should all exist in a non-owned warehouse _before_ a deal is ingested.
+    warehouse = models.ForeignKey(Warehouse, on_delete=models.DO_NOTHING)
 
 
 class Unit(models.Model):
-    """
-    the inbound shipment cost is on the Shipment.
+    """the inbound shipment cost is on the Shipment.
     the outbound shipment cost is on the Shipment.
     the sell cost is on the order line item, the sell invoice on the order.
     the buy cost is on the deal item??, the buy invoice on the deal.
@@ -119,6 +135,23 @@ class Unit(models.Model):
     # shouldn't be deleting them
     warehouse = models.ForeignKey(Warehouse, null=True, on_delete=models.DO_NOTHING)
 
+    # deal indicates the supplier they came from. It can't be null as otherwise how
+    # do we see buy price.
+    deal = models.ForeignKey(Deal, on_delete=models.DO_NOTHING)
+
+    # we get these from the deal invoice at point of ingestion into our system. They are
+    # corresponsing to the deal. If the deal is not finalised (invoice is not final)
+    # then these are subject to change
+    # the mapping of Invoice -> Unit is currently manual, but we don't use the
+    # intermediate step of InvoiceUnit - this is because it just recreates the Unit
+    # table and we don't have a standardised method of breaking down invoices.
+    buy_price = MoneyField(amount_field="buy_price_amount", currency_field="currency")
+    # TODO: this could be stored on the deal right? How do we measure if it has been
+    # reclaimed. Can we assume it is always reclaimed?
+    buy_price_vat = MoneyField(
+        amount_field="buy_price_vat_amount", currency_field="currency"
+    )
+
     # we keep the shipment a unit is in here. This is because both orders and deals
     # have a many to many relationship with shipments, but a unit may be in one
     # inbound shipment and one outbound shipment, so it's actually easier to just
@@ -131,5 +164,9 @@ class Unit(models.Model):
         Shipment, null=True, on_delete=models.DO_NOTHING, related_name="inbound_units"
     )
 
-    # the order may be None if it is not consumed yet.
+    # the order may be None if it is not consumed yet (available as floor stock).
+    # If this is null then we can display in the Stock table.
+    # should have OrderLine.qty = sum(Unit.order_line==OrderLine)
     order_line = models.ForeignKey(OrderLine, null=True, on_delete=models.DO_NOTHING)
+
+    # TODO:fullfillment - when pick and packed, map to the order fulfillment.

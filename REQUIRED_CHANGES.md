@@ -10,14 +10,14 @@
 
 5. We sometimes are invoiced for duties on a shipment in a seaprate invoice, and sometimes the duties are aggregated over several shipments and are very hard to disaggregate.
 
-6. Sometimes goods may be collected
+6. Sometimes goods may be collected from our warehouse.
 
-7. Go over VAT cases with James
+7. Go over VAT cases with James when writing.
 
-8. Need country of origin for goods
+8. Need country of origin for goods, can request EITHER at point of ingest OR at point of purchase, but this may affect sell price + shipping.
 
 # Changes
-- We can use the Proforma _or_ an order slip to add units. We can't rely on the invoice as much as I hoped (1).
+- We can use the Proforma _or_ an order slip to add units. We can't rely on the invoice as much as I hoped, because it is subject to change (not final) (1).
 
 - Store buy_price, buy_vat on the Unit. Until a Deal has a confirmed _final_ invoice attached these can change. (1,2)
 
@@ -30,7 +30,14 @@
 
 # Knowledge Required
 ## Shipping
-- Freight forwarding
+- Freight forwarding, who invoices us.
 - Cost is (shipping,duties). Any others?
 - How do we disaggregate duties and check they're correct?
 What am I missing (need confirmation from Paul)
+
+
+## Statement for Paul to check
+We have Shipping cost + Duty
+Shipping Cost is charged by the shipment provider (normally fedex) and several shipments appear in a single invoice. HOWEVER, one shipment is never split across invoices.
+Duties _may_ occur in a different invoice, sometimes from a shipment provider and sometimes from a freight forwarder and show duties charged by HS code. We sometimes have to break down a Duties invoice using what shipments we expect to attribute the cost per shipment per HS code.
+
