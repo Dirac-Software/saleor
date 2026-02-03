@@ -29,8 +29,8 @@ class Invoice(ModelWithMetadata, Job):
         null=True,
         on_delete=models.SET_NULL,
     )
-    deal = models.OneToOneField(
-        "inventory.Deal",
+    purchase_order = models.OneToOneField(
+        "inventory.PurchaseOrder",
         related_name="invoice",
         null=True,
         blank=True,

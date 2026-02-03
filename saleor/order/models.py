@@ -781,6 +781,12 @@ class OrderLine(ModelWithMetadata):
 
 
 class Fulfillment(ModelWithMetadata):
+    """
+    Note that an Order can be fulfilled by multiple shipments and that we can put
+    multiple orders in the same shipment. This is how we see the stock that has left
+    the warehouse.
+    """
+
     fulfillment_order = models.PositiveIntegerField(editable=False)
     order = models.ForeignKey(
         Order,
@@ -854,6 +860,11 @@ class Fulfillment(ModelWithMetadata):
 
 
 class FulfillmentLine(models.Model):
+    """
+    This table is given significant responsibility when we introduce inventory
+    tracking (`saleor/inventory`). When we
+    """
+
     order_line = models.ForeignKey(
         OrderLine,
         related_name="fulfillment_lines",

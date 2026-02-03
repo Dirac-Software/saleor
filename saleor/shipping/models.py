@@ -388,19 +388,12 @@ class Shipment(models.Model):
         amount_field="shipping_cost_vat_amount", currency_field="currency"
     )
 
-    # instead of using a duties invoice
-    duties_cost = MoneyField(
-        amount_field="duties_cost_amount", currency_field="currency"
-    )
-
-    shipping_invoice = models.ForeignKey(
-        "invoice.Invoice",
-        related_name="shipments",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
-
+    # instead of using a duties invoice we can get these from the unit price, hs code on
+    # a ProductVariant and the shipment source and destination.
+    # duties_cost = MoneyField(
+    #     amount_field="duties_cost_amount", currency_field="currency"
+    # )
+    #
     # this has never been in prod. It has been included as an indicator that
     # we _dont_ use duties invoices to get duties cost! We use the hs code + country
     # of origin and buy price instead.
@@ -413,13 +406,19 @@ class Shipment(models.Model):
     #     on_delete=models.SET_NULL,
     # )
 
+    shipping_invoice = models.ForeignKey(
+        "invoice.Invoice",
+        related_name="shipments",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+
     # for an inbound shipment we need this
     arrived_at = models.DateTimeField(null=True)
     # for an outbound shipment we need this
     departed_at = models.DateTimeField(null=True)
 
-    # does this matter, do people care?
-    delivery_method = models.CharField(null=True)
-
+    carrier = models.CharField(null=True)
     # we can propogate this up to the order.
     tracking_number = models.CharField(null=True)
