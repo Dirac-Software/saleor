@@ -163,3 +163,33 @@ def warehouse_no_shipping_zone(address, channel_USD):
     )
     warehouse.channels.add(channel_USD)
     return warehouse
+
+
+@pytest.fixture
+def owned_warehouse(address, shipping_zone, channel_USD):
+    """Warehouse with is_owned=True for batch tracking."""
+    warehouse = Warehouse.objects.create(
+        address=address,
+        name="Owned Warehouse",
+        slug="owned-warehouse",
+        email="owned@example.com",
+        is_owned=True,
+    )
+    warehouse.shipping_zones.add(shipping_zone)
+    warehouse.channels.add(channel_USD)
+    return warehouse
+
+
+@pytest.fixture
+def nonowned_warehouse(address, shipping_zone, channel_USD):
+    """Supplier warehouse with is_owned=False."""
+    warehouse = Warehouse.objects.create(
+        address=address,
+        name="Supplier Warehouse",
+        slug="supplier-warehouse",
+        email="supplier@example.com",
+        is_owned=False,
+    )
+    warehouse.shipping_zones.add(shipping_zone)
+    warehouse.channels.add(channel_USD)
+    return warehouse

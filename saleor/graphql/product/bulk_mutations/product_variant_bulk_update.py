@@ -354,6 +354,21 @@ class ProductVariantBulkUpdate(BaseMutation):
                     continue
 
                 stock_data["stock"] = stock_global_id_to_instance_map[stock_id]
+
+                # Check if warehouse is owned - cannot update stocks in owned warehouses
+                if stock_data["stock"].warehouse.is_owned:
+                    index_error_map[variant_index].append(
+                        ProductVariantBulkError(
+                            field="stock",
+                            path=f"stocks.update.{stock_index}.stock",
+                            message="Cannot update stock for owned warehouse. Stock updates "
+                            "for owned warehouses are managed through OrderConsumption.",
+                            code=ProductVariantBulkErrorCode.INVALID.value,
+                            stocks=[stock_id],
+                        )
+                    )
+                    continue
+
                 stock_data["stock"].quantity = stock_data["quantity"]
                 stocks_to_update.append(stock_data)
 
@@ -373,6 +388,22 @@ class ProductVariantBulkUpdate(BaseMutation):
                         )
                     )
                     continue
+
+                # Check if warehouse is owned - cannot delete stocks from owned warehouses
+                stock = stock_global_id_to_instance_map[stock_id]
+                if stock.warehouse.is_owned:
+                    index_error_map[variant_index].append(
+                        ProductVariantBulkError(
+                            field="stock",
+                            path=f"stocks.remove.{stock_index}",
+                            message="Cannot delete stock for owned warehouse. Stocks for "
+                            "owned warehouses are managed through the inventory system.",
+                            code=ProductVariantBulkErrorCode.INVALID.value,
+                            stocks=[stock_id],
+                        )
+                    )
+                    continue
+
                 stocks_to_remove.append(graphene.Node.from_global_id(stock_id)[1])
             cleaned_input["stocks"]["remove"] = stocks_to_remove
 

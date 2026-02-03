@@ -7,6 +7,7 @@ from ....core.tracing import traced_atomic_transaction
 from ....permission.enums import ProductPermissions
 from ....product import models
 from ....warehouse import models as warehouse_models
+from ....warehouse.error_codes import StockErrorCode
 from ....warehouse.management import stock_bulk_update
 from ....webhook.event_types import WebhookEventAsyncType
 from ....webhook.utils import get_webhooks_for_event
@@ -76,6 +77,24 @@ class ProductVariantStocksUpdate(ProductVariantStocksCreate):
             warehouses = cls.get_nodes_or_error(
                 warehouse_ids, "warehouse", only_type=Warehouse
             )
+
+            # Check for owned warehouses
+            for i, warehouse in enumerate(warehouses):
+                if warehouse.is_owned:
+                    error_msg = (
+                        "Cannot update stock for owned warehouse. Stock updates for "
+                        "owned warehouses are managed through OrderConsumption."
+                    )
+                    cls.update_errors(
+                        errors,
+                        error_msg,
+                        "warehouse",
+                        StockErrorCode.OWNED_WAREHOUSE,
+                        [i],
+                    )
+
+            if errors:
+                raise ValidationError(errors)
 
             manager = get_plugin_manager_promise(info.context).get()
             cls.update_or_create_variant_stocks(variant, stocks, warehouses, manager)

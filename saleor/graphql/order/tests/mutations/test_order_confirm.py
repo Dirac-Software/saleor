@@ -699,3 +699,134 @@ def test_order_confirm_triggers_webhooks(
     )
     assert not mocked_send_webhook_request_sync.called
     assert wrapped_call_order_event.called
+
+
+def test_order_confirm_blocked_without_allocation_sources(
+    staff_api_client,
+    order_unconfirmed,
+    permission_group_manage_orders,
+    owned_warehouse,
+):
+    """OrderConfirm mutation fails when allocations lack AllocationSources."""
+    from .....warehouse.models import Allocation, Stock
+
+    # given
+    order_line = order_unconfirmed.lines.first()
+    variant = order_line.variant
+    stock = Stock.objects.create(
+        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    )
+
+    # Create allocation WITHOUT AllocationSource
+    Allocation.objects.create(order_line=order_line, stock=stock, quantity_allocated=50)
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_CONFIRM_MUTATION,
+        {"id": graphene.Node.to_global_id("Order", order_unconfirmed.id)},
+    )
+
+    # then
+    content = get_graphql_content(response)
+    errors = content["data"]["orderConfirm"]["errors"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == OrderErrorCode.INVALID.name
+
+    # Order should remain UNCONFIRMED
+    order_unconfirmed.refresh_from_db()
+    assert order_unconfirmed.status == OrderStatus.UNCONFIRMED
+
+
+def test_order_confirm_succeeds_with_allocation_sources(
+    staff_api_client,
+    order_unconfirmed,
+    permission_group_manage_orders,
+    owned_warehouse,
+    purchase_order_item,
+    channel_USD,
+):
+    """OrderConfirm succeeds when allocations have proper AllocationSources."""
+    from .....order.fetch import OrderLineInfo
+    from .....plugins.manager import get_plugins_manager
+    from .....warehouse.management import allocate_stocks
+    from .....warehouse.models import Stock
+
+    # given
+    order_line = order_unconfirmed.lines.first()
+    variant = order_line.variant
+    Stock.objects.create(
+        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    )
+
+    # Use allocate_stocks which creates AllocationSources automatically
+    allocate_stocks(
+        [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
+        "US",
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_CONFIRM_MUTATION,
+        {"id": graphene.Node.to_global_id("Order", order_unconfirmed.id)},
+    )
+
+    # then
+    content = get_graphql_content(response)
+    order_data = content["data"]["orderConfirm"]["order"]
+
+    assert order_data["status"] == OrderStatus.UNFULFILLED.upper()
+    order_unconfirmed.refresh_from_db()
+    assert order_unconfirmed.status == OrderStatus.UNFULFILLED
+
+
+def test_order_confirm_blocked_with_nonowned_warehouse(
+    staff_api_client,
+    order_unconfirmed,
+    permission_group_manage_orders,
+    nonowned_warehouse,
+    channel_USD,
+):
+    """OrderConfirm fails when allocations are in non-owned warehouses."""
+    from .....order.fetch import OrderLineInfo
+    from .....plugins.manager import get_plugins_manager
+    from .....warehouse.management import allocate_stocks
+    from .....warehouse.models import Stock
+
+    # given
+    order_line = order_unconfirmed.lines.first()
+    variant = order_line.variant
+    Stock.objects.create(
+        warehouse=nonowned_warehouse, product_variant=variant, quantity=100
+    )
+
+    # Allocate in non-owned warehouse (no AllocationSources created)
+    allocate_stocks(
+        [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
+        "US",
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_CONFIRM_MUTATION,
+        {"id": graphene.Node.to_global_id("Order", order_unconfirmed.id)},
+    )
+
+    # then
+    content = get_graphql_content(response)
+    errors = content["data"]["orderConfirm"]["errors"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == OrderErrorCode.INVALID.name
+
+    # Order should remain UNCONFIRMED
+    order_unconfirmed.refresh_from_db()
+    assert order_unconfirmed.status == OrderStatus.UNCONFIRMED

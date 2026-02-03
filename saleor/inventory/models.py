@@ -1,12 +1,10 @@
-from django.db import models
 from django.conf import settings
-
-from ..order.models import OrderLine
-from ..product.models import ProductVariant
-from ..shipping.models import Shipment
-from ..warehouse.models import Warehouse
-from ..core.db.fields import MoneyField
+from django.db import models
 from django_countries.fields import CountryField
+
+from ..core.db.fields import MoneyField
+from ..product.models import ProductVariant
+from ..warehouse.models import Warehouse
 from . import PurchaseOrderItemStatus
 
 """
@@ -44,14 +42,17 @@ PurchaseOrder with a Xero invoice id and ensure the sum of the unit costs
 add up to what we expect from the PurchaseOrderItem. We can then see when and how much
 of the invoice we have paid.
 
+Currently we don't track VAT (it is all reclaimed anyway). This means the cash flow
+isn't fully accurate.
 
 TODO: add a celery task to check the Stock is as expected every evening.
 """
 
 
 class PurchaseOrder(models.Model):
-    """Products come into this world through a PurchaseOrder, which is an invoice from a supplier we
-    have received for some products.
+    """Products come into this world through a PurchaseOrder.
+
+    An invoice from a supplier we have received for some products.
 
     The Invoice stores the one to one field to the deal and as such this doesn't
     really store that much information.
@@ -73,10 +74,16 @@ class PurchaseOrder(models.Model):
     # we can't null this because stock must come from somewhere, and we expect that
     # the ProductVariants already exist for the units, which means that the variants
     # should all exist in a non-owned warehouse _before_ a deal is ingested.
-    source_warehouse = models.ForeignKey(Warehouse, on_delete=models.DO_NOTHING)
+    source_warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.DO_NOTHING, related_name="source_purchase_orders"
+    )
 
     # this has to be an owned warehouse, it is where the goods end up.
-    destination_warehouse = models.ForeignKey(Warehouse, on_delete=models.DO_NOTHING)
+    destination_warehouse = models.ForeignKey(
+        Warehouse,
+        on_delete=models.DO_NOTHING,
+        related_name="destination_purchase_orders",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -100,24 +107,33 @@ class PurchaseOrderItem(models.Model):
     product_variant = models.ForeignKey(
         ProductVariant, on_delete=models.CASCADE, related_name="items"
     )
-    quantity = models.PositiveIntegerField()
+    quantity_ordered = models.PositiveIntegerField()  # Renamed from 'quantity'
     # for this to be > 0 then we must have the shipment received_at be not null.
     quantity_received = models.PositiveIntegerField()
+    # Tracks how much of this batch has been allocated to customer orders
+    # via AllocationSource
+    quantity_allocated = models.PositiveIntegerField(default=0)
 
-    buy_price_amount = models.DecimalField(
+    @property
+    def available_quantity(self):
+        """Amount available for allocation (not yet allocated).
+
+        Uses quantity_received if RECEIVED, otherwise quantity_ordered.
+        """
+        from . import PurchaseOrderItemStatus
+
+        base = (
+            self.quantity_received
+            if self.status == PurchaseOrderItemStatus.RECEIVED
+            else self.quantity_ordered
+        )
+        return max(0, base - self.quantity_allocated)
+
+    unit_price_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
     )
-    unit_price = MoneyField(amount_field="buy_price_amount", currency_field="currency")
-
-    unit_price_vat_amount = models.DecimalField(
-        max_digits=settings.DEFAULT_MAX_DIGITS,
-        decimal_places=settings.DEFAULT_DECIMAL_PLACES,
-    )
-    # TODO: do we need to store this - we pay then reclaim. Is it critical for cash flow.
-    unit_price_vat = MoneyField(
-        amount_field="buy_price_vat_amount", currency_field="currency"
-    )
+    unit_price = MoneyField(amount_field="unit_price_amount", currency_field="currency")
 
     currency = models.CharField(
         max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH,
@@ -127,6 +143,8 @@ class PurchaseOrderItem(models.Model):
         "shipping.Shipment",
         on_delete=models.DO_NOTHING,
         related_name="purchase_order_items",
+        null=True,
+        blank=True,
     )
 
     country_of_origin = CountryField()
@@ -144,30 +162,3 @@ class PurchaseOrderItem(models.Model):
         blank=True,
         help_text="When status changed to CONFIRMED (ordered from supplier)",
     )
-
-
-class OrderConsumption(models.Model):
-    """Created at ORDER CONFIRMATION - reserves specific batch for an order.
-
-    Links OrderLine to PurchaseOrderItem batch via FIFO at confirmation time.
-    This allows confirming orders before goods physically arrive.
-
-    When created:
-    - Stock.quantity decreases (batch reserved for this order)
-    - Stock.quantity_allocated increases (order confirmed)
-    - Order can move to UNFULFILLED status (payment taken)
-
-    One OrderLine can have multiple OrderConsumptions if combined from multiple batches.
-    """
-
-    purchase_order_item = models.ForeignKey(
-        PurchaseOrderItem,
-        on_delete=models.DO_NOTHING,
-        related_name="order_consumptions",
-    )
-    order_line = models.ForeignKey(
-        OrderLine, on_delete=models.DO_NOTHING, related_name="order_consumptions"
-    )
-    quantity = models.PositiveIntegerField()
-
-    created_at = models.DateTimeField(auto_now_add=True)

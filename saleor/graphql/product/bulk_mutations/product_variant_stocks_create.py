@@ -79,6 +79,26 @@ class ProductVariantStocksCreate(BaseMutation):
         warehouses = cls.get_nodes_or_error(
             warehouse_ids, "warehouse", only_type=Warehouse
         )
+
+        # Check for owned warehouses
+        owned_warehouse_indexes = []
+        for i, warehouse in enumerate(warehouses):
+            if warehouse.is_owned:
+                owned_warehouse_indexes.append(i)
+
+        if owned_warehouse_indexes:
+            error_msg = (
+                "Cannot create stock for owned warehouse. Stocks for owned "
+                "warehouses are managed through PurchaseOrder."
+            )
+            cls.update_errors(
+                errors,
+                error_msg,
+                "warehouse",
+                StockErrorCode.OWNED_WAREHOUSE,
+                owned_warehouse_indexes,
+            )
+
         existing_stocks = variant.stocks.filter(warehouse__in=warehouses).values_list(
             "warehouse__pk", flat=True
         )

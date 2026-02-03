@@ -618,3 +618,116 @@ def test_invalidate_stocks_dataloader_on_update_stocks(
 
     # stock is updated in the second mutation
     assert update_stocks_data["stocks"][0]["quantity"] == new_quantity
+
+
+def test_product_variant_stocks_update_owned_warehouse_rejected(
+    staff_api_client,
+    variant,
+    warehouse,
+    permission_manage_products,
+):
+    # given - owned warehouse should not allow stock updates
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    # Make the warehouse owned
+    warehouse.is_owned = True
+    warehouse.save()
+
+    # Create initial stock
+    Stock.objects.create(product_variant=variant, warehouse=warehouse, quantity=10)
+
+    stocks = [
+        {
+            "warehouse": graphene.Node.to_global_id("Warehouse", warehouse.id),
+            "quantity": 20,
+        },
+    ]
+    variables = {"variantId": variant_id, "stocks": stocks}
+
+    # when
+    response = staff_api_client.post_graphql(
+        VARIANT_STOCKS_UPDATE_MUTATIONS,
+        variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["productVariantStocksUpdate"]
+
+    # then
+    errors = data["errors"]
+    assert errors
+    assert errors[0]["code"] == StockErrorCode.OWNED_WAREHOUSE.name
+    assert "owned warehouse" in errors[0]["message"].lower()
+
+    # Stock quantity should not have changed
+    stock = Stock.objects.get(product_variant=variant, warehouse=warehouse)
+    assert stock.quantity == 10
+
+
+def test_product_variant_stocks_update_mixed_owned_and_non_owned_warehouses(
+    staff_api_client,
+    variant,
+    warehouse,
+    permission_manage_products,
+):
+    # given - mix of owned and non-owned warehouses
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    # Create a second warehouse and make it owned
+    owned_warehouse = Warehouse.objects.get(pk=warehouse.pk)
+    owned_warehouse.slug = "owned-warehouse"
+    owned_warehouse.pk = None
+    owned_warehouse.is_owned = True
+    owned_warehouse.save()
+
+    # First warehouse is non-owned (default)
+    non_owned_warehouse = warehouse
+
+    # Create initial stocks
+    Stock.objects.create(
+        product_variant=variant, warehouse=non_owned_warehouse, quantity=10
+    )
+    Stock.objects.create(
+        product_variant=variant, warehouse=owned_warehouse, quantity=10
+    )
+
+    stocks = [
+        {
+            "warehouse": graphene.Node.to_global_id(
+                "Warehouse", non_owned_warehouse.id
+            ),
+            "quantity": 20,
+        },
+        {
+            "warehouse": graphene.Node.to_global_id("Warehouse", owned_warehouse.id),
+            "quantity": 100,
+        },
+    ]
+    variables = {"variantId": variant_id, "stocks": stocks}
+
+    # when
+    response = staff_api_client.post_graphql(
+        VARIANT_STOCKS_UPDATE_MUTATIONS,
+        variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["productVariantStocksUpdate"]
+    errors = data["errors"]
+
+    # then
+    assert errors
+    # Should have error for the owned warehouse
+    owned_warehouse_errors = [e for e in errors if e["index"] == 1]
+    assert len(owned_warehouse_errors) == 1
+    assert owned_warehouse_errors[0]["code"] == StockErrorCode.OWNED_WAREHOUSE.name
+
+    # Stock should have been updated for non-owned warehouse
+    non_owned_stock = Stock.objects.get(
+        product_variant=variant, warehouse=non_owned_warehouse
+    )
+    assert non_owned_stock.quantity == 20
+
+    # Stock should NOT have been updated for owned warehouse
+    owned_stock = Stock.objects.get(product_variant=variant, warehouse=owned_warehouse)
+    assert owned_stock.quantity == 10  # unchanged

@@ -181,3 +181,103 @@ def test_invalidate_stocks_dataloader_on_removing_stocks(
 
     # stocks are empty in the second mutation
     assert remove_stocks_data["stocks"] == []
+
+
+def test_product_variant_stocks_delete_owned_warehouse_rejected(
+    staff_api_client, variant, warehouse, permission_manage_products
+):
+    # given - owned warehouse should not allow stock deletion
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    # Make the warehouse owned
+    warehouse.is_owned = True
+    warehouse.save()
+
+    Stock.objects.create(product_variant=variant, warehouse=warehouse, quantity=10)
+
+    warehouse_ids = [graphene.Node.to_global_id("Warehouse", warehouse.id)]
+
+    variables = {"variantId": variant_id, "warehouseIds": warehouse_ids}
+
+    # when
+    response = staff_api_client.post_graphql(
+        VARIANT_STOCKS_DELETE_MUTATION,
+        variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["productVariantStocksDelete"]
+
+    # then
+    errors = data["errors"]
+    assert errors
+    assert errors[0]["code"] == "OWNED_WAREHOUSE"
+    assert "owned warehouse" in errors[0]["message"].lower()
+
+    # Stock should not have been deleted
+    assert Stock.objects.filter(product_variant=variant, warehouse=warehouse).exists()
+
+
+def test_product_variant_stocks_delete_mixed_owned_and_non_owned_warehouses(
+    staff_api_client, variant, warehouse, permission_manage_products
+):
+    # given - mix of owned and non-owned warehouses
+    # When attempting to delete both owned and non-owned stocks together,
+    # the entire operation should fail to prevent accidental data loss
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.pk)
+
+    # Create a second warehouse and make it owned
+    owned_warehouse = Warehouse.objects.get(pk=warehouse.pk)
+    owned_warehouse.slug = "owned-warehouse"
+    owned_warehouse.pk = None
+    owned_warehouse.is_owned = True
+    owned_warehouse.save()
+
+    # First warehouse is non-owned (default)
+    non_owned_warehouse = warehouse
+
+    Stock.objects.bulk_create(
+        [
+            Stock(product_variant=variant, warehouse=non_owned_warehouse, quantity=10),
+            Stock(product_variant=variant, warehouse=owned_warehouse, quantity=140),
+        ]
+    )
+    stocks_count = variant.stocks.count()
+    assert stocks_count == 2
+
+    warehouse_ids = [
+        graphene.Node.to_global_id("Warehouse", non_owned_warehouse.id),
+        graphene.Node.to_global_id("Warehouse", owned_warehouse.id),
+    ]
+
+    variables = {"variantId": variant_id, "warehouseIds": warehouse_ids}
+
+    # when
+    response = staff_api_client.post_graphql(
+        VARIANT_STOCKS_DELETE_MUTATION,
+        variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["productVariantStocksDelete"]
+
+    # then
+    errors = data["errors"]
+    assert errors
+    # Should have error for owned warehouse
+    assert any("owned warehouse" in e["message"].lower() for e in errors)
+
+    variant.refresh_from_db()
+
+    # IMPORTANT: Entire operation should fail - no stocks should be deleted
+    # This prevents accidental deletion of non-owned stocks when owned are included
+    assert Stock.objects.filter(
+        product_variant=variant, warehouse=non_owned_warehouse
+    ).exists()
+
+    assert Stock.objects.filter(
+        product_variant=variant, warehouse=owned_warehouse
+    ).exists()
+
+    # Both stocks should still exist
+    assert variant.stocks.count() == 2

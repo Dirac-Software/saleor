@@ -20585,6 +20585,7 @@ enum StockBulkUpdateErrorCode @doc(category: "Products") {
   GRAPHQL_ERROR
   INVALID
   NOT_FOUND
+  OWNED_WAREHOUSE
   REQUIRED
 }
 
@@ -23311,6 +23312,7 @@ enum StockErrorCode @doc(category: "Products") {
   GRAPHQL_ERROR
   INVALID
   NOT_FOUND
+  OWNED_WAREHOUSE
   REQUIRED
   UNIQUE
 }

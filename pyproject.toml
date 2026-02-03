@@ -178,8 +178,8 @@ Populates database with sample data and creates admin user with credentials:
 - password: admin
 """
 
-test.cmd="pytest --reuse-db"
-test.help = "Run tests with db reuse to speed up testing time"
+test.shell = "DATABASE_URL=${SUPERUSER_DATABASE_URL:-$DATABASE_URL} pytest \"$@\""
+test.help = "Run tests (uses SUPERUSER_DATABASE_URL if set, otherwise DATABASE_URL)"
 
 [tool.deptry]
 extend_exclude = ["conftest\\.py", ".*/conftest\\.py", ".*/tests/.*"]
