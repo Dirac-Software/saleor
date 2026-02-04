@@ -433,3 +433,60 @@ class ShippingMethodsPerCountry(BaseObjectType):
     class Meta:
         doc_category = DOC_CATEGORY_SHIPPING
         description = "List of shipping methods available for the country."
+
+
+class Shipment(ModelObjectType[models.Shipment]):
+    id = graphene.GlobalID(required=True, description="The ID of the shipment.")
+    source = graphene.Field(
+        "saleor.graphql.account.types.Address",
+        required=True,
+        description="Source address (where shipment originates).",
+    )
+    destination = graphene.Field(
+        "saleor.graphql.account.types.Address",
+        required=True,
+        description="Destination address (where shipment is going).",
+    )
+    shipping_cost = graphene.Field(
+        Money,
+        required=True,
+        description="Shipping cost (estimated until invoice added).",
+    )
+    shipping_cost_vat = graphene.Field(
+        Money,
+        required=True,
+        description="VAT on shipping cost.",
+    )
+    shipping_invoice = graphene.Field(
+        "saleor.graphql.invoice.types.Invoice",
+        description="Shipping invoice (null if not yet received).",
+    )
+    arrived_at = graphene.DateTime(
+        description="When shipment arrived (null if still in transit)."
+    )
+    departed_at = graphene.DateTime(
+        description="When shipment departed (null for inbound shipments)."
+    )
+    carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
+    tracking_number = graphene.String(description="Tracking number from carrier.")
+    purchase_order_items = NonNullList(
+        lambda: __import__('saleor.graphql.inventory.types', fromlist=['PurchaseOrderItem']).PurchaseOrderItem,
+        required=True,
+        description="Purchase order items in this shipment.",
+    )
+
+    class Meta:
+        description = "Represents a shipment of goods from supplier to warehouse."
+        model = models.Shipment
+        interfaces = [relay.Node]
+        doc_category = DOC_CATEGORY_SHIPPING
+
+    @staticmethod
+    def resolve_purchase_order_items(root, info):
+        return root.purchase_order_items.all()
+
+
+class ShipmentCountableConnection(CountableConnection):
+    class Meta:
+        doc_category = DOC_CATEGORY_SHIPPING
+        node = Shipment

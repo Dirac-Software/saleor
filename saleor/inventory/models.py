@@ -1,11 +1,12 @@
 from django.conf import settings
 from django.db import models
 from django_countries.fields import CountryField
+from prices import Money
 
 from ..core.db.fields import MoneyField
 from ..product.models import ProductVariant
 from ..warehouse.models import Warehouse
-from . import PurchaseOrderItemStatus
+from . import PurchaseOrderItemAdjustmentReason, PurchaseOrderItemStatus, ReceiptStatus
 
 """
 A PurchaseOrder is created when we confirm we will order some products from a supplier.
@@ -107,33 +108,59 @@ class PurchaseOrderItem(models.Model):
     product_variant = models.ForeignKey(
         ProductVariant, on_delete=models.CASCADE, related_name="items"
     )
-    quantity_ordered = models.PositiveIntegerField()  # Renamed from 'quantity'
-    # for this to be > 0 then we must have the shipment received_at be not null.
-    quantity_received = models.PositiveIntegerField()
+    quantity_ordered = models.PositiveIntegerField()
     # Tracks how much of this batch has been allocated to customer orders
     # via AllocationSource
     quantity_allocated = models.PositiveIntegerField(default=0)
 
     @property
     def available_quantity(self):
-        """Amount available for allocation (not yet allocated).
+        """Amount available for allocation.
 
-        Uses quantity_received if RECEIVED, otherwise quantity_ordered.
+        Calculates: quantity_ordered + processed_adjustments - quantity_allocated
+
+        Only processed adjustments (processed_at is set) are included in the calculation.
+        This allows adjustments to be created but not applied until explicitly processed.
         """
-        from . import PurchaseOrderItemStatus
+        from django.db.models import Sum
 
-        base = (
-            self.quantity_received
-            if self.status == PurchaseOrderItemStatus.RECEIVED
-            else self.quantity_ordered
+        processed_adjustments = (
+            self.adjustments.filter(processed_at__isnull=False).aggregate(
+                total=Sum("quantity_change")
+            )["total"]
+            or 0
         )
+
+        base = self.quantity_ordered + processed_adjustments
         return max(0, base - self.quantity_allocated)
 
-    unit_price_amount = models.DecimalField(
+    @property
+    def unit_price_amount(self):
+        """Unit price we actually pay (after invoice adjustments).
+
+        For invoice variance/delivery short: uses actual_total_paid
+        This is what we use for financial calculations.
+        """
+        received_qty = self.quantity_ordered + sum(
+            adj.quantity_change
+            for adj in self.adjustments.filter(
+                affects_payable=True, processed_at__isnull=False
+            )
+        )
+        if received_qty > 0:
+            return self.actual_total_paid.amount / received_qty
+        return self.original_unit_price.amount
+
+    @property
+    def unit_price(self):
+        """Unit price as Money object."""
+        return Money(self.unit_price_amount, self.currency)
+
+    total_price_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        help_text="Total invoice amount for this POI (quantity × unit price)",
     )
-    unit_price = MoneyField(amount_field="unit_price_amount", currency_field="currency")
 
     currency = models.CharField(
         max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH,
@@ -162,3 +189,234 @@ class PurchaseOrderItem(models.Model):
         blank=True,
         help_text="When status changed to CONFIRMED (ordered from supplier)",
     )
+
+
+class PurchaseOrderItemAdjustment(models.Model):
+    """Audit trail for inventory adjustments (leakage).
+
+    We create this whenever we identify a change in what we expected from
+    quantity_ordered compared to what we currently have now.
+
+    Because we need to account for where all products come from for accounting, we track
+    these here.
+
+    On creation we need to call increase_stock or decrease_stock - need to change these
+    so that for an owned warehouse we will cancel / change orders.
+
+    Processing these is painful because we may have confirmed some orders!
+    The possible outcomes:
+    1. the good: we can handle the shortage by simply removing from unused quantity (unlikely as
+    we are dropshippers and
+    we dont tend to buy unpromised stock)
+    2. the bad: we have to unconfirm some orders that have not been paid for due to
+    shortage.
+    3. the ugly: we have to refund some orders that have been paid due to the shortage
+
+    """
+
+    purchase_order_item = models.ForeignKey(
+        PurchaseOrderItem,
+        on_delete=models.CASCADE,
+        related_name="adjustments",
+        help_text="Which POI batch this adjustment applies to",
+    )
+
+    quantity_change = models.IntegerField(
+        help_text="Change in quantity (negative for losses, positive for gains)"
+    )
+
+    reason = models.CharField(
+        max_length=32,
+        choices=PurchaseOrderItemAdjustmentReason.CHOICES,
+        help_text="Why this adjustment was made",
+    )
+
+    affects_payable = models.BooleanField(
+        default=False,
+        help_text=(
+            "True if supplier credits us for this adjustment "
+            "(invoice variance, delivery short). "
+            "False if we eat the loss (shrinkage, damage)."
+        ),
+    )
+
+    notes = models.TextField(
+        blank=True, help_text="Additional details about the adjustment"
+    )
+
+    # if we have handled the change in stock. For the cases where orders are unpaid this
+    # is easy. It is much harder when they are not!
+    processed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this adjustment was processed (stock updated, allocations adjusted)",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="User who recorded this adjustment",
+    )
+
+    @property
+    def financial_impact(self):
+        """Calculate the financial impact of this adjustment.
+
+        Returns the cost impact in the POI's currency.
+        Negative for losses, positive for gains.
+        """
+        return self.quantity_change * self.purchase_order_item.unit_price_amount
+
+    @property
+    def gl_account_type(self):
+        """Determine which GL account type this adjustment affects.
+
+        Returns:
+            'accounts_payable': Supplier credits us (reduces what we owe)
+            'operating_expense': We eat the loss (shrinkage, damage, etc.)
+        """
+        if self.affects_payable:
+            return "accounts_payable"
+        return "operating_expense"
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["purchase_order_item", "-created_at"]),
+            models.Index(fields=["reason", "-created_at"]),
+            models.Index(fields=["processed_at"]),
+            models.Index(fields=["affects_payable", "-created_at"]),
+        ]
+
+    def __str__(self):
+        direction = "loss" if self.quantity_change < 0 else "gain"
+        return (
+            f"POI #{self.purchase_order_item.id}: "
+            f"{abs(self.quantity_change)} unit {direction} ({self.reason})"
+        )
+
+
+class Receipt(models.Model):
+    """Document for receiving inbound shipments from suppliers.
+
+    Tracks the physical receiving process for a shipment. When warehouse staff
+    receive goods, they create a Receipt and add ReceiptLines as items are scanned.
+
+    Workflow:
+    1. Create Receipt for a Shipment (status=IN_PROGRESS)
+    2. Add ReceiptLines as items are scanned/counted
+    3. Complete Receipt → creates adjustments for discrepancies,
+       sets Shipment.arrived_at, updates POI status to RECEIVED
+    """
+
+    shipment = models.OneToOneField(
+        "shipping.Shipment",
+        on_delete=models.CASCADE,
+        related_name="receipt",
+        help_text="Inbound shipment being received",
+    )
+
+    status = models.CharField(
+        max_length=32,
+        choices=ReceiptStatus.CHOICES,
+        default=ReceiptStatus.IN_PROGRESS,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When receiving was completed and processed",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="receipts_created",
+        help_text="Warehouse staff who started receiving",
+    )
+
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="receipts_completed",
+        help_text="Warehouse staff who completed receiving",
+    )
+
+    notes = models.TextField(
+        blank=True, help_text="Additional notes about this receipt"
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["shipment", "-created_at"]),
+            models.Index(fields=["status", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Receipt #{self.id} for Shipment #{self.shipment_id}"
+
+
+class ReceiptLine(models.Model):
+    """Individual line item in a goods receipt.
+
+    Tracks what was actually received for each PurchaseOrderItem.
+    Multiple ReceiptLines can exist for the same POI if items are
+    scanned in separate batches during receiving.
+    """
+
+    receipt = models.ForeignKey(
+        Receipt,
+        on_delete=models.CASCADE,
+        related_name="lines",
+    )
+
+    purchase_order_item = models.ForeignKey(
+        PurchaseOrderItem,
+        on_delete=models.CASCADE,
+        related_name="receipt_lines",
+        help_text="Which POI this line receives against",
+    )
+
+    quantity_received = models.PositiveIntegerField(
+        help_text="Quantity physically received in this receipt line"
+    )
+
+    received_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this specific item/batch was scanned",
+    )
+
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Warehouse staff who scanned this item",
+    )
+
+    notes = models.TextField(
+        blank=True, help_text="Notes about this specific line (damage, etc.)"
+    )
+
+    class Meta:
+        ordering = ["received_at"]
+        indexes = [
+            models.Index(fields=["receipt", "purchase_order_item"]),
+            models.Index(fields=["received_at"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"ReceiptLine: {self.quantity_received}x "
+            f"{self.purchase_order_item.product_variant.sku}"
+        )

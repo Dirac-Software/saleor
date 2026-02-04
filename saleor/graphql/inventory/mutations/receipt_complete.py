@@ -1,0 +1,99 @@
+import graphene
+from django.core.exceptions import ValidationError
+
+from ....inventory.error_codes import ReceiptErrorCode
+from ....inventory.models import Receipt as ReceiptModel
+from ....inventory.stock_management import complete_receipt
+from ....permission.enums import ProductPermissions
+from ...core import ResolveInfo
+from...core.doc_category import DOC_CATEGORY_PRODUCTS
+from ...core.mutations import BaseMutation
+from ...core.types import ReceiptError
+from ...core.utils import from_global_id_or_error
+from ...plugins.dataloaders import get_plugin_manager_promise
+from ..types import Receipt
+from ..types.purchase_order import PurchaseOrderItemAdjustment
+
+
+class ReceiptComplete(BaseMutation):
+    """Complete a receipt and process any discrepancies."""
+
+    receipt = graphene.Field(
+        Receipt,
+        description="The completed receipt.",
+    )
+    adjustments_created = graphene.List(
+        graphene.NonNull(PurchaseOrderItemAdjustment),
+        description="Adjustments that were automatically processed.",
+        required=True,
+    )
+    adjustments_pending = graphene.List(
+        graphene.NonNull(PurchaseOrderItemAdjustment),
+        description="Adjustments requiring manual review.",
+        required=True,
+    )
+    discrepancies = graphene.Int(
+        description="Number of items with discrepancies.",
+        required=True,
+    )
+
+    class Arguments:
+        receipt_id = graphene.ID(
+            required=True,
+            description="ID of the receipt to complete.",
+        )
+
+    class Meta:
+        description = (
+            "Complete a goods receipt. Automatically creates adjustments for "
+            "discrepancies between ordered and received quantities."
+        )
+        permissions = (ProductPermissions.MANAGE_PRODUCTS,)
+        error_type_class = ReceiptError
+        error_type_field = "receipt_errors"
+        doc_category = DOC_CATEGORY_PRODUCTS
+
+    @classmethod
+    def perform_mutation(cls, root, info: ResolveInfo, /, **data):
+        receipt_id = data["receipt_id"]
+
+        # Get receipt
+        _, receipt_pk = from_global_id_or_error(receipt_id, "Receipt")
+        try:
+            receipt = ReceiptModel.objects.get(pk=receipt_pk)
+        except ReceiptModel.DoesNotExist:
+            raise ValidationError(
+                {
+                    "receipt_id": ValidationError(
+                        "Receipt not found.",
+                        code=ReceiptErrorCode.NOT_FOUND.value,
+                    )
+                }
+            )
+
+        # Get plugin manager for notifications
+        manager = get_plugin_manager_promise(info.context).get()
+
+        # Complete receipt
+        try:
+            result = complete_receipt(
+                receipt=receipt,
+                user=info.context.user,
+                manager=manager,
+            )
+        except ValueError as e:
+            raise ValidationError(
+                {
+                    "receipt_id": ValidationError(
+                        str(e),
+                        code=ReceiptErrorCode.INVALID.value,
+                    )
+                }
+            )
+
+        return ReceiptComplete(
+            receipt=result["receipt"],
+            adjustments_created=result["adjustments_created"],
+            adjustments_pending=result["adjustments_pending"],
+            discrepancies=result["discrepancies"],
+        )

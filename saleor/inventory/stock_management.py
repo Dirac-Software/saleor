@@ -6,8 +6,15 @@ from django.utils import timezone
 from ..core.exceptions import InsufficientStock
 from ..warehouse.models import Stock
 from . import PurchaseOrderItemStatus
-from .exceptions import InvalidPurchaseOrderItemStatus
-from .models import PurchaseOrderItem
+from .exceptions import (
+    AdjustmentAffectsConfirmedOrders,
+    AdjustmentAffectsFulfilledOrders,
+    AdjustmentAlreadyProcessed,
+    InvalidPurchaseOrderItemStatus,
+    ReceiptLineNotInProgress,
+    ReceiptNotInProgress,
+)
+from .models import PurchaseOrderItem, PurchaseOrderItemAdjustment
 
 
 @transaction.atomic
@@ -162,36 +169,450 @@ def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
     return source
 
 
+#TODO: this needs work on refunding orders
 @transaction.atomic
-def receive_purchase_order_item(
-    purchase_order_item: PurchaseOrderItem, actual_quantity: int
+def process_adjustment(
+    adjustment: PurchaseOrderItemAdjustment,
+    user=None,
+    app=None,
+    manager=None,
 ):
-    """Record receipt of goods from shipment arrival.
+    """Process a PurchaseOrderItemAdjustment and update stock.
 
-    Updates quantity_received and handles shortages if actual < ordered.
+    Handles inventory discrepancies by adjusting stock and POI quantities.
+    For negative adjustments, deallocates from unpaid orders if stock is allocated.
 
-    Shortage handling is a pain because we may have confirmed some orders!
-    The possible outcomes:
-    1. the good: we can handle the shortage by simply removing from unused quantity (unlikely as
-    we are dropshippers and
-    we dont tend to buy unpromised stock)
-    2. the bad: we have to unconfirm some orders that have not been paid for due to
-    shortage.
-    3. the ugly: we have to refund some orders that have been paid due to the shortage
+    Args:
+        adjustment: PurchaseOrderItemAdjustment instance to process
+        user: User processing the adjustment (optional)
+        app: App processing the adjustment (optional)
+        manager: PluginsManager for webhooks (optional)
 
+    For positive adjustments (gains):
+        - Increases stock.quantity
+        - Increases POI.quantity_received
+        - Makes stock available for new allocations
 
+    For negative adjustments (losses):
+        - Decreases stock.quantity
+        - Decreases POI.quantity_received
+        - Deallocates from affected unpaid orders
+        - Unconfirms orders that lose all their sources
+
+    Raises:
+        AdjustmentAlreadyProcessed: If adjustment already processed
+        AdjustmentAffectsFulfilledOrders: If affects UNFULFILLED orders (locked, not editable)
+        AdjustmentAffectsPaidOrders: If negative adjustment affects fully paid orders
+        InsufficientStock: If loss exceeds total physical stock in warehouse
+
+    UNFULFILLED orders require manual resolution (cannot be edited via standard flow) -
+    we will kick this back for now
     """
-    if purchase_order_item.status != PurchaseOrderItemStatus.CONFIRMED:
-        raise InvalidPurchaseOrderItemStatus(
-            purchase_order_item, PurchaseOrderItemStatus.CONFIRMED
+    from ..order import OrderStatus
+    from ..warehouse.management import can_confirm_order, deallocate_sources
+    from ..warehouse.models import AllocationSource
+
+    if adjustment.processed_at is not None:
+        raise AdjustmentAlreadyProcessed(adjustment)
+
+    poi = adjustment.purchase_order_item
+    quantity_change = adjustment.quantity_change
+
+    # Get stock with lock
+    stock = Stock.objects.select_for_update().get(
+        warehouse=poi.order.destination_warehouse,
+        product_variant=poi.product_variant,
+    )
+
+    # Handle positive adjustment (gain)
+    if quantity_change > 0:
+        stock.quantity += quantity_change
+        stock.save(update_fields=["quantity"])
+
+        poi.quantity_received += quantity_change
+        poi.save(update_fields=["quantity_received"])
+
+    # Handle negative adjustment (loss)
+    elif quantity_change < 0:
+        loss = abs(quantity_change)
+
+        # stock.quantity is live stock so if we don't have enough live stock how the
+        # hell did we lose more than we ever had?
+        if stock.quantity < loss:
+            raise InsufficientStock(
+                [
+                    {
+                        "warehouse": stock.warehouse.name,
+                        "variant": stock.product_variant.sku,
+                        "available_quantity": stock.quantity,
+                        "quantity_allocated": stock.quantity_allocated,
+                        "requested": loss,
+                    }
+                ]
+            )
+
+        # Find allocations sourced from this POI batch
+        affected_sources = (
+            AllocationSource.objects.select_for_update()
+            .select_related("allocation__order_line__order")
+            .filter(purchase_order_item=poi)
         )
 
-    purchase_order_item.quantity_received = actual_quantity
-    purchase_order_item.status = PurchaseOrderItemStatus.RECEIVED
-    purchase_order_item.save(update_fields=["quantity_received", "status"])
+        # Check order statuses and payment
+        unfulfilled_orders_affected = []
+        paid_orders_affected = []
+        unconfirmed_sources = []
 
-    # TODO: Handle shortage if actual_quantity < purchase_order_item.quantity_ordered
-    if actual_quantity < purchase_order_item.quantity_ordered:
-        # shortage = purchase_order_item.quantity_ordered - actual_quantity
-        # _handle_shortage(purchase_order_item, shortage)
-        pass
+        for source in affected_sources:
+            order = source.allocation.order_line.order
+
+            # Check if UNFULFILLED (locked, can't edit)
+            if order.status == OrderStatus.UNFULFILLED:
+                unfulfilled_orders_affected.append(order.number)
+
+            # Check if fully paid
+            elif order.is_fully_paid():
+                paid_orders_affected.append(order.number)
+
+            # UNCONFIRMED and not fully paid - we can handle this
+            else:
+                unconfirmed_sources.append(source)
+
+        # Reject if UNFULFILLED orders are affected
+        # These are locked and cannot be edited automatically
+        if unfulfilled_orders_affected:
+            raise AdjustmentAffectsFulfilledOrders(
+                adjustment, unfulfilled_orders_affected
+            )
+
+        # Reject if fully paid orders are affected
+        # TODO: Implement refund workflow
+        if paid_orders_affected:
+            raise AdjustmentAffectsPaidOrders(adjustment, paid_orders_affected)
+
+        # Deallocate from UNCONFIRMED, unpaid orders
+        orders_to_check = set()
+        for source in unconfirmed_sources:
+            allocation = source.allocation
+            order = allocation.order_line.order
+            quantity_to_deallocate = min(source.quantity, loss)
+
+            # Deallocate sources (removes AllocationSource, restores POI.quantity_allocated)
+            deallocate_sources(allocation, quantity_to_deallocate)
+
+            # Track unconfirmed orders for status check
+            if order.status == OrderStatus.UNCONFIRMED:
+                orders_to_check.add(order)
+
+            # Reduce allocation quantity
+            allocation.quantity_allocated -= quantity_to_deallocate
+            if allocation.quantity_allocated == 0:
+                allocation.delete()
+            else:
+                allocation.save(update_fields=["quantity_allocated"])
+
+            # Update stock quantity_allocated
+            stock.quantity_allocated -= quantity_to_deallocate
+
+        # Decrease physical stock
+        stock.quantity -= loss
+        stock.save(update_fields=["quantity", "quantity_allocated"])
+
+        # Decrease POI quantity
+        poi.quantity_received -= loss
+        poi.save(update_fields=["quantity_received"])
+
+        # Unconfirm orders that lost all their sources
+        for order in orders_to_check:
+            if not can_confirm_order(order):
+                order.status = OrderStatus.DRAFT
+                order.save(update_fields=["status", "updated_at"])
+
+    # Mark adjustment as processed
+    adjustment.processed_at = timezone.now()
+    adjustment.save(update_fields=["processed_at"])
+
+    return adjustment
+
+
+# Receipt workflow functions
+
+
+@transaction.atomic
+def start_receipt(shipment, user=None):
+    """Create a new Receipt for receiving an inbound shipment.
+
+    Args:
+        shipment: Shipment being received
+        user: User starting the receipt (warehouse staff)
+
+    Returns:
+        Receipt instance
+
+    Raises:
+        ValueError: If shipment already has a receipt or is already received
+    """
+    from .models import Receipt
+
+    if shipment.arrived_at is not None:
+        raise ValueError(f"Shipment {shipment.id} already marked as received")
+
+    if hasattr(shipment, "receipt"):
+        existing = shipment.receipt
+        if existing.status == "in_progress":
+            return existing
+        raise ValueError(f"Shipment {shipment.id} already has a receipt")
+
+    receipt = Receipt.objects.create(
+        shipment=shipment,
+        created_by=user,
+    )
+
+    return receipt
+
+
+@transaction.atomic
+def receive_item(receipt, product_variant, quantity, user=None, notes=""):
+    """Add a received item to a receipt.
+
+    Scans/records an item during receiving. Updates POI.quantity_received
+    and creates a ReceiptLine for audit trail.
+
+    Args:
+        receipt: Receipt to add item to
+        product_variant: ProductVariant being received
+        quantity: Quantity received
+        user: User who scanned/recorded the item
+        notes: Optional notes about this specific item
+
+    Returns:
+        ReceiptLine instance
+
+    Raises:
+        ReceiptNotInProgress: If receipt is not in progress
+        ValueError: If variant not in shipment
+    """
+    from . import ReceiptStatus
+    from .models import ReceiptLine
+
+    if receipt.status != ReceiptStatus.IN_PROGRESS:
+        raise ReceiptNotInProgress(receipt)
+
+    try:
+        poi = PurchaseOrderItem.objects.select_for_update().get(
+            shipment=receipt.shipment,
+            product_variant=product_variant,
+        )
+    except PurchaseOrderItem.DoesNotExist:
+        raise ValueError(
+            f"Product variant {product_variant.sku} not found in "
+            f"shipment {receipt.shipment.id}"
+        )
+
+    # Update POI quantity_received
+    poi.quantity_received += quantity
+    poi.save(update_fields=["quantity_received", "updated_at"])
+
+    # Create receipt line for audit trail
+    receipt_line = ReceiptLine.objects.create(
+        receipt=receipt,
+        purchase_order_item=poi,
+        quantity_received=quantity,
+        received_by=user,
+        notes=notes,
+    )
+
+    return receipt_line
+
+
+@transaction.atomic
+def complete_receipt(receipt, user=None, manager=None):
+    """Complete a receipt and process any discrepancies.
+
+    Finalizes the receiving process:
+    1. Compares quantity_received vs quantity_ordered for each POI
+    2. Creates PurchaseOrderItemAdjustments for discrepancies
+    3. Processes adjustments (updates stock, handles allocations)
+    4. Marks shipment as arrived
+    5. Updates POI status to RECEIVED
+    6. Marks receipt as completed
+
+    If adjustments affect confirmed orders, creates the adjustments but
+    doesn't process them immediately. Instead, emails staff to manually
+    process them.
+
+    Args:
+        receipt: Receipt to complete
+        user: User completing the receipt
+        manager: PluginsManager for sending notifications (optional)
+
+    Returns:
+        dict with summary: {
+            'receipt': Receipt,
+            'adjustments_created': [PurchaseOrderItemAdjustment, ...],
+            'adjustments_pending': [PurchaseOrderItemAdjustment, ...],
+            'items_received': int,
+            'discrepancies': int,
+        }
+
+    Raises:
+        ValueError: If receipt is not in progress
+    """
+    from ..core.notify import AdminNotifyEvent, NotifyHandler
+    from . import PurchaseOrderItemAdjustmentReason, PurchaseOrderItemStatus, ReceiptStatus
+    from .exceptions import AdjustmentAffectsConfirmedOrders
+    from .models import PurchaseOrderItemAdjustment
+
+    # Validate receipt status
+    if receipt.status != ReceiptStatus.IN_PROGRESS:
+        raise ValueError(f"Receipt {receipt.id} is not in progress")
+
+    shipment = receipt.shipment
+    pois = PurchaseOrderItem.objects.select_for_update().filter(
+        shipment=shipment
+    )
+
+    adjustments_created = []
+    adjustments_pending = []
+    discrepancies = 0
+
+    # Check each POI for discrepancies
+    for poi in pois:
+        discrepancy = poi.quantity_received - poi.quantity_ordered
+
+        if discrepancy != 0:
+            discrepancies += 1
+
+            # Determine reason and whether it affects payable
+            if discrepancy < 0:
+                # Delivery short - supplier should credit us
+                reason = PurchaseOrderItemAdjustmentReason.DELIVERY_SHORT
+                affects_payable = True
+            else:
+                # Received more than ordered - rare but possible
+                reason = PurchaseOrderItemAdjustmentReason.CYCLE_COUNT_POSITIVE
+                affects_payable = False
+
+            # Create adjustment
+            adjustment = PurchaseOrderItemAdjustment.objects.create(
+                purchase_order_item=poi,
+                quantity_change=discrepancy,
+                reason=reason,
+                affects_payable=affects_payable,
+                notes=f"Auto-created during receipt completion (Receipt #{receipt.id})",
+                created_by=user,
+            )
+
+            # Try to process the adjustment immediately
+            try:
+                process_adjustment(adjustment, user=user)
+                adjustments_created.append(adjustment)
+            except AdjustmentAffectsConfirmedOrders:
+                # Can't auto-process - affects confirmed orders
+                # Leave unprocessed and notify staff
+                adjustments_pending.append(adjustment)
+
+        # Update POI status to RECEIVED
+        poi.status = PurchaseOrderItemStatus.RECEIVED
+        poi.save(update_fields=["status", "updated_at"])
+
+    # Mark shipment as arrived
+    if shipment.arrived_at is None:
+        shipment.arrived_at = timezone.now()
+        shipment.save(update_fields=["arrived_at"])
+
+    # Complete the receipt
+    receipt.status = ReceiptStatus.COMPLETED
+    receipt.completed_at = timezone.now()
+    receipt.completed_by = user
+    receipt.save(update_fields=["status", "completed_at", "completed_by"])
+
+    # If there are pending adjustments, notify staff
+    if adjustments_pending and manager:
+        def generate_payload():
+            return {
+                "receipt_id": receipt.id,
+                "shipment_id": shipment.id,
+                "count": len(adjustments_pending),
+                "adjustments": [
+                    {
+                        "id": adj.id,
+                        "poi_id": adj.purchase_order_item.id,
+                        "variant_sku": adj.purchase_order_item.product_variant.sku,
+                        "quantity_change": adj.quantity_change,
+                        "reason": adj.get_reason_display(),
+                    }
+                    for adj in adjustments_pending
+                ],
+            }
+
+        handler = NotifyHandler(generate_payload)
+        manager.notify(
+            AdminNotifyEvent.PENDING_ADJUSTMENTS,
+            payload_func=handler.payload,
+        )
+
+    return {
+        "receipt": receipt,
+        "adjustments_created": adjustments_created,
+        "adjustments_pending": adjustments_pending,
+        "items_received": len(pois),
+        "discrepancies": discrepancies,
+    }
+
+
+@transaction.atomic
+def delete_receipt(receipt):
+    """Delete a draft receipt and revert any quantity updates.
+
+    Only allows deleting receipts that are still IN_PROGRESS.
+    Reverts POI.quantity_received for all items in the receipt.
+
+    Args:
+        receipt: Receipt to delete
+
+    Raises:
+        ReceiptNotInProgress: If receipt is already completed
+    """
+    from . import ReceiptStatus
+
+    # Only allow deleting in-progress receipts
+    if receipt.status != ReceiptStatus.IN_PROGRESS:
+        raise ReceiptNotInProgress(receipt)
+
+    # Revert POI.quantity_received for all receipt lines
+    for line in receipt.lines.select_related("purchase_order_item"):
+        poi = line.purchase_order_item
+        poi.quantity_received -= line.quantity_received
+        poi.save(update_fields=["quantity_received", "updated_at"])
+
+    # Delete the receipt (cascade will delete lines)
+    receipt.delete()
+
+
+@transaction.atomic
+def delete_receipt_line(receipt_line):
+    """Delete a receipt line and revert quantity update.
+
+    Use when an item was scanned by mistake during receiving.
+    Only works if receipt is still IN_PROGRESS.
+
+    Args:
+        receipt_line: ReceiptLine to delete
+
+    Raises:
+        ReceiptLineNotInProgress: If receipt is not in progress
+    """
+    from . import ReceiptStatus
+
+    # Only allow deleting lines from in-progress receipts
+    if receipt_line.receipt.status != ReceiptStatus.IN_PROGRESS:
+        raise ReceiptLineNotInProgress(receipt_line)
+
+    # Revert POI quantity
+    poi = receipt_line.purchase_order_item
+    poi.quantity_received -= receipt_line.quantity_received
+    poi.save(update_fields=["quantity_received", "updated_at"])
+
+    # Delete the line
+    receipt_line.delete()

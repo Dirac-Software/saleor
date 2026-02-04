@@ -2181,6 +2181,28 @@ class PluginsManager(PaymentInterface):
 
     # Note: this method is deprecated and will be removed in a future release.
     # Webhook-related functionality will be moved from plugin to core modules.
+    def purchase_order_created(self, purchase_order: "PurchaseOrder"):
+        default_value = None
+        return self.__run_method_on_plugins(
+            "purchase_order_created",
+            default_value,
+            purchase_order,
+            channel_slug=None,
+        )
+
+    # Note: this method is deprecated and will be removed in a future release.
+    # Webhook-related functionality will be moved from plugin to core modules.
+    def purchase_order_confirmed(self, purchase_order: "PurchaseOrder"):
+        default_value = None
+        return self.__run_method_on_plugins(
+            "purchase_order_confirmed",
+            default_value,
+            purchase_order,
+            channel_slug=None,
+        )
+
+    # Note: this method is deprecated and will be removed in a future release.
+    # Webhook-related functionality will be moved from plugin to core modules.
     def warehouse_updated(self, warehouse: "Warehouse"):
         default_value = None
         return self.__run_method_on_plugins(

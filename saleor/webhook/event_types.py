@@ -187,6 +187,9 @@ class WebhookEventAsyncType:
     WAREHOUSE_DELETED = "warehouse_deleted"
     WAREHOUSE_METADATA_UPDATED = "warehouse_metadata_updated"
 
+    PURCHASE_ORDER_CREATED = "purchase_order_created"
+    PURCHASE_ORDER_CONFIRMED = "purchase_order_confirmed"
+
     VOUCHER_CREATED = "voucher_created"
     VOUCHER_UPDATED = "voucher_updated"
     VOUCHER_DELETED = "voucher_deleted"
@@ -730,6 +733,14 @@ class WebhookEventAsyncType:
         },
         WAREHOUSE_METADATA_UPDATED: {
             "name": "Warehouse metadata updated",
+            "permission": ProductPermissions.MANAGE_PRODUCTS,
+        },
+        PURCHASE_ORDER_CREATED: {
+            "name": "Purchase order created",
+            "permission": ProductPermissions.MANAGE_PRODUCTS,
+        },
+        PURCHASE_ORDER_CONFIRMED: {
+            "name": "Purchase order confirmed",
             "permission": ProductPermissions.MANAGE_PRODUCTS,
         },
         VOUCHER_CREATED: {

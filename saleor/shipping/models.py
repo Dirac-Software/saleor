@@ -383,10 +383,6 @@ class Shipment(models.Model):
     shipping_cost = MoneyField(
         amount_field="shipping_cost_amount", currency_field="currency"
     )
-    # reclaimed. Can we assume it is always reclaimed?
-    shipping_cost_vat = MoneyField(
-        amount_field="shipping_cost_vat_amount", currency_field="currency"
-    )
 
     # instead of using a duties invoice we can get these from the unit price, hs code on
     # a ProductVariant and the shipment source and destination.

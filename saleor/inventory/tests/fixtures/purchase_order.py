@@ -6,6 +6,20 @@ from ...models import PurchaseOrder, PurchaseOrderItem
 
 
 @pytest.fixture
+def shipment(nonowned_warehouse, owned_warehouse):
+    """Create a shipment for testing receipts."""
+    from ....shipping.models import Shipment
+
+    return Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        tracking_number="TEST-SHIPMENT",
+        shipping_cost_amount=100.00,
+        currency="USD",
+    )
+
+
+@pytest.fixture
 def purchase_order(nonowned_warehouse, owned_warehouse):
     """PurchaseOrder moving stock from supplier to owned warehouse."""
     return PurchaseOrder.objects.create(
@@ -15,17 +29,8 @@ def purchase_order(nonowned_warehouse, owned_warehouse):
 
 
 @pytest.fixture
-def purchase_order_item(purchase_order, variant):
+def purchase_order_item(purchase_order, variant, shipment):
     """Create confirmed POI with quantity available for allocation."""
-    # Need to create a shipment for the FK
-    from ....shipping.models import Shipment
-
-    shipment = Shipment.objects.create(
-        source=purchase_order.source_warehouse.address,
-        destination=purchase_order.destination_warehouse.address,
-        tracking_number="TEST-123",
-    )
-
     return PurchaseOrderItem.objects.create(
         order=purchase_order,
         product_variant=variant,

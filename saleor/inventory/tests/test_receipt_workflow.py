@@ -1,0 +1,363 @@
+"""Tests for receipt workflow (start_receipt, receive_item, complete_receipt, etc)."""
+
+import pytest
+from django.utils import timezone
+
+from ..exceptions import (
+    ReceiptLineNotInProgress,
+    ReceiptNotInProgress,
+)
+from ..stock_management import (
+    complete_receipt,
+    delete_receipt,
+    delete_receipt_line,
+    receive_item,
+    start_receipt,
+)
+from .. import ReceiptStatus
+
+
+class TestStartReceipt:
+    """Tests for start_receipt function."""
+
+    def test_creates_receipt_successfully(self, shipment, staff_user):
+        # given: a shipment without a receipt
+        # when: starting a receipt
+        receipt = start_receipt(shipment, user=staff_user)
+
+        # then: receipt is created with correct status
+        assert receipt.shipment == shipment
+        assert receipt.status == ReceiptStatus.IN_PROGRESS
+        assert receipt.created_by == staff_user
+        assert receipt.created_at is not None
+        assert receipt.completed_at is None
+
+    def test_resumes_existing_in_progress_receipt(self, shipment, staff_user):
+        # given: a shipment with an in-progress receipt
+        existing_receipt = start_receipt(shipment, user=staff_user)
+
+        # when: starting another receipt for same shipment
+        receipt = start_receipt(shipment, user=staff_user)
+
+        # then: returns the existing receipt
+        assert receipt.id == existing_receipt.id
+        assert receipt.status == ReceiptStatus.IN_PROGRESS
+
+    def test_error_when_shipment_already_received(self, shipment, staff_user):
+        # given: a shipment that has already been received
+        shipment.arrived_at = timezone.now()
+        shipment.save()
+
+        # when/then: starting a receipt raises error
+        with pytest.raises(ValueError, match="already marked as received"):
+            start_receipt(shipment, user=staff_user)
+
+    def test_error_when_shipment_has_completed_receipt(
+        self, shipment, staff_user, receipt_factory
+    ):
+        # given: a shipment with a completed receipt
+        receipt_factory(shipment=shipment, status=ReceiptStatus.COMPLETED)
+
+        # when/then: starting a new receipt raises error
+        with pytest.raises(ValueError, match="already has a receipt"):
+            start_receipt(shipment, user=staff_user)
+
+
+class TestReceiveItem:
+    """Tests for receive_item function."""
+
+    def test_receives_item_successfully(
+        self, receipt, purchase_order_item, product_variant, staff_user
+    ):
+        # given: an in-progress receipt and a POI with 0 received
+        assert purchase_order_item.quantity_received == 0
+
+        # when: receiving an item
+        line = receive_item(
+            receipt, product_variant, quantity=50, user=staff_user, notes="Test"
+        )
+
+        # then: ReceiptLine created and POI updated
+        assert line.receipt == receipt
+        assert line.purchase_order_item == purchase_order_item
+        assert line.quantity_received == 50
+        assert line.received_by == staff_user
+        assert line.notes == "Test"
+
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 50
+
+    def test_multiple_scans_increment_quantity(
+        self, receipt, purchase_order_item, product_variant, staff_user
+    ):
+        # given: a POI that we scan multiple times
+        receive_item(receipt, product_variant, quantity=30, user=staff_user)
+
+        # when: scanning the same item again
+        receive_item(receipt, product_variant, quantity=20, user=staff_user)
+
+        # then: quantity_received is cumulative
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 50
+
+        # and: two separate receipt lines exist
+        assert receipt.lines.count() == 2
+
+    def test_error_when_receipt_not_in_progress(
+        self, receipt, product_variant, staff_user
+    ):
+        # given: a completed receipt
+        receipt.status = ReceiptStatus.COMPLETED
+        receipt.save()
+
+        # when/then: trying to receive items raises error
+        with pytest.raises(ReceiptNotInProgress):
+            receive_item(receipt, product_variant, quantity=10, user=staff_user)
+
+    def test_error_when_variant_not_in_shipment(
+        self, receipt, product_variant_factory, staff_user
+    ):
+        # given: a variant that is not part of this shipment
+        other_variant = product_variant_factory()
+
+        # when/then: trying to receive it raises error
+        with pytest.raises(ValueError, match="not found in shipment"):
+            receive_item(receipt, other_variant, quantity=10, user=staff_user)
+
+    def test_audit_trail_captured(self, receipt, product_variant, staff_user):
+        # given/when: receiving an item
+        before = timezone.now()
+        line = receive_item(receipt, product_variant, quantity=10, user=staff_user)
+        after = timezone.now()
+
+        # then: audit fields are populated
+        assert line.received_by == staff_user
+        assert before <= line.received_at <= after
+
+
+class TestCompleteReceipt:
+    """Tests for complete_receipt function."""
+
+    def test_completes_receipt_with_no_discrepancies(
+        self, receipt, purchase_order_item, staff_user
+    ):
+        # given: a receipt where received == ordered
+        purchase_order_item.quantity_ordered = 100
+        purchase_order_item.quantity_received = 100
+        purchase_order_item.save()
+
+        # when: completing the receipt
+        result = complete_receipt(receipt, user=staff_user)
+
+        # then: no adjustments created
+        assert result["discrepancies"] == 0
+        assert len(result["adjustments_created"]) == 0
+        assert len(result["adjustments_pending"]) == 0
+
+        # and: receipt is completed
+        receipt.refresh_from_db()
+        assert receipt.status == ReceiptStatus.COMPLETED
+        assert receipt.completed_at is not None
+        assert receipt.completed_by == staff_user
+
+        # and: POI status updated
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.status == "received"
+
+        # and: shipment marked arrived
+        assert receipt.shipment.arrived_at is not None
+
+    def test_creates_adjustment_for_delivery_short(
+        self, receipt, purchase_order_item, staff_user
+    ):
+        # given: received less than ordered
+        purchase_order_item.quantity_ordered = 100
+        purchase_order_item.quantity_received = 98
+        purchase_order_item.save()
+
+        # when: completing the receipt
+        result = complete_receipt(receipt, user=staff_user)
+
+        # then: adjustment created for shortage
+        assert result["discrepancies"] == 1
+        assert len(result["adjustments_created"]) == 1
+
+        adjustment = result["adjustments_created"][0]
+        assert adjustment.quantity_change == -2
+        assert adjustment.reason == "delivery_short"
+        assert adjustment.affects_payable is True
+        assert adjustment.processed_at is not None  # Auto-processed
+
+    def test_creates_adjustment_for_overage(
+        self, receipt, purchase_order_item, staff_user
+    ):
+        # given: received more than ordered
+        purchase_order_item.quantity_ordered = 100
+        purchase_order_item.quantity_received = 105
+        purchase_order_item.save()
+
+        # when: completing the receipt
+        result = complete_receipt(receipt, user=staff_user)
+
+        # then: adjustment created for overage
+        assert result["discrepancies"] == 1
+        adjustment = result["adjustments_created"][0]
+        assert adjustment.quantity_change == 5
+        assert adjustment.reason == "cycle_count_pos"
+        assert adjustment.affects_payable is False
+
+    def test_handles_adjustment_affecting_confirmed_orders(
+        self, receipt, purchase_order_item, staff_user, mocker
+    ):
+        # given: a shortage that would affect confirmed orders
+        purchase_order_item.quantity_ordered = 100
+        purchase_order_item.quantity_received = 90
+        purchase_order_item.save()
+
+        # and: process_adjustment will raise AdjustmentAffectsConfirmedOrders
+        from ...inventory.exceptions import AdjustmentAffectsConfirmedOrders
+
+        mock_process = mocker.patch(
+            "saleor.inventory.stock_management.process_adjustment",
+            side_effect=AdjustmentAffectsConfirmedOrders(
+                adjustment=mocker.Mock(), order_numbers=[1234]
+            ),
+        )
+
+        # when: completing the receipt
+        result = complete_receipt(receipt, user=staff_user)
+
+        # then: adjustment created but NOT processed
+        assert result["discrepancies"] == 1
+        assert len(result["adjustments_pending"]) == 1
+        assert len(result["adjustments_created"]) == 0
+
+        adjustment = result["adjustments_pending"][0]
+        assert adjustment.processed_at is None
+
+    def test_sends_notification_for_pending_adjustments(
+        self, receipt, purchase_order_item, staff_user, mocker
+    ):
+        # given: a shortage affecting confirmed orders
+        purchase_order_item.quantity_ordered = 100
+        purchase_order_item.quantity_received = 90
+        purchase_order_item.save()
+
+        from ...inventory.exceptions import AdjustmentAffectsConfirmedOrders
+
+        mocker.patch(
+            "saleor.inventory.stock_management.process_adjustment",
+            side_effect=AdjustmentAffectsConfirmedOrders(
+                adjustment=mocker.Mock(), order_numbers=[1234]
+            ),
+        )
+
+        # and: a plugin manager
+        mock_manager = mocker.Mock()
+
+        # when: completing the receipt
+        complete_receipt(receipt, user=staff_user, manager=mock_manager)
+
+        # then: notification sent
+        mock_manager.notify.assert_called_once()
+        call_args = mock_manager.notify.call_args
+        assert call_args[0][0] == "pending_adjustments"
+
+    def test_error_when_receipt_not_in_progress(self, receipt, staff_user):
+        # given: a completed receipt
+        receipt.status = ReceiptStatus.COMPLETED
+        receipt.save()
+
+        # when/then: trying to complete again raises error
+        with pytest.raises(ValueError, match="not in progress"):
+            complete_receipt(receipt, user=staff_user)
+
+
+class TestDeleteReceipt:
+    """Tests for delete_receipt function."""
+
+    def test_deletes_receipt_and_reverts_quantities(
+        self, receipt, purchase_order_item, product_variant, staff_user
+    ):
+        # given: a receipt with received items
+        receive_item(receipt, product_variant, quantity=50, user=staff_user)
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 50
+
+        # when: deleting the receipt
+        delete_receipt(receipt)
+
+        # then: receipt is deleted
+        from ...inventory.models import Receipt
+
+        assert not Receipt.objects.filter(id=receipt.id).exists()
+
+        # and: POI quantity reverted
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 0
+
+    def test_error_when_receipt_completed(self, receipt, staff_user):
+        # given: a completed receipt
+        receipt.status = ReceiptStatus.COMPLETED
+        receipt.save()
+
+        # when/then: deleting raises error
+        with pytest.raises(ReceiptNotInProgress):
+            delete_receipt(receipt)
+
+
+class TestDeleteReceiptLine:
+    """Tests for delete_receipt_line function."""
+
+    def test_deletes_line_and_reverts_quantity(
+        self, receipt, purchase_order_item, product_variant, staff_user
+    ):
+        # given: a receipt line
+        line = receive_item(receipt, product_variant, quantity=50, user=staff_user)
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 50
+
+        # when: deleting the line
+        delete_receipt_line(line)
+
+        # then: line is deleted
+        from ...inventory.models import ReceiptLine
+
+        assert not ReceiptLine.objects.filter(id=line.id).exists()
+
+        # and: POI quantity reverted
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 0
+
+    def test_only_reverts_deleted_line_quantity(
+        self, receipt, purchase_order_item, product_variant, staff_user
+    ):
+        # given: multiple lines for same POI
+        line1 = receive_item(receipt, product_variant, quantity=30, user=staff_user)
+        line2 = receive_item(receipt, product_variant, quantity=20, user=staff_user)
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 50
+
+        # when: deleting only line1
+        delete_receipt_line(line1)
+
+        # then: only line1's quantity reverted
+        purchase_order_item.refresh_from_db()
+        assert purchase_order_item.quantity_received == 20
+
+        # and: line2 still exists
+        from ...inventory.models import ReceiptLine
+
+        assert ReceiptLine.objects.filter(id=line2.id).exists()
+
+    def test_error_when_receipt_completed(
+        self, receipt, product_variant, staff_user
+    ):
+        # given: a line from a completed receipt
+        line = receive_item(receipt, product_variant, quantity=50, user=staff_user)
+        receipt.status = ReceiptStatus.COMPLETED
+        receipt.save()
+
+        # when/then: deleting the line raises error
+        with pytest.raises(ReceiptLineNotInProgress):
+            delete_receipt_line(line)

@@ -62,6 +62,7 @@ class AdminNotifyEvent:
     CSV_EXPORT_FAILED = "csv_export_failed"
     STAFF_ORDER_CONFIRMATION = "staff_order_confirmation"
     CONTACT_FORM_SUBMISSION = "contact_form_submission"
+    PENDING_ADJUSTMENTS = "pending_adjustments"
 
     CHOICES = [
         ACCOUNT_SET_STAFF_PASSWORD,
@@ -70,6 +71,7 @@ class AdminNotifyEvent:
         STAFF_ORDER_CONFIRMATION,
         ACCOUNT_STAFF_RESET_PASSWORD,
         CONTACT_FORM_SUBMISSION,
+        PENDING_ADJUSTMENTS,
     ]
 
 
