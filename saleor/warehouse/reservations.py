@@ -110,7 +110,14 @@ def reserve_stocks(
         stock_qs_select_for_update()
         .get_variants_stocks_for_country(country_code, channel.slug, variants)
         .order_by("pk")
-        .values("id", "product_variant", "pk", "quantity", "warehouse_id")
+        .values(
+            "id",
+            "product_variant",
+            "pk",
+            "quantity",
+            "warehouse_id",
+            "warehouse__is_owned",
+        )
     )
     stocks_id = [stock.pop("id") for stock in stocks]
 

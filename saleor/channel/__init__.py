@@ -1,10 +1,14 @@
 class AllocationStrategy:
     """Determine the allocation strategy for the channel.
 
+    Both strategies prioritize owned warehouses (is_owned=True) over non-owned
+    warehouses (suppliers) to ensure proper batch tracking via PurchaseOrderItems.
+
     PRIORITIZE_SORTING_ORDER - allocate stocks according to the warehouses' order
-    within the channel
+    within the channel (owned warehouses first, then non-owned by sorting order)
 
     PRIORITIZE_HIGH_STOCK - allocate stock in a warehouse with the most stock
+    (owned warehouses first sorted by quantity, then non-owned by quantity)
     """
 
     PRIORITIZE_SORTING_ORDER = "prioritize-sorting-order"

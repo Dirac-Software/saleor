@@ -1,4 +1,5 @@
 import graphene
+
 from ...inventory import models
 from ..core import ResolveInfo
 from ..core.connection import CountableConnection
@@ -6,7 +7,6 @@ from ..core.doc_category import DOC_CATEGORY_PRODUCTS
 from ..core.types import ModelObjectType, Money
 from ..product.dataloaders import ProductVariantByIdLoader
 from ..warehouse.dataloaders import WarehouseByIdLoader
-from .enums import PurchaseOrderStateEnum
 
 
 class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
@@ -14,11 +14,7 @@ class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
     supplier_warehouse = graphene.Field(
         "saleor.graphql.warehouse.types.Warehouse",
         required=True,
-        description="Supplier warehouse (non-owned)."
-    )
-    state = PurchaseOrderStateEnum(
-        required=True,
-        description="Current state of the purchase order."
+        description="Supplier warehouse (non-owned).",
     )
     reference = graphene.String(description="Purchase order reference number.")
     order_date = graphene.Date(description="Date the order was placed.")
@@ -27,17 +23,16 @@ class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
     items = graphene.List(
         lambda: PurchaseOrderItem,
         required=True,
-        description="Items in this purchase order."
+        description="Items in this purchase order.",
     )
 
     pickings = graphene.List(
         "saleor.graphql.warehouse.types_picking.Picking",
-        description="Receipt pickings for this purchase order."
+        description="Receipt pickings for this purchase order.",
     )
 
     invoice = graphene.Field(
-        "saleor.graphql.invoice.types.Invoice",
-        description="Supplier invoice."
+        "saleor.graphql.invoice.types.Invoice", description="Supplier invoice."
     )
 
     created_at = graphene.DateTime(required=True)
@@ -62,31 +57,24 @@ class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
 
 
 class PurchaseOrderItem(ModelObjectType[models.PurchaseOrderItem]):
-    id = graphene.GlobalID(required=True, description="The ID of the purchase order item.")
+    id = graphene.GlobalID(
+        required=True, description="The ID of the purchase order item."
+    )
     purchase_order = graphene.Field(
-        PurchaseOrder,
-        required=True,
-        description="Parent purchase order."
+        PurchaseOrder, required=True, description="Parent purchase order."
     )
     product_variant = graphene.Field(
         "saleor.graphql.product.types.ProductVariant",
         required=True,
-        description="Product variant ordered."
+        description="Product variant ordered.",
     )
-    quantity_ordered = graphene.Int(
-        required=True,
-        description="Quantity ordered."
-    )
+    quantity_ordered = graphene.Int(required=True, description="Quantity ordered.")
 
     expected_unit_cost = graphene.Field(
-        Money,
-        required=True,
-        description="Expected unit cost from proforma."
+        Money, required=True, description="Expected unit cost from proforma."
     )
     expected_unit_cost_vat = graphene.Field(
-        Money,
-        required=True,
-        description="Expected unit cost VAT."
+        Money, required=True, description="Expected unit cost VAT."
     )
     expected_country_of_origin = graphene.String(
         description="Expected country of origin (ISO 2-letter code)."

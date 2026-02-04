@@ -1,6 +1,9 @@
 from unittest.mock import ANY, call, patch
 
 import graphene
+
+# Override order_unconfirmed to ensure it has lines
+import pytest
 from django.test import override_settings
 
 from .....core.models import EventDelivery
@@ -29,6 +32,15 @@ from .....webhook.utils import get_webhooks_for_multiple_events
 from ....core.utils import to_global_id_or_none
 from ....tests.utils import assert_no_permission, get_graphql_content
 
+
+@pytest.fixture
+def order_unconfirmed(order_with_lines):
+    """Order with lines in UNCONFIRMED status."""
+    order_with_lines.status = OrderStatus.UNCONFIRMED
+    order_with_lines.save(update_fields=["status"])
+    return order_with_lines
+
+
 ORDER_CONFIRM_MUTATION = """
     mutation orderConfirm($id: ID!) {
         orderConfirm(id: $id) {
@@ -42,6 +54,51 @@ ORDER_CONFIRM_MUTATION = """
         }
     }
 """
+
+
+def setup_order_with_allocation_sources(
+    order, owned_warehouse, channel, purchase_order_item
+):
+    """Set up order with allocations and sources for OrderConfirm tests."""
+    from .....order.fetch import OrderLineInfo
+    from .....plugins.manager import get_plugins_manager
+    from .....warehouse.management import allocate_stocks
+    from .....warehouse.models import Stock
+
+    order_line = order.lines.first()
+    if not order_line:
+        return
+
+    variant = order_line.variant
+
+    # Update POI to match the test's variant and warehouse
+    purchase_order_item.product_variant = variant
+    purchase_order_item.order.destination_warehouse = owned_warehouse
+    purchase_order_item.order.save(update_fields=["destination_warehouse"])
+
+    # Ensure POI has enough quantity for the order
+    needed_qty = order_line.quantity
+    if purchase_order_item.quantity_ordered < needed_qty:
+        purchase_order_item.quantity_ordered = needed_qty * 2  # Buffer
+    purchase_order_item.save(update_fields=["product_variant", "quantity_ordered"])
+
+    # Create stock in owned warehouse with enough quantity
+    stock, created = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 10000, "quantity_allocated": 0},
+    )
+    if not created:
+        stock.quantity = 10000
+        stock.save(update_fields=["quantity"])
+
+    # Allocate stocks (creates allocations and sources using the POI)
+    allocate_stocks(
+        [OrderLineInfo(line=order_line, variant=variant, quantity=order_line.quantity)],
+        "US",
+        channel,
+        manager=get_plugins_manager(allow_replica=False),
+    )
 
 
 @patch("saleor.order.actions.handle_fully_paid_order", wraps=handle_fully_paid_order)
@@ -65,8 +122,15 @@ def test_order_confirm(
     permission_group_manage_orders,
     payment_txn_preauth,
     site_settings,
+    owned_warehouse,
+    channel_USD,
+    purchase_order_item,
 ):
     # given
+    setup_order_with_allocation_sources(
+        order_unconfirmed, owned_warehouse, channel_USD, purchase_order_item
+    )
+
     webhook_event_map = get_webhooks_for_multiple_events(
         WEBHOOK_EVENTS_FOR_ORDER_CONFIRMED.union(WEBHOOK_EVENTS_FOR_ORDER_CHARGED)
     )
@@ -207,8 +271,15 @@ def test_order_confirm_without_sku(
     permission_group_manage_orders,
     payment_txn_preauth,
     site_settings,
+    owned_warehouse,
+    channel_USD,
+    purchase_order_item,
 ):
     # given
+    setup_order_with_allocation_sources(
+        order_unconfirmed, owned_warehouse, channel_USD, purchase_order_item
+    )
+
     order_unconfirmed.lines.update(product_sku=None)
     ProductVariant.objects.update(sku=None)
 
@@ -309,7 +380,13 @@ def test_order_confirm_wont_call_capture_for_non_active_payment(
     order_unconfirmed,
     permission_group_manage_orders,
     payment_txn_preauth,
+    owned_warehouse,
+    channel_USD,
+    purchase_order_item,
 ):
+    setup_order_with_allocation_sources(
+        order_unconfirmed, owned_warehouse, channel_USD, purchase_order_item
+    )
     payment_txn_preauth.order = order_unconfirmed
     payment_txn_preauth.is_active = False
     payment_txn_preauth.save()
@@ -337,12 +414,17 @@ def test_order_confirm_update_display_gross_prices(
     staff_api_client,
     order_with_lines,
     permission_group_manage_orders,
+    owned_warehouse,
+    purchase_order_item,
 ):
     # given
     order = order_with_lines
     order.status = OrderStatus.UNCONFIRMED
     order.save(update_fields=["status"])
     channel = order.channel
+    setup_order_with_allocation_sources(
+        order, owned_warehouse, channel, purchase_order_item
+    )
     tax_config = channel.tax_configuration
 
     # Change the current display_gross_prices to the opposite of what is set in the
@@ -419,8 +501,15 @@ def test_order_confirm_by_app(
     permission_manage_orders,
     payment_txn_preauth,
     site_settings,
+    owned_warehouse,
+    channel_USD,
+    purchase_order_item,
 ):
     # given
+    setup_order_with_allocation_sources(
+        order_unconfirmed, owned_warehouse, channel_USD, purchase_order_item
+    )
+
     webhook_event_map = get_webhooks_for_multiple_events(
         WEBHOOK_EVENTS_FOR_ORDER_CONFIRMED.union(WEBHOOK_EVENTS_FOR_ORDER_CHARGED)
     )
@@ -564,9 +653,15 @@ def test_order_confirm_skip_address_validation(
     payment_txn_preauth,
     site_settings,
     graphql_address_data,
+    owned_warehouse,
+    channel_USD,
+    purchase_order_item,
 ):
     # given
     order = order_unconfirmed
+    setup_order_with_allocation_sources(
+        order, owned_warehouse, channel_USD, purchase_order_item
+    )
     payment_txn_preauth.order = order
     payment_txn_preauth.captured_amount = order.total.gross.amount
     payment_txn_preauth.total = order.total.gross.amount
@@ -625,8 +720,14 @@ def test_order_confirm_triggers_webhooks(
     permission_group_manage_orders,
     payment_txn_preauth,
     settings,
+    owned_warehouse,
+    channel_USD,
+    purchase_order_item,
 ):
     # given
+    setup_order_with_allocation_sources(
+        order_unconfirmed, owned_warehouse, channel_USD, purchase_order_item
+    )
     mocked_send_webhook_request_sync.return_value = []
     (
         tax_webhook,

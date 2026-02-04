@@ -3,10 +3,10 @@ from typing import Final
 import graphene
 
 from ...graphql.core.enums import to_enum
-from ...inventory.models import PurchaseOrderState
+from ...inventory import PurchaseOrderItemStatus
 from ..core.doc_category import DOC_CATEGORY_PRODUCTS
 
-PurchaseOrderStateEnum: Final[graphene.Enum] = to_enum(
-    PurchaseOrderState, type_name="PurchaseOrderStateEnum"
+PurchaseOrderItemStatusEnum: Final[graphene.Enum] = to_enum(
+    PurchaseOrderItemStatus, type_name="PurchaseOrderItemStatusEnum"
 )
-PurchaseOrderStateEnum.doc_category = DOC_CATEGORY_PRODUCTS
+PurchaseOrderItemStatusEnum.doc_category = DOC_CATEGORY_PRODUCTS

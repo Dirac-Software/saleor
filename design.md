@@ -20,10 +20,32 @@ When an Order is created we check that we have enough stock in any warehouse to 
 
 
 ## Allocation
-We allocate products prioritising owned warehouses. We then use nonowned warehouses. We can allocate products in an owned warehouse before the Shipment containing the Purchase Order Item has been received. This is good for cash flow, we can send out invoices and take payment sooner, but it is **bad** if we end up receiving less than we expected. In this case, we will often have to issue a refund if the payment status.
+We allocate products prioritising owned warehouses. Both allocation strategies (`PRIORITIZE_HIGH_STOCK` and `PRIORITIZE_SORTING_ORDER`) enforce owned-warehouse-first ordering to ensure:
+1. Customer allocations use confirmed inventory in owned warehouses
+2. Batch tracking via `AllocationSources` links allocations to specific `PurchaseOrderItems`
+3. `POI.quantity_allocated` accurately tracks how much of each batch is allocated
+
+After exhausting owned warehouse stock, we then allocate from non-owned warehouses. We can allocate products in an owned warehouse before the Shipment containing the Purchase Order Item has been received. This is good for cash flow, we can send out invoices and take payment sooner, but it is **bad** if we end up receiving less than we expected. In this case, we will often have to issue a refund if the payment status.
 
 
 
 ## Warehouse Tasks
 - When a shipment arrives the goods need to be checked in
 - When an order is in the warehouse it needs to be picked and packed.
+
+
+## Invoice Variance
+Stock changes between Proforma (purchase order) and Final invoices for a purchase order
+We handle this at shipment reception but we need to do a little bit better.
+When we have invoice variance we may need to issue refunds / affect stock
+
+## Delivery Short / Receipt Shortage
+Stock is missing from a delivery
+The suppliers fault.
+
+## Shrinkage
+Stock missing from a warehouse
+
+
+## Inbound Shipment Reception
+Typically we scan in barcodes or similar

@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from ...channel import AllocationStrategy
 from ...core.exceptions import InsufficientStock
@@ -1366,3 +1367,280 @@ def test_allocate_preorders_with_global_reservations(
         check_reservations=True,
         checkout_lines=[checkout_line_with_reserved_preorder_item],
     )
+
+
+# ==============================================================================
+# OWNED WAREHOUSE PRIORITIZATION TESTS
+# ==============================================================================
+
+
+def test_allocate_prioritizes_owned_over_non_owned_high_stock_strategy(
+    order_line, channel_USD, owned_warehouse, nonowned_warehouse, purchase_order
+):
+    """Test PRIORITIZE_HIGH_STOCK strategy prefers owned warehouse even with less stock.
+
+    Given:
+        - Owned warehouse with 5 units (backed by POI)
+        - Non-owned warehouse with 100 units
+        - Order for 3 units
+        - Strategy: PRIORITIZE_HIGH_STOCK
+
+    Expected:
+        - All 3 units allocated from owned warehouse (not the higher-stock non-owned)
+    """
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...shipping.models import Shipment
+
+    # given
+    channel_USD.allocation_strategy = AllocationStrategy.PRIORITIZE_HIGH_STOCK
+    channel_USD.save(update_fields=["allocation_strategy"])
+
+    # Create POI for owned warehouse (required for AllocationSource creation)
+    shipment = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        tracking_number="TEST-OWNED",
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=order_line.variant,
+        quantity_ordered=5,
+        quantity_received=0,
+        quantity_allocated=0,
+        unit_price_amount=10.00,
+        currency="USD",
+        shipment=shipment,
+        status=PurchaseOrderItemStatus.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+
+    # Create stock in owned warehouse (less stock, backed by POI)
+    owned_stock = owned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=5,
+    )
+
+    # Create stock in non-owned warehouse (more stock, no POI needed)
+    nonowned_stock = nonowned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=100,
+    )
+
+    quantity = 3
+    line_data = OrderLineInfo(
+        line=order_line, variant=order_line.variant, quantity=quantity
+    )
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then
+    allocations = Allocation.objects.filter(order_line=order_line)
+
+    # Should have allocated from owned warehouse only
+    assert allocations.count() == 1
+    assert allocations[0].stock == owned_stock
+    assert allocations[0].quantity_allocated == quantity
+
+    # Owned stock should have allocation
+    owned_stock.refresh_from_db()
+    assert owned_stock.quantity_allocated == quantity
+
+    # Non-owned stock should have no allocation
+    nonowned_stock.refresh_from_db()
+    assert nonowned_stock.quantity_allocated == 0
+
+
+def test_allocate_falls_back_to_non_owned_when_owned_insufficient(
+    order_line, channel_USD, owned_warehouse, nonowned_warehouse, purchase_order
+):
+    """Test allocation falls back to non-owned when owned warehouse has insufficient stock.
+
+    Given:
+        - Owned warehouse with 5 units (backed by POI)
+        - Non-owned warehouse with 100 units
+        - Order for 10 units
+
+    Expected:
+        - 5 units from owned warehouse
+        - 5 units from non-owned warehouse
+    """
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...shipping.models import Shipment
+
+    # given
+    channel_USD.allocation_strategy = AllocationStrategy.PRIORITIZE_HIGH_STOCK
+    channel_USD.save(update_fields=["allocation_strategy"])
+
+    # Create POI for owned warehouse
+    shipment = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        tracking_number="TEST-OWNED-2",
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=order_line.variant,
+        quantity_ordered=5,
+        quantity_received=0,
+        quantity_allocated=0,
+        unit_price_amount=10.00,
+        currency="USD",
+        shipment=shipment,
+        status=PurchaseOrderItemStatus.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+
+    # Create stock in owned warehouse (insufficient, backed by POI)
+    owned_stock = owned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=5,
+    )
+
+    # Create stock in non-owned warehouse (fallback)
+    nonowned_stock = nonowned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=100,
+    )
+
+    # Add both warehouses to channel
+
+    quantity = 10
+    line_data = OrderLineInfo(
+        line=order_line, variant=order_line.variant, quantity=quantity
+    )
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then
+    allocations = Allocation.objects.filter(order_line=order_line).order_by(
+        "-stock__warehouse__is_owned"
+    )
+
+    # Should have 2 allocations
+    assert allocations.count() == 2
+
+    # First allocation: owned warehouse (full capacity)
+    owned_allocation = allocations.filter(stock__warehouse__is_owned=True).first()
+    assert owned_allocation.stock == owned_stock
+    assert owned_allocation.quantity_allocated == 5
+
+    # Second allocation: non-owned warehouse (remaining)
+    nonowned_allocation = allocations.filter(stock__warehouse__is_owned=False).first()
+    assert nonowned_allocation.stock == nonowned_stock
+    assert nonowned_allocation.quantity_allocated == 5
+
+    # Verify stock quantities
+    owned_stock.refresh_from_db()
+    assert owned_stock.quantity_allocated == 5
+
+    nonowned_stock.refresh_from_db()
+    assert nonowned_stock.quantity_allocated == 5
+
+
+def test_allocate_sorting_order_prioritizes_owned_first(
+    order_line, channel_USD, owned_warehouse, nonowned_warehouse, purchase_order
+):
+    """Test PRIORITIZE_SORTING_ORDER strategy prioritizes owned warehouses.
+
+    Given:
+        - Non-owned warehouse with sort_order=0 (higher priority in channel)
+        - Owned warehouse with sort_order=1 (lower priority in channel)
+        - Order for 3 units (backed by POI)
+        - Strategy: PRIORITIZE_SORTING_ORDER
+
+    Expected:
+        - All units allocated from owned warehouse (ownership beats sort order)
+    """
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...shipping.models import Shipment
+
+    # given
+    channel_USD.allocation_strategy = AllocationStrategy.PRIORITIZE_SORTING_ORDER
+    channel_USD.save(update_fields=["allocation_strategy"])
+
+    # Create POI for owned warehouse
+    shipment = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        tracking_number="TEST-OWNED-3",
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=order_line.variant,
+        quantity_ordered=10,
+        quantity_received=0,
+        quantity_allocated=0,
+        unit_price_amount=10.00,
+        currency="USD",
+        shipment=shipment,
+        status=PurchaseOrderItemStatus.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+
+    # Create stock in both warehouses (owned backed by POI)
+    owned_stock = owned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=10,
+    )
+
+    nonowned_stock = nonowned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=10,
+    )
+
+    # Add both to channel with supplier having HIGHER priority (lower sort order)
+    channel_USD.warehouses.add(nonowned_warehouse, owned_warehouse)
+
+    nonowned_cw = ChannelWarehouse.objects.get(
+        channel=channel_USD, warehouse=nonowned_warehouse
+    )
+    nonowned_cw.sort_order = 0
+    nonowned_cw.save()
+
+    owned_cw = ChannelWarehouse.objects.get(
+        channel=channel_USD, warehouse=owned_warehouse
+    )
+    owned_cw.sort_order = 1
+    owned_cw.save()
+
+    quantity = 3
+    line_data = OrderLineInfo(
+        line=order_line, variant=order_line.variant, quantity=quantity
+    )
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then
+    allocations = Allocation.objects.filter(order_line=order_line)
+
+    # Should allocate from owned warehouse despite lower sort order
+    assert allocations.count() == 1
+    assert allocations[0].stock == owned_stock
+    assert allocations[0].quantity_allocated == quantity
+
+    owned_stock.refresh_from_db()
+    assert owned_stock.quantity_allocated == quantity
+
+    nonowned_stock.refresh_from_db()
+    assert nonowned_stock.quantity_allocated == 0

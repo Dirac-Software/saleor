@@ -355,8 +355,8 @@ class ShippingMethodTranslation(Translation):
 
 
 class Shipment(models.Model):
-    """
-    Represents a Movement of a collection of units from A to B.
+    """Represents a Movement of a collection of units from A to B.
+
     This model is for accounting + inventory, not for the website to create
     arbritrarily.
 

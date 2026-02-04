@@ -302,7 +302,14 @@ def allocate_stocks(
     stocks = list(
         stock_select_for_update_for_existing_qs(stocks)
         .filter(**filter_lookup)
-        .values("id", "product_variant", "pk", "quantity", "warehouse_id")
+        .values(
+            "id",
+            "product_variant",
+            "pk",
+            "quantity",
+            "warehouse_id",
+            "warehouse__is_owned",
+        )
     )
     stocks_id = (stock.pop("id") for stock in stocks)
 
@@ -441,32 +448,72 @@ def sort_stocks(
     quantity_allocation_for_stocks: dict[int, int],
     collection_point_pk: UUID | None = None,
 ):
+    """Sort stocks for allocation according to the specified strategy.
+
+    IMPORTANT: Both strategies prioritize owned warehouses (is_owned=True) over
+    non-owned warehouses. This ensures allocations use owned warehouse stock first,
+    enabling proper batch tracking via PurchaseOrderItems and AllocationSources.
+
+    Args:
+        allocation_strategy: Either PRIORITIZE_HIGH_STOCK or PRIORITIZE_SORTING_ORDER
+        stocks: List of stock dictionaries with warehouse__is_owned field
+        channel: Channel with allocation strategy configuration
+        quantity_allocation_for_stocks: Map of stock PK to allocated quantity
+        collection_point_pk: Optional collection point warehouse (always prioritized)
+
+    Returns:
+        Sorted list of stocks (owned first, then strategy-specific sorting)
+
+    """
     warehouse_ids = [stock_data["warehouse_id"] for stock_data in stocks]
     channel_warehouse_ids = ChannelWarehouse.objects.filter(
         channel_id=channel.id, warehouse_id__in=warehouse_ids
     ).values_list("warehouse_id", flat=True)
 
     def sort_stocks_by_highest_stocks(stock_data):
-        """Sort the stocks by the highest quantity available."""
-        # in case of click and collect order we should allocate stocks from
-        # collection point warehouse at the first place
-        if stock_data.pop("warehouse_id") == collection_point_pk:
-            return math.inf
-        return stock_data["quantity"] - quantity_allocation_for_stocks.get(
-            stock_data["pk"], 0
-        )
+        """Sort the stocks by the highest quantity available.
+
+        Priority (with reverse=True, highest first):
+        1. Collection point (priority=2)
+        2. Owned warehouses (priority=1, sorted by quantity desc)
+        3. Non-owned warehouses (priority=0, sorted by quantity desc)
+        """
+        warehouse_id = stock_data.pop("warehouse_id")
+        is_owned = stock_data.pop("warehouse__is_owned")
+
+        available_quantity = stock_data[
+            "quantity"
+        ] - quantity_allocation_for_stocks.get(stock_data["pk"], 0)
+
+        # Collection point gets highest priority
+        if warehouse_id == collection_point_pk:
+            return (2, math.inf)
+
+        # Return tuple: (priority, quantity) for sorting with reverse=True
+        # Owned=1, Non-owned=0, so owned comes first
+        priority = 1 if is_owned else 0
+        return (priority, available_quantity)
 
     def sort_stocks_by_warehouse_sorting_order(stock_data):
-        """Sort the stocks based on the warehouse within channel order."""
-        # get the sort order for stocks warehouses within the channel
-        sorted_warehouse_list = list(channel_warehouse_ids)
+        """Sort the stocks based on the warehouse within channel order.
 
+        Priority (with reverse=False, lowest first):
+        1. Collection point (priority=-1)
+        2. Owned warehouses (priority=0, sorted by channel order asc)
+        3. Non-owned warehouses (priority=1, sorted by channel order asc)
+        """
+        sorted_warehouse_list = list(channel_warehouse_ids)
         warehouse_id = stock_data.pop("warehouse_id")
-        # in case of click and collect order we should allocate stocks from
-        # collection point warehouse at the first place
+        is_owned = stock_data.pop("warehouse__is_owned")
+
+        # Collection point gets highest priority (lowest value)
         if warehouse_id == collection_point_pk:
-            return -math.inf
-        return sorted_warehouse_list.index(warehouse_id)
+            return (-1, 0)
+
+        # Return tuple: (priority, index) for sorting with reverse=False
+        # Owned=0, Non-owned=1, so owned comes first
+        priority = 0 if is_owned else 1
+        return (priority, sorted_warehouse_list.index(warehouse_id))
 
     allocation_strategy_to_sort_method_and_reverse_option = {
         AllocationStrategy.PRIORITIZE_HIGH_STOCK: (sort_stocks_by_highest_stocks, True),
