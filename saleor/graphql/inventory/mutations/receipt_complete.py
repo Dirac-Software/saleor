@@ -6,13 +6,11 @@ from ....inventory.models import Receipt as ReceiptModel
 from ....inventory.stock_management import complete_receipt
 from ....permission.enums import ProductPermissions
 from ...core import ResolveInfo
-from...core.doc_category import DOC_CATEGORY_PRODUCTS
+from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import BaseMutation
-from ...core.types import ReceiptError
 from ...core.utils import from_global_id_or_error
 from ...plugins.dataloaders import get_plugin_manager_promise
-from ..types import Receipt
-from ..types.purchase_order import PurchaseOrderItemAdjustment
+from ..types import PurchaseOrderItemAdjustment, Receipt, ReceiptError
 
 
 class ReceiptComplete(BaseMutation):
@@ -69,7 +67,7 @@ class ReceiptComplete(BaseMutation):
                         code=ReceiptErrorCode.NOT_FOUND.value,
                     )
                 }
-            )
+            ) from None
 
         # Get plugin manager for notifications
         manager = get_plugin_manager_promise(info.context).get()
@@ -89,7 +87,7 @@ class ReceiptComplete(BaseMutation):
                         code=ReceiptErrorCode.INVALID.value,
                     )
                 }
-            )
+            ) from e
 
         return ReceiptComplete(
             receipt=result["receipt"],

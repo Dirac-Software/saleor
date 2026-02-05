@@ -3,6 +3,7 @@
 import pytest
 from django.utils import timezone
 
+from .. import ReceiptStatus
 from ..exceptions import (
     ReceiptLineNotInProgress,
     ReceiptNotInProgress,
@@ -14,7 +15,6 @@ from ..stock_management import (
     receive_item,
     start_receipt,
 )
-from .. import ReceiptStatus
 
 
 class TestStartReceipt:
@@ -124,7 +124,9 @@ class TestReceiveItem:
         with pytest.raises(ValueError, match="not found in shipment"):
             receive_item(receipt, other_variant, quantity=10, user=staff_user)
 
-    def test_audit_trail_captured(self, receipt, product_variant, staff_user):
+    def test_audit_trail_captured(
+        self, receipt, purchase_order_item, product_variant, staff_user
+    ):
         # given/when: receiving an item
         before = timezone.now()
         line = receive_item(receipt, product_variant, quantity=10, user=staff_user)
@@ -139,12 +141,19 @@ class TestCompleteReceipt:
     """Tests for complete_receipt function."""
 
     def test_completes_receipt_with_no_discrepancies(
-        self, receipt, purchase_order_item, staff_user
+        self, receipt, purchase_order_item, staff_user, receipt_line_factory
     ):
         # given: a receipt where received == ordered
         purchase_order_item.quantity_ordered = 100
-        purchase_order_item.quantity_received = 100
         purchase_order_item.save()
+
+        # Create receipt line to simulate receiving 100 items
+        receipt_line_factory(
+            receipt=receipt,
+            purchase_order_item=purchase_order_item,
+            quantity_received=100,
+            received_by=staff_user,
+        )
 
         # when: completing the receipt
         result = complete_receipt(receipt, user=staff_user)
@@ -168,12 +177,19 @@ class TestCompleteReceipt:
         assert receipt.shipment.arrived_at is not None
 
     def test_creates_adjustment_for_delivery_short(
-        self, receipt, purchase_order_item, staff_user
+        self, receipt, purchase_order_item, staff_user, receipt_line_factory
     ):
         # given: received less than ordered
         purchase_order_item.quantity_ordered = 100
-        purchase_order_item.quantity_received = 98
         purchase_order_item.save()
+
+        # Create receipt line to simulate receiving 98 items (shortage of 2)
+        receipt_line_factory(
+            receipt=receipt,
+            purchase_order_item=purchase_order_item,
+            quantity_received=98,
+            received_by=staff_user,
+        )
 
         # when: completing the receipt
         result = complete_receipt(receipt, user=staff_user)
@@ -189,12 +205,19 @@ class TestCompleteReceipt:
         assert adjustment.processed_at is not None  # Auto-processed
 
     def test_creates_adjustment_for_overage(
-        self, receipt, purchase_order_item, staff_user
+        self, receipt, purchase_order_item, staff_user, receipt_line_factory
     ):
         # given: received more than ordered
         purchase_order_item.quantity_ordered = 100
-        purchase_order_item.quantity_received = 105
         purchase_order_item.save()
+
+        # Create receipt line to simulate receiving 105 items (overage of 5)
+        receipt_line_factory(
+            receipt=receipt,
+            purchase_order_item=purchase_order_item,
+            quantity_received=105,
+            received_by=staff_user,
+        )
 
         # when: completing the receipt
         result = complete_receipt(receipt, user=staff_user)
@@ -207,17 +230,24 @@ class TestCompleteReceipt:
         assert adjustment.affects_payable is False
 
     def test_handles_adjustment_affecting_confirmed_orders(
-        self, receipt, purchase_order_item, staff_user, mocker
+        self, receipt, purchase_order_item, staff_user, mocker, receipt_line_factory
     ):
         # given: a shortage that would affect confirmed orders
         purchase_order_item.quantity_ordered = 100
-        purchase_order_item.quantity_received = 90
         purchase_order_item.save()
+
+        # Create receipt line to simulate receiving 90 items (shortage of 10)
+        receipt_line_factory(
+            receipt=receipt,
+            purchase_order_item=purchase_order_item,
+            quantity_received=90,
+            received_by=staff_user,
+        )
 
         # and: process_adjustment will raise AdjustmentAffectsConfirmedOrders
         from ...inventory.exceptions import AdjustmentAffectsConfirmedOrders
 
-        mock_process = mocker.patch(
+        _mock_process = mocker.patch(
             "saleor.inventory.stock_management.process_adjustment",
             side_effect=AdjustmentAffectsConfirmedOrders(
                 adjustment=mocker.Mock(), order_numbers=[1234]
@@ -236,12 +266,19 @@ class TestCompleteReceipt:
         assert adjustment.processed_at is None
 
     def test_sends_notification_for_pending_adjustments(
-        self, receipt, purchase_order_item, staff_user, mocker
+        self, receipt, purchase_order_item, staff_user, mocker, receipt_line_factory
     ):
         # given: a shortage affecting confirmed orders
         purchase_order_item.quantity_ordered = 100
-        purchase_order_item.quantity_received = 90
         purchase_order_item.save()
+
+        # Create receipt line to simulate receiving 90 items (shortage of 10)
+        receipt_line_factory(
+            receipt=receipt,
+            purchase_order_item=purchase_order_item,
+            quantity_received=90,
+            received_by=staff_user,
+        )
 
         from ...inventory.exceptions import AdjustmentAffectsConfirmedOrders
 
@@ -351,7 +388,7 @@ class TestDeleteReceiptLine:
         assert ReceiptLine.objects.filter(id=line2.id).exists()
 
     def test_error_when_receipt_completed(
-        self, receipt, product_variant, staff_user
+        self, receipt, purchase_order_item, product_variant, staff_user
     ):
         # given: a line from a completed receipt
         line = receive_item(receipt, product_variant, quantity=50, user=staff_user)

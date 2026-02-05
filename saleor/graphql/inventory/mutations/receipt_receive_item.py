@@ -10,9 +10,8 @@ from ....product.models import ProductVariant
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import BaseMutation
-from ...core.types import ReceiptError
 from ...core.utils import from_global_id_or_error
-from ..types import ReceiptLine
+from ..types import ReceiptError, ReceiptLine
 
 
 class ReceiptReceiveItem(BaseMutation):
@@ -66,7 +65,7 @@ class ReceiptReceiveItem(BaseMutation):
                         code=ReceiptErrorCode.NOT_FOUND.value,
                     )
                 }
-            )
+            ) from None
 
         # Get variant
         _, variant_pk = from_global_id_or_error(variant_id, "ProductVariant")
@@ -80,7 +79,7 @@ class ReceiptReceiveItem(BaseMutation):
                         code=ReceiptErrorCode.NOT_FOUND.value,
                     )
                 }
-            )
+            ) from None
 
         # Validate quantity
         if quantity <= 0:
@@ -110,7 +109,7 @@ class ReceiptReceiveItem(BaseMutation):
                         code=ReceiptErrorCode.INVALID.value,
                     )
                 }
-            )
+            ) from e
         except ValueError as e:
             raise ValidationError(
                 {
@@ -119,6 +118,6 @@ class ReceiptReceiveItem(BaseMutation):
                         code=ReceiptErrorCode.INVALID.value,
                     )
                 }
-            )
+            ) from e
 
         return ReceiptReceiveItem(receipt_line=receipt_line)

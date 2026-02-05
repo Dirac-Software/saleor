@@ -63,13 +63,16 @@ def setup_order_with_allocation_sources(
     from .....order.fetch import OrderLineInfo
     from .....plugins.manager import get_plugins_manager
     from .....warehouse.management import allocate_stocks
-    from .....warehouse.models import Stock
+    from .....warehouse.models import Allocation, Stock
 
     order_line = order.lines.first()
     if not order_line:
         return
 
     variant = order_line.variant
+
+    # Clear any existing allocations from the order
+    Allocation.objects.filter(order_line__order=order).delete()
 
     # Update POI to match the test's variant and warehouse
     purchase_order_item.product_variant = variant
@@ -90,7 +93,8 @@ def setup_order_with_allocation_sources(
     )
     if not created:
         stock.quantity = 10000
-        stock.save(update_fields=["quantity"])
+        stock.quantity_allocated = 0
+        stock.save(update_fields=["quantity", "quantity_allocated"])
 
     # Allocate stocks (creates allocations and sources using the POI)
     allocate_stocks(
@@ -852,11 +856,22 @@ def test_order_confirm_succeeds_with_allocation_sources(
     from .....order.fetch import OrderLineInfo
     from .....plugins.manager import get_plugins_manager
     from .....warehouse.management import allocate_stocks
-    from .....warehouse.models import Stock
+    from .....warehouse.models import Allocation, Stock
 
     # given
     order_line = order_unconfirmed.lines.first()
     variant = order_line.variant
+
+    # Clear any existing allocations
+    Allocation.objects.filter(order_line__order=order_unconfirmed).delete()
+
+    # Set up purchase order item for the variant and warehouse
+    purchase_order_item.product_variant = variant
+    purchase_order_item.order.destination_warehouse = owned_warehouse
+    purchase_order_item.quantity_ordered = 100
+    purchase_order_item.order.save(update_fields=["destination_warehouse"])
+    purchase_order_item.save(update_fields=["product_variant", "quantity_ordered"])
+
     Stock.objects.create(
         warehouse=owned_warehouse, product_variant=variant, quantity=100
     )

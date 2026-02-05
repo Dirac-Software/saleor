@@ -11,10 +11,9 @@ from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import BaseMutation
-from ..types import PurchaseOrderError
 from ...core.utils import from_global_id_or_error
 from ...plugins.dataloaders import get_plugin_manager_promise
-from ..types import PurchaseOrder
+from ..types import PurchaseOrder, PurchaseOrderError
 
 
 class PurchaseOrderConfirm(BaseMutation):
@@ -65,7 +64,7 @@ class PurchaseOrderConfirm(BaseMutation):
                         code=PurchaseOrderErrorCode.GRAPHQL_ERROR.value,
                     )
                 }
-            )
+            ) from None
 
         # Validate all items are in DRAFT status
         non_draft_items = [
@@ -74,7 +73,7 @@ class PurchaseOrderConfirm(BaseMutation):
             if item.status != PurchaseOrderItemStatus.DRAFT
         ]
         if non_draft_items:
-            statuses = ", ".join(set(item.status for item in non_draft_items))
+            statuses = ", ".join({item.status for item in non_draft_items})
             raise ValidationError(
                 {
                     "id": ValidationError(
@@ -109,7 +108,7 @@ class PurchaseOrderConfirm(BaseMutation):
                         code=PurchaseOrderErrorCode.GRAPHQL_ERROR.value,
                     )
                 }
-            )
+            ) from e
 
         # Trigger async webhook
         cls.call_event(

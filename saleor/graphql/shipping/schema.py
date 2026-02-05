@@ -25,11 +25,33 @@ from .mutations import (
 from .mutations.shipping_method_channel_listing_update import (
     ShippingMethodChannelListingUpdate,
 )
-from .resolvers import resolve_shipping_zones
-from .types import ShippingZone, ShippingZoneCountableConnection
+from .resolvers import resolve_shipment, resolve_shipments, resolve_shipping_zones
+from .types import (
+    Shipment,
+    ShipmentCountableConnection,
+    ShippingZone,
+    ShippingZoneCountableConnection,
+)
 
 
 class ShippingQueries(graphene.ObjectType):
+    shipment = PermissionsField(
+        Shipment,
+        id=graphene.Argument(
+            graphene.ID,
+            description="ID of the shipment.",
+            required=True,
+        ),
+        description="Look up a shipment by ID.",
+        permissions=[ShippingPermissions.MANAGE_SHIPPING],
+        doc_category=DOC_CATEGORY_SHIPPING,
+    )
+    shipments = FilterConnectionField(
+        ShipmentCountableConnection,
+        description="List of inbound/outbound shipments.",
+        permissions=[ShippingPermissions.MANAGE_SHIPPING],
+        doc_category=DOC_CATEGORY_SHIPPING,
+    )
     shipping_zone = PermissionsField(
         ShippingZone,
         id=graphene.Argument(
@@ -54,6 +76,19 @@ class ShippingQueries(graphene.ObjectType):
         permissions=[ShippingPermissions.MANAGE_SHIPPING],
         doc_category=DOC_CATEGORY_SHIPPING,
     )
+
+    @staticmethod
+    def resolve_shipment(_root, info: ResolveInfo, *, id):
+        _, pk = from_global_id_or_error(id, "Shipment")
+        return resolve_shipment(info, pk)
+
+    @staticmethod
+    def resolve_shipments(_root, info: ResolveInfo, **kwargs):
+        qs = resolve_shipments(info)
+        qs = filter_connection_queryset(
+            qs, kwargs, allow_replica=info.context.allow_replica
+        )
+        return create_connection_slice(qs, info, kwargs, ShipmentCountableConnection)
 
     @staticmethod
     def resolve_shipping_zone(_root, info: ResolveInfo, *, id, channel=None):

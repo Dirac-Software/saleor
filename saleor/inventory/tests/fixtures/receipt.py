@@ -2,8 +2,8 @@
 
 import pytest
 
+from ... import ReceiptStatus
 from ...models import Receipt, ReceiptLine
-from .. import ReceiptStatus
 
 
 @pytest.fixture
@@ -18,7 +18,7 @@ def receipt(shipment, staff_user):
 
 @pytest.fixture
 def receipt_factory(db):
-    """Factory for creating receipts with custom parameters."""
+    """Create receipts with custom parameters."""
 
     def create_receipt(**kwargs):
         return Receipt.objects.create(**kwargs)
@@ -39,7 +39,7 @@ def receipt_line(receipt, purchase_order_item, staff_user):
 
 @pytest.fixture
 def receipt_line_factory(db):
-    """Factory for creating receipt lines with custom parameters."""
+    """Create receipt lines with custom parameters."""
 
     def create_receipt_line(**kwargs):
         return ReceiptLine.objects.create(**kwargs)

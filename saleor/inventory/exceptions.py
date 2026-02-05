@@ -3,7 +3,12 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import PurchaseOrderItem, PurchaseOrderItemAdjustment, Receipt, ReceiptLine
+    from .models import (
+        PurchaseOrderItem,
+        PurchaseOrderItemAdjustment,
+        Receipt,
+        ReceiptLine,
+    )
 
 
 class InvalidPurchaseOrderItemStatus(Exception):
@@ -59,6 +64,21 @@ class AdjustmentAffectsFulfilledOrders(Exception):
             f"Cannot process adjustment {adjustment.id}: affects UNFULFILLED orders "
             f"{order_numbers}. UNFULFILLED orders cannot be automatically modified. "
             f"Manual resolution required."
+        )
+
+
+class AdjustmentAffectsPaidOrders(Exception):
+    """Raised when a negative adjustment would affect fully paid orders.
+
+    Paid orders require refund workflow before stock can be reduced.
+    """
+
+    def __init__(self, adjustment: "PurchaseOrderItemAdjustment", order_numbers: list):
+        self.adjustment = adjustment
+        self.order_numbers = order_numbers
+        super().__init__(
+            f"Cannot process adjustment {adjustment.id}: affects fully paid orders "
+            f"{order_numbers}. Refund workflow required."
         )
 
 

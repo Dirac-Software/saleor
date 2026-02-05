@@ -3,7 +3,6 @@ from django.db import models
 from django_countries.fields import CountryField
 from prices import Money
 
-from ..core.db.fields import MoneyField
 from ..product.models import ProductVariant
 from ..warehouse.models import Warehouse
 from . import PurchaseOrderItemAdjustmentReason, PurchaseOrderItemStatus, ReceiptStatus
@@ -135,21 +134,52 @@ class PurchaseOrderItem(models.Model):
         return max(0, base - self.quantity_allocated)
 
     @property
+    def quantity_received(self):
+        """Total quantity received across all receipt lines.
+
+        Sums the quantity_received from all ReceiptLine records
+        associated with this purchase order item.
+        """
+        from django.db.models import Sum
+
+        total = self.receipt_lines.aggregate(total=Sum("quantity_received"))["total"]
+        return total or 0
+
+    @property
     def unit_price_amount(self):
         """Unit price we actually pay (after invoice adjustments).
 
-        For invoice variance/delivery short: uses actual_total_paid
-        This is what we use for financial calculations.
+        Calculates unit price from total_price_amount adjusted for processed
+        adjustments that affect what we owe the supplier.
         """
+        # Start with base total from invoice
+        total = self.total_price_amount
+
+        # Adjust for processed adjustments that affect what we pay supplier
+        # (invoice variance, delivery short)
+        adjustment_value = sum(
+            (adj.quantity_change * (self.total_price_amount / self.quantity_ordered))
+            for adj in self.adjustments.filter(
+                affects_payable=True, processed_at__isnull=False
+            )
+        )
+        adjusted_total = total + adjustment_value
+
+        # Calculate unit price from adjusted total
         received_qty = self.quantity_ordered + sum(
             adj.quantity_change
             for adj in self.adjustments.filter(
                 affects_payable=True, processed_at__isnull=False
             )
         )
+
         if received_qty > 0:
-            return self.actual_total_paid.amount / received_qty
-        return self.original_unit_price.amount
+            return adjusted_total / received_qty
+        return (
+            self.total_price_amount / self.quantity_ordered
+            if self.quantity_ordered > 0
+            else 0
+        )
 
     @property
     def unit_price(self):
@@ -278,6 +308,7 @@ class PurchaseOrderItemAdjustment(models.Model):
         Returns:
             'accounts_payable': Supplier credits us (reduces what we owe)
             'operating_expense': We eat the loss (shrinkage, damage, etc.)
+
         """
         if self.affects_payable:
             return "accounts_payable"

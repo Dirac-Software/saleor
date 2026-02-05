@@ -1,11 +1,9 @@
 import graphene
-import pytest
 
+from .....inventory import PurchaseOrderItemStatus
 from .....inventory.error_codes import PurchaseOrderErrorCode
 from .....inventory.models import PurchaseOrder, PurchaseOrderItem
-from .....inventory import PurchaseOrderItemStatus
-from ....tests.utils import get_graphql_content
-
+from ....tests.utils import assert_no_permission, get_graphql_content
 
 MUTATION_CREATE_PURCHASE_ORDER = """
 mutation createPurchaseOrder($input: PurchaseOrderCreateInput!) {
@@ -58,7 +56,9 @@ def test_create_purchase_order_success(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -91,6 +91,7 @@ def test_create_purchase_order_success(
     assert item.quantity_ordered == 100
     assert item.quantity_received == 0
     assert item.unit_price_amount == 10.50
+    assert item.total_price_amount == 1050.00  # 100 * 10.50
     assert item.currency == "GBP"
     assert item.country_of_origin == "CN"
     assert item.status == PurchaseOrderItemStatus.DRAFT
@@ -109,7 +110,9 @@ def test_create_purchase_order_source_warehouse_must_be_non_owned(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -151,7 +154,9 @@ def test_create_purchase_order_destination_warehouse_must_be_owned(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -227,7 +232,9 @@ def test_create_purchase_order_quantity_must_be_positive(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 0,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -313,7 +320,9 @@ def test_create_purchase_order_invalid_country_code(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -355,7 +364,9 @@ def test_create_purchase_order_requires_permission(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -390,7 +401,9 @@ def test_create_purchase_order_initial_status_is_draft(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -430,7 +443,9 @@ def test_create_purchase_order_quantity_received_starts_at_zero(
             ),
             "items": [
                 {
-                    "variantId": graphene.Node.to_global_id("ProductVariant", variant.id),
+                    "variantId": graphene.Node.to_global_id(
+                        "ProductVariant", variant.id
+                    ),
                     "quantityOrdered": 100,
                     "unitPriceAmount": "10.50",
                     "currency": "GBP",
@@ -453,10 +468,3 @@ def test_create_purchase_order_quantity_received_starts_at_zero(
 
     item = PurchaseOrderItem.objects.first()
     assert item.quantity_received == 0
-
-
-def assert_no_permission(response):
-    """Helper to assert permission error."""
-    content = get_graphql_content(response)
-    assert "errors" in content
-    assert content["errors"][0]["extensions"]["exception"]["code"] == "PermissionDenied"

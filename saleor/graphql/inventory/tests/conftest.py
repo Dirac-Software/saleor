@@ -2,9 +2,8 @@ import pytest
 
 from ....warehouse.models import Warehouse
 
-
-# Import warehouse fixtures
-pytest_plugins = ["saleor.warehouse.tests.fixtures"]
+# Note: pytest_plugins can only be defined in top-level conftest.py
+# Warehouse fixtures are imported by the root conftest.py
 
 
 @pytest.fixture

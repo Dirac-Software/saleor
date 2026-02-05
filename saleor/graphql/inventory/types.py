@@ -3,9 +3,10 @@ import graphene
 from ...inventory import models
 from ..core import ResolveInfo
 from ..core.connection import CountableConnection
+from ..core.context import ChannelContext
 from ..core.doc_category import DOC_CATEGORY_PRODUCTS
 from ..core.enums import PurchaseOrderErrorCode, ReceiptErrorCode
-from ..core.scalars import PositiveDecimal
+from ..core.scalars import DateTime, PositiveDecimal
 from ..core.types import BaseInputObjectType, Error, ModelObjectType, Money, NonNullList
 from ..meta.inputs import MetadataInput
 from ..product.dataloaders import ProductVariantByIdLoader
@@ -63,18 +64,18 @@ class PurchaseOrderItem(ModelObjectType[models.PurchaseOrderItem]):
         description="Product variant ordered.",
     )
     quantity_ordered = graphene.Int(required=True, description="Quantity ordered.")
-    quantity_received = graphene.Int(required=True, description="Quantity received.")
+    quantity_received = graphene.Int(
+        required=True, description="Total quantity received across all receipt lines."
+    )
 
     unit_price = graphene.Field(
         Money, required=True, description="Unit cost (buy price)."
     )
     country_of_origin = graphene.String(
-        required=True,
-        description="Country of origin (ISO 2-letter code)."
+        required=True, description="Country of origin (ISO 2-letter code)."
     )
     status = PurchaseOrderItemStatusEnum(
-        required=True,
-        description="Status of this purchase order item."
+        required=True, description="Status of this purchase order item."
     )
 
     class Meta:
@@ -84,7 +85,16 @@ class PurchaseOrderItem(ModelObjectType[models.PurchaseOrderItem]):
 
     @staticmethod
     def resolve_product_variant(root, info: ResolveInfo):
-        return ProductVariantByIdLoader(info.context).load(root.product_variant_id)
+        return (
+            ProductVariantByIdLoader(info.context)
+            .load(root.product_variant_id)
+            .then(lambda variant: ChannelContext(node=variant, channel_slug=None))
+        )
+
+    @staticmethod
+    def resolve_unit_price(root: models.PurchaseOrderItem, info: ResolveInfo):
+        """Return unit price from model property (prices.Money object)."""
+        return root.unit_price
 
 
 class PurchaseOrderCountableConnection(CountableConnection):
@@ -96,6 +106,19 @@ class PurchaseOrderCountableConnection(CountableConnection):
 # Error types
 class PurchaseOrderError(Error):
     code = PurchaseOrderErrorCode(description="The error code.", required=True)
+    warehouses = NonNullList(
+        graphene.ID,
+        description="List of warehouse IDs which cause the error.",
+        required=False,
+    )
+    variants = NonNullList(
+        graphene.ID,
+        description="List of variant IDs which cause the error.",
+        required=False,
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_PRODUCTS
 
 
 class ReceiptError(Error):
@@ -117,9 +140,7 @@ class ReceiptError(Error):
 
 # Input types
 class PurchaseOrderItemInput(BaseInputObjectType):
-    variant_id = graphene.ID(
-        required=True, description="Product variant to order."
-    )
+    variant_id = graphene.ID(required=True, description="Product variant to order.")
     quantity_ordered = graphene.Int(
         required=True, description="Quantity to order from supplier."
     )
@@ -166,9 +187,7 @@ class PurchaseOrderCreateInput(BaseInputObjectType):
 
 
 class PurchaseOrderItemAdjustment(ModelObjectType[models.PurchaseOrderItemAdjustment]):
-    id = graphene.GlobalID(
-        required=True, description="The ID of the adjustment."
-    )
+    id = graphene.GlobalID(required=True, description="The ID of the adjustment.")
     purchase_order_item = graphene.Field(
         PurchaseOrderItem,
         required=True,
@@ -182,13 +201,11 @@ class PurchaseOrderItemAdjustment(ModelObjectType[models.PurchaseOrderItemAdjust
         required=True,
         description="Reason for the adjustment.",
     )
-    notes = graphene.String(
-        description="Additional notes about the adjustment."
-    )
-    processed_at = graphene.DateTime(
+    notes = graphene.String(description="Additional notes about the adjustment.")
+    processed_at = DateTime(
         description="When the adjustment was processed (null if pending)."
     )
-    created_at = graphene.DateTime(
+    created_at = DateTime(
         required=True,
         description="When the adjustment was created.",
     )
@@ -211,3 +228,96 @@ class PurchaseOrderItemAdjustmentCountableConnection(CountableConnection):
     class Meta:
         doc_category = DOC_CATEGORY_PRODUCTS
         node = PurchaseOrderItemAdjustment
+
+
+# Receipt types
+
+
+class ReceiptStatusEnum(graphene.Enum):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class ReceiptLine(ModelObjectType[models.ReceiptLine]):
+    purchase_order_item = graphene.Field(
+        PurchaseOrderItem,
+        description="The purchase order item being received.",
+        required=True,
+    )
+    quantity_received = graphene.Int(
+        description="Quantity received in this line.",
+        required=True,
+    )
+    received_at = DateTime(
+        description="When this item was scanned/received.",
+        required=True,
+    )
+    received_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who scanned this item.",
+    )
+    notes = graphene.String(
+        description="Notes about this specific receipt line.",
+    )
+
+    class Meta:
+        description = "Represents a line item in a goods receipt."
+        interfaces = [graphene.relay.Node]
+        model = models.ReceiptLine
+        doc_category = DOC_CATEGORY_PRODUCTS
+
+
+class ReceiptLineCountableConnection(CountableConnection):
+    class Meta:
+        node = ReceiptLine
+
+
+class Receipt(ModelObjectType[models.Receipt]):
+    shipment = graphene.Field(
+        "saleor.graphql.shipping.types.Shipment",
+        description="The shipment being received.",
+        required=True,
+    )
+    status = ReceiptStatusEnum(
+        description="Current status of the receipt.",
+        required=True,
+    )
+    lines = graphene.List(
+        graphene.NonNull(ReceiptLine),
+        description="Items received in this receipt.",
+        required=True,
+    )
+    created_at = DateTime(
+        description="When the receipt was started.",
+        required=True,
+    )
+    completed_at = DateTime(
+        description="When the receipt was completed.",
+    )
+    created_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="User who started the receipt.",
+    )
+    completed_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="User who completed the receipt.",
+    )
+    notes = graphene.String(
+        description="Notes about this receipt.",
+    )
+
+    class Meta:
+        description = "Represents a goods receipt for an inbound shipment."
+        interfaces = [graphene.relay.Node]
+        model = models.Receipt
+        doc_category = DOC_CATEGORY_PRODUCTS
+
+    @staticmethod
+    def resolve_lines(root: models.Receipt, info: ResolveInfo):
+        return root.lines.all()
+
+
+class ReceiptCountableConnection(CountableConnection):
+    class Meta:
+        node = Receipt

@@ -1406,9 +1406,8 @@ def test_allocate_prioritizes_owned_over_non_owned_high_stock_strategy(
         order=purchase_order,
         product_variant=order_line.variant,
         quantity_ordered=5,
-        quantity_received=0,
         quantity_allocated=0,
-        unit_price_amount=10.00,
+        total_price_amount=50.0,  # 5 qty × $10.0/unit
         currency="USD",
         shipment=shipment,
         status=PurchaseOrderItemStatus.CONFIRMED,
@@ -1489,9 +1488,8 @@ def test_allocate_falls_back_to_non_owned_when_owned_insufficient(
         order=purchase_order,
         product_variant=order_line.variant,
         quantity_ordered=5,
-        quantity_received=0,
         quantity_allocated=0,
-        unit_price_amount=10.00,
+        total_price_amount=50.0,  # 5 qty × $10.0/unit
         currency="USD",
         shipment=shipment,
         status=PurchaseOrderItemStatus.CONFIRMED,
@@ -1583,9 +1581,8 @@ def test_allocate_sorting_order_prioritizes_owned_first(
         order=purchase_order,
         product_variant=order_line.variant,
         quantity_ordered=10,
-        quantity_received=0,
         quantity_allocated=0,
-        unit_price_amount=10.00,
+        total_price_amount=100.0,  # 10 qty × $10.0/unit
         currency="USD",
         shipment=shipment,
         status=PurchaseOrderItemStatus.CONFIRMED,

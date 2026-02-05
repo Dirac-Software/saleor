@@ -137,9 +137,8 @@ def test_can_confirm_order_with_multiple_sources(
         order=purchase_order,
         product_variant=variant,
         quantity_ordered=30,
-        quantity_received=30,
         quantity_allocated=0,
-        unit_price_amount=10,
+        total_price_amount=300.0,  # 30 qty × $10.0/unit
         currency="USD",
         status=PurchaseOrderItemStatus.CONFIRMED,
     )
@@ -147,9 +146,8 @@ def test_can_confirm_order_with_multiple_sources(
         order=purchase_order,
         product_variant=variant,
         quantity_ordered=20,
-        quantity_received=20,
         quantity_allocated=0,
-        unit_price_amount=10,
+        total_price_amount=200.0,  # 20 qty × $10.0/unit
         currency="USD",
         status=PurchaseOrderItemStatus.CONFIRMED,
     )
@@ -232,9 +230,8 @@ def test_can_confirm_order_multiple_order_lines(
         order=purchase_order,
         product_variant=variant2,
         quantity_ordered=100,
-        quantity_received=0,
         quantity_allocated=0,
-        unit_price_amount=10,
+        total_price_amount=1000.0,  # 100 qty × $10.0/unit
         currency="USD",
         status=PurchaseOrderItemStatus.CONFIRMED,
     )

@@ -1,4 +1,3 @@
-import graphene
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django_countries import countries
@@ -7,10 +6,8 @@ from ....inventory import PurchaseOrderItemStatus, events, models
 from ....inventory.error_codes import PurchaseOrderErrorCode
 from ....permission.enums import ProductPermissions
 from ....warehouse.models import Warehouse
-from ....webhook.event_types import WebhookEventAsyncType
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
-from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import DeprecatedModelMutation
 from ...core.utils import from_global_id_or_error
 from ...plugins.dataloaders import get_plugin_manager_promise
@@ -50,9 +47,7 @@ class PurchaseOrderCreate(DeprecatedModelMutation):
         source_warehouse_id = data.get("source_warehouse_id")
         if source_warehouse_id:
             try:
-                _, source_id = from_global_id_or_error(
-                    source_warehouse_id, "Warehouse"
-                )
+                _, source_id = from_global_id_or_error(source_warehouse_id, "Warehouse")
                 source_warehouse = Warehouse.objects.get(pk=source_id)
 
                 if source_warehouse.is_owned:
@@ -196,7 +191,9 @@ class PurchaseOrderCreate(DeprecatedModelMutation):
                     )
 
                 if item_errors:
-                    errors[f"items[{idx}]"] = item_errors
+                    # Flatten nested errors: items[0].field instead of items[0]: {field: error}
+                    for field, error in item_errors.items():
+                        errors[f"items[{idx}].{field}"] = error
                 else:
                     cleaned_items.append(cleaned_item)
 
@@ -209,9 +206,8 @@ class PurchaseOrderCreate(DeprecatedModelMutation):
         return cleaned_input
 
     @classmethod
-    def save(cls, info: ResolveInfo, instance, cleaned_input):
+    def save(cls, info: ResolveInfo, instance, cleaned_input, instance_tracker=None):
         """Create the purchase order and its items in a transaction."""
-        manager = get_plugin_manager_promise(info.context).get()
         app = get_app_promise(info.context).get()
 
         with transaction.atomic():
@@ -223,12 +219,16 @@ class PurchaseOrderCreate(DeprecatedModelMutation):
             # Create purchase order items
             items = cleaned_input.get("items", [])
             for item_data in items:
+                # Calculate total_price_amount from unit price * quantity
+                total_price = (
+                    item_data["unit_price_amount"] * item_data["quantity_ordered"]
+                )
+
                 models.PurchaseOrderItem.objects.create(
                     order=instance,
                     product_variant=item_data["product_variant"],
                     quantity_ordered=item_data["quantity_ordered"],
-                    quantity_received=0,
-                    unit_price_amount=item_data["unit_price_amount"],
+                    total_price_amount=total_price,
                     currency=item_data["currency"],
                     country_of_origin=item_data["country_of_origin"],
                     status=PurchaseOrderItemStatus.DRAFT,

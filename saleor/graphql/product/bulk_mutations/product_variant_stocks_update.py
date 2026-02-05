@@ -78,8 +78,12 @@ class ProductVariantStocksUpdate(ProductVariantStocksCreate):
                 warehouse_ids, "warehouse", only_type=Warehouse
             )
 
-            # Check for owned warehouses
-            for i, warehouse in enumerate(warehouses):
+            # Check for owned warehouses and filter them out
+            valid_stocks = []
+            valid_warehouses = []
+            for i, (stock, warehouse) in enumerate(
+                zip(stocks, warehouses, strict=False)
+            ):
                 if warehouse.is_owned:
                     error_msg = (
                         "Cannot update stock for owned warehouse. Stock updates for "
@@ -92,14 +96,22 @@ class ProductVariantStocksUpdate(ProductVariantStocksCreate):
                         StockErrorCode.OWNED_WAREHOUSE,
                         [i],
                     )
+                else:
+                    valid_stocks.append(stock)
+                    valid_warehouses.append(warehouse)
 
-            if errors:
-                raise ValidationError(errors)
-
-            manager = get_plugin_manager_promise(info.context).get()
-            cls.update_or_create_variant_stocks(variant, stocks, warehouses, manager)
+            # Only update valid stocks (non-owned warehouses)
+            if valid_stocks:
+                manager = get_plugin_manager_promise(info.context).get()
+                cls.update_or_create_variant_stocks(
+                    variant, valid_stocks, valid_warehouses, manager
+                )
 
         StocksByProductVariantIdLoader(info.context).clear(variant.id)
+
+        # Raise validation errors if any exist (after successful operations complete)
+        if errors:
+            raise ValidationError(errors)
 
         variant = ChannelContext(node=variant, channel_slug=None)
         return cls(product_variant=variant)

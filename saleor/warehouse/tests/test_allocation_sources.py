@@ -424,9 +424,8 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
         order=purchase_order,
         product_variant=variant,
         quantity_ordered=100,
-        quantity_received=0,
         quantity_allocated=0,
-        unit_price_amount=10.00,
+        total_price_amount=1000.0,  # 100 qty × $10.0/unit
         currency="USD",
         shipment=shipment,
         country_of_origin="US",

@@ -45,7 +45,6 @@ class ProductVariantStocksCreate(BaseMutation):
         error_type_field = "bulk_stock_errors"
 
     @classmethod
-    @traced_atomic_transaction()
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
         manager = get_plugin_manager_promise(info.context).get()
         errors: defaultdict[str, list[ValidationError]] = defaultdict(list)
@@ -55,19 +54,43 @@ class ProductVariantStocksCreate(BaseMutation):
         )
         if stocks:
             warehouses = cls.clean_stocks_input(variant, stocks, errors)
-            if errors:
-                raise ValidationError(errors)
-            new_stocks = create_stocks(variant, stocks, warehouses)
-
-            webhooks = get_webhooks_for_event(
-                WebhookEventAsyncType.PRODUCT_VARIANT_BACK_IN_STOCK
-            )
-            for stock in new_stocks:
-                cls.call_event(
-                    manager.product_variant_back_in_stock, stock, webhooks=webhooks
+            # Filter out stocks with errors (e.g., owned warehouses)
+            valid_stocks = []
+            valid_warehouses = []
+            for i, (stock, warehouse) in enumerate(
+                zip(stocks, warehouses, strict=False)
+            ):
+                # Check if this index has any errors
+                has_error = any(
+                    err.params and err.params.get("index") == i
+                    for error_list in errors.values()
+                    for err in error_list
                 )
+                if not has_error:
+                    valid_stocks.append(stock)
+                    valid_warehouses.append(warehouse)
+
+            # Only create stocks that don't have errors
+            new_stocks = []
+            if valid_stocks:
+                with traced_atomic_transaction():
+                    new_stocks = create_stocks(variant, valid_stocks, valid_warehouses)
+
+                    webhooks = get_webhooks_for_event(
+                        WebhookEventAsyncType.PRODUCT_VARIANT_BACK_IN_STOCK
+                    )
+                    for stock in new_stocks:
+                        cls.call_event(
+                            manager.product_variant_back_in_stock,
+                            stock,
+                            webhooks=webhooks,
+                        )
 
         StocksByProductVariantIdLoader(info.context).clear(variant.id)
+
+        # Raise validation errors if any exist (after successful operations complete)
+        if errors:
+            raise ValidationError(errors)
 
         variant = ChannelContext(node=variant, channel_slug=None)
         return cls(product_variant=variant)

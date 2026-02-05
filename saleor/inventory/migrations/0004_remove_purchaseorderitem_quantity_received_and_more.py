@@ -5,7 +5,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("account", "0095_repopulate_user_number_of_orders"),
         ("inventory", "0003_rename_quantity_to_quantity_ordered"),

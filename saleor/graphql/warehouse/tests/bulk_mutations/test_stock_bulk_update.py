@@ -6,8 +6,8 @@ from .....warehouse.error_codes import StockBulkUpdateErrorCode
 from ....tests.utils import get_graphql_content
 
 STOCKS_BULK_UPDATE_MUTATION = """
-    mutation StockBulkUpdate($stocks: [StockBulkUpdateInput!]!){
-        stockBulkUpdate(stocks: $stocks){
+    mutation StockBulkUpdate($stocks: [StockBulkUpdateInput!]!, $errorPolicy: ErrorPolicyEnum){
+        stockBulkUpdate(stocks: $stocks, errorPolicy: $errorPolicy){
             results{
                 errors {
                     field
@@ -570,7 +570,7 @@ def test_stocks_bulk_update_mixed_owned_and_non_owned_warehouses(
         },
     ]
 
-    variables = {"stocks": stocks_input}
+    variables = {"stocks": stocks_input, "errorPolicy": "REJECT_FAILED_ROWS"}
 
     # when
     staff_api_client.user.user_permissions.add(permission_manage_products)

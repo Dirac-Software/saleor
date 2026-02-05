@@ -5,6 +5,7 @@ from ....core.tracing import traced_atomic_transaction
 from ....permission.enums import ProductPermissions
 from ....product import models
 from ....warehouse import models as warehouse_models
+from ....warehouse.error_codes import StockErrorCode
 from ....warehouse.management import delete_stocks
 from ....webhook.event_types import WebhookEventAsyncType
 from ....webhook.utils import get_webhooks_for_event
@@ -84,7 +85,11 @@ class ProductVariantStocksDelete(BaseMutation):
                 "warehouses are managed through the inventory system."
             )
             raise ValidationError(
-                {"warehouse_ids": ValidationError(error_msg, code="OWNED_WAREHOUSE")}
+                {
+                    "warehouse_ids": ValidationError(
+                        error_msg, code=StockErrorCode.OWNED_WAREHOUSE
+                    )
+                }
             )
 
         webhooks = get_webhooks_for_event(

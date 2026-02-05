@@ -1,7 +1,6 @@
 """Shipment lifecycle management for inbound goods."""
 
 from django.db import transaction
-from django.utils import timezone
 
 from ..inventory import PurchaseOrderItemStatus
 from .models import Shipment
@@ -37,11 +36,9 @@ def create_shipment(
     carrier=None,
     tracking_number=None,
     shipping_cost=None,
-    shipping_cost_vat=None,
     currency="GBP",
 ):
-    """
-    Create a new shipment for inbound goods from supplier.
+    """Create a new shipment for inbound goods from supplier.
 
     Args:
         source_address: Address where shipment originates (supplier)
@@ -49,8 +46,7 @@ def create_shipment(
         purchase_order_items: List of PurchaseOrderItem instances to include
         carrier: Optional carrier name
         tracking_number: Optional tracking number
-        shipping_cost: Estimated shipping cost (Decimal)
-        shipping_cost_vat: Estimated VAT on shipping (Decimal)
+        shipping_cost: Estimated shipping cost including VAT (Decimal)
         currency: Currency for costs (default GBP)
 
     Returns:
@@ -61,6 +57,7 @@ def create_shipment(
 
     Links POIs to shipment for tracking physical movement.
     Costs start as estimates until invoice is added.
+
     """
     # Validate all POIs are CONFIRMED
     for poi in purchase_order_items:
@@ -75,13 +72,12 @@ def create_shipment(
             )
 
     # Create the shipment
-    shipment = Shipment.objects.create(
+    shipment = Shipment.objects.create(  # type: ignore[misc]
         source=source_address,
         destination=destination_address,
         carrier=carrier,
         tracking_number=tracking_number,
         shipping_cost_amount=shipping_cost or 0,
-        shipping_cost_vat_amount=shipping_cost_vat or 0,
         currency=currency,
     )
 
@@ -94,36 +90,31 @@ def create_shipment(
 
 
 @transaction.atomic
-def add_invoice_for_shipment(shipment, invoice, shipping_cost, shipping_cost_vat):
-    """
-    Attach shipping invoice and finalize costs.
+def add_invoice_for_shipment(shipment, invoice, shipping_cost):
+    """Attach shipping invoice and finalize costs.
 
     Args:
         shipment: Shipment instance
         invoice: Invoice instance for shipping costs
-        shipping_cost: Actual shipping cost from invoice (Decimal)
-        shipping_cost_vat: Actual VAT from invoice (Decimal)
+        shipping_cost: Actual shipping cost from invoice including VAT (Decimal)
 
     Returns:
         Updated Shipment instance
 
     Updates shipment with final costs from invoice.
     Called when shipping invoice is received and processed.
+
     """
     shipment.shipping_invoice = invoice
     shipment.shipping_cost_amount = shipping_cost
-    shipment.shipping_cost_vat_amount = shipping_cost_vat
-    shipment.save(
-        update_fields=["shipping_invoice", "shipping_cost_amount", "shipping_cost_vat_amount"]
-    )
+    shipment.save(update_fields=["shipping_invoice", "shipping_cost_amount"])
 
     return shipment
 
 
 @transaction.atomic
 def receive_shipment(shipment, items_received, finalize=False):
-    """
-    Process receipt of shipment goods.
+    """Process receipt of shipment goods.
 
     Args:
         shipment: Shipment instance being received
@@ -138,5 +129,6 @@ def receive_shipment(shipment, items_received, finalize=False):
     When finalize=True:
     - Sets shipment.arrived_at to current time
     - Finalizes all POIs (handles shortages, moves to RECEIVED status)
+
     """
     raise NotImplementedError("receive_shipment not yet implemented")

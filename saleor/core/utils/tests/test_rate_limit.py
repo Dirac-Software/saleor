@@ -139,34 +139,36 @@ def test_rate_limiter_check_or_raise_allows_when_under_limit():
     limiter.check_or_raise("user1")
 
 
-def test_rate_limiter_check_or_raise_raises_when_over_limit():
+def test_rate_limiter_check_or_raise_raises_when_over_limit(unique_prefix):
     # given
     limiter = RateLimiter(
-        key_prefix="test_raise_over", max_requests=2, window_seconds=60
+        key_prefix=f"{unique_prefix}_raise_over", max_requests=2, window_seconds=60
     )
 
     # when - Make 2 requests (at limit)
-    limiter.check_or_raise("user_raise_over")
-    limiter.check_or_raise("user_raise_over")
+    user_id = f"{unique_prefix}_user_raise_over"
+    limiter.check_or_raise(user_id)
+    limiter.check_or_raise(user_id)
 
     # then - 3rd request should raise
     with pytest.raises(RateLimitExceeded) as exc_info:
-        limiter.check_or_raise("user_raise_over")
+        limiter.check_or_raise(user_id)
 
     assert "Rate limit exceeded" in str(exc_info.value)
     assert exc_info.value.retry_after > 0
 
 
-def test_rate_limiter_check_or_raise_custom_message():
+def test_rate_limiter_check_or_raise_custom_message(unique_prefix):
     # given
     limiter = RateLimiter(
-        key_prefix="test_custom_msg", max_requests=1, window_seconds=60
+        key_prefix=f"{unique_prefix}_custom_msg", max_requests=1, window_seconds=60
     )
-    limiter.check_or_raise("user_custom_msg")
+    user_id = f"{unique_prefix}_user_custom_msg"
+    limiter.check_or_raise(user_id)
 
     # when/then
     with pytest.raises(RateLimitExceeded) as exc_info:
-        limiter.check_or_raise("user_custom_msg", error_message="Custom error")
+        limiter.check_or_raise(user_id, error_message="Custom error")
 
     assert str(exc_info.value) == "Custom error"
 

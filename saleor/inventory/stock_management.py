@@ -3,12 +3,13 @@
 from django.db import transaction
 from django.utils import timezone
 
-from ..core.exceptions import InsufficientStock
+from ..core.exceptions import InsufficientStock, InsufficientStockData
 from ..warehouse.models import Stock
 from . import PurchaseOrderItemStatus
 from .exceptions import (
     AdjustmentAffectsConfirmedOrders,
     AdjustmentAffectsFulfilledOrders,
+    AdjustmentAffectsPaidOrders,
     AdjustmentAlreadyProcessed,
     InvalidPurchaseOrderItemStatus,
     ReceiptLineNotInProgress,
@@ -169,7 +170,7 @@ def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
     return source
 
 
-#TODO: this needs work on refunding orders
+# TODO: this needs work on refunding orders
 @transaction.atomic
 def process_adjustment(
     adjustment: PurchaseOrderItemAdjustment,
@@ -207,6 +208,7 @@ def process_adjustment(
 
     UNFULFILLED orders require manual resolution (cannot be edited via standard flow) -
     we will kick this back for now
+
     """
     from ..order import OrderStatus
     from ..warehouse.management import can_confirm_order, deallocate_sources
@@ -229,8 +231,8 @@ def process_adjustment(
         stock.quantity += quantity_change
         stock.save(update_fields=["quantity"])
 
-        poi.quantity_received += quantity_change
-        poi.save(update_fields=["quantity_received"])
+        # Note: quantity_received is not modified - it represents what was physically received
+        # Adjustments affect available_quantity which includes processed adjustments
 
     # Handle negative adjustment (loss)
     elif quantity_change < 0:
@@ -241,13 +243,11 @@ def process_adjustment(
         if stock.quantity < loss:
             raise InsufficientStock(
                 [
-                    {
-                        "warehouse": stock.warehouse.name,
-                        "variant": stock.product_variant.sku,
-                        "available_quantity": stock.quantity,
-                        "quantity_allocated": stock.quantity_allocated,
-                        "requested": loss,
-                    }
+                    InsufficientStockData(
+                        available_quantity=stock.quantity,
+                        variant=stock.product_variant,
+                        warehouse_pk=stock.warehouse.pk,
+                    )
                 ]
             )
 
@@ -318,9 +318,8 @@ def process_adjustment(
         stock.quantity -= loss
         stock.save(update_fields=["quantity", "quantity_allocated"])
 
-        # Decrease POI quantity
-        poi.quantity_received -= loss
-        poi.save(update_fields=["quantity_received"])
+        # Note: quantity_received is not modified - it represents what was physically received
+        # The adjustment is tracked separately and affects available_quantity
 
         # Unconfirm orders that lost all their sources
         for order in orders_to_check:
@@ -351,6 +350,7 @@ def start_receipt(shipment, user=None):
 
     Raises:
         ValueError: If shipment already has a receipt or is already received
+
     """
     from .models import Receipt
 
@@ -391,6 +391,7 @@ def receive_item(receipt, product_variant, quantity, user=None, notes=""):
     Raises:
         ReceiptNotInProgress: If receipt is not in progress
         ValueError: If variant not in shipment
+
     """
     from . import ReceiptStatus
     from .models import ReceiptLine
@@ -407,13 +408,9 @@ def receive_item(receipt, product_variant, quantity, user=None, notes=""):
         raise ValueError(
             f"Product variant {product_variant.sku} not found in "
             f"shipment {receipt.shipment.id}"
-        )
+        ) from None
 
-    # Update POI quantity_received
-    poi.quantity_received += quantity
-    poi.save(update_fields=["quantity_received", "updated_at"])
-
-    # Create receipt line for audit trail
+    # Create receipt line (quantity_received will be automatically calculated from receipt lines)
     receipt_line = ReceiptLine.objects.create(
         receipt=receipt,
         purchase_order_item=poi,
@@ -457,10 +454,14 @@ def complete_receipt(receipt, user=None, manager=None):
 
     Raises:
         ValueError: If receipt is not in progress
+
     """
     from ..core.notify import AdminNotifyEvent, NotifyHandler
-    from . import PurchaseOrderItemAdjustmentReason, PurchaseOrderItemStatus, ReceiptStatus
-    from .exceptions import AdjustmentAffectsConfirmedOrders
+    from . import (
+        PurchaseOrderItemAdjustmentReason,
+        PurchaseOrderItemStatus,
+        ReceiptStatus,
+    )
     from .models import PurchaseOrderItemAdjustment
 
     # Validate receipt status
@@ -468,9 +469,7 @@ def complete_receipt(receipt, user=None, manager=None):
         raise ValueError(f"Receipt {receipt.id} is not in progress")
 
     shipment = receipt.shipment
-    pois = PurchaseOrderItem.objects.select_for_update().filter(
-        shipment=shipment
-    )
+    pois = PurchaseOrderItem.objects.select_for_update().filter(shipment=shipment)
 
     adjustments_created = []
     adjustments_pending = []
@@ -529,6 +528,7 @@ def complete_receipt(receipt, user=None, manager=None):
 
     # If there are pending adjustments, notify staff
     if adjustments_pending and manager:
+
         def generate_payload():
             return {
                 "receipt_id": receipt.id,
@@ -573,6 +573,7 @@ def delete_receipt(receipt):
 
     Raises:
         ReceiptNotInProgress: If receipt is already completed
+
     """
     from . import ReceiptStatus
 
@@ -580,13 +581,7 @@ def delete_receipt(receipt):
     if receipt.status != ReceiptStatus.IN_PROGRESS:
         raise ReceiptNotInProgress(receipt)
 
-    # Revert POI.quantity_received for all receipt lines
-    for line in receipt.lines.select_related("purchase_order_item"):
-        poi = line.purchase_order_item
-        poi.quantity_received -= line.quantity_received
-        poi.save(update_fields=["quantity_received", "updated_at"])
-
-    # Delete the receipt (cascade will delete lines)
+    # Delete the receipt (cascade will delete lines, quantity_received auto-recalculates)
     receipt.delete()
 
 
@@ -602,6 +597,7 @@ def delete_receipt_line(receipt_line):
 
     Raises:
         ReceiptLineNotInProgress: If receipt is not in progress
+
     """
     from . import ReceiptStatus
 
@@ -609,10 +605,5 @@ def delete_receipt_line(receipt_line):
     if receipt_line.receipt.status != ReceiptStatus.IN_PROGRESS:
         raise ReceiptLineNotInProgress(receipt_line)
 
-    # Revert POI quantity
-    poi = receipt_line.purchase_order_item
-    poi.quantity_received -= receipt_line.quantity_received
-    poi.save(update_fields=["quantity_received", "updated_at"])
-
-    # Delete the line
+    # Delete the line (quantity_received auto-recalculates from remaining lines)
     receipt_line.delete()

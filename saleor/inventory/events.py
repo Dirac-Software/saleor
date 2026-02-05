@@ -1,5 +1,4 @@
 """Event logging for inventory/purchase order operations."""
-from typing import Optional
 
 from ..account.models import User
 from ..app.models import App
@@ -9,8 +8,8 @@ from .models import PurchaseOrder
 def purchase_order_created_event(
     *,
     purchase_order: PurchaseOrder,
-    user: Optional[User] = None,
-    app: Optional[App] = None,
+    user: User | None = None,
+    app: App | None = None,
 ) -> None:
     """Log purchase order creation event.
 
@@ -19,14 +18,13 @@ def purchase_order_created_event(
     # In a full implementation, this would create an event log entry
     # For now, we'll keep it as a placeholder for the event system
     # that Saleor uses for audit trails
-    pass
 
 
 def purchase_order_confirmed_event(
     *,
     purchase_order: PurchaseOrder,
-    user: Optional[User] = None,
-    app: Optional[App] = None,
+    user: User | None = None,
+    app: App | None = None,
 ) -> None:
     """Log purchase order confirmation event.
 
@@ -35,4 +33,3 @@ def purchase_order_confirmed_event(
     # In a full implementation, this would create an event log entry
     # For now, we'll keep it as a placeholder for the event system
     # that Saleor uses for audit trails
-    pass

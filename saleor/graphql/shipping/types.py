@@ -20,6 +20,7 @@ from ..core.context import (
 from ..core.descriptions import DEFAULT_DEPRECATION_REASON, RICH_CONTENT
 from ..core.doc_category import DOC_CATEGORY_SHIPPING
 from ..core.fields import ConnectionField, JSONString, PermissionsField
+from ..core.scalars import DateTime
 from ..core.tracing import traced_resolver
 from ..core.types import (
     BaseObjectType,
@@ -450,29 +451,28 @@ class Shipment(ModelObjectType[models.Shipment]):
     shipping_cost = graphene.Field(
         Money,
         required=True,
-        description="Shipping cost (estimated until invoice added).",
-    )
-    shipping_cost_vat = graphene.Field(
-        Money,
-        required=True,
-        description="VAT on shipping cost.",
+        description="Shipping cost including VAT (estimated until invoice added).",
     )
     shipping_invoice = graphene.Field(
         "saleor.graphql.invoice.types.Invoice",
         description="Shipping invoice (null if not yet received).",
     )
-    arrived_at = graphene.DateTime(
+    arrived_at = DateTime(
         description="When shipment arrived (null if still in transit)."
     )
-    departed_at = graphene.DateTime(
+    departed_at = DateTime(
         description="When shipment departed (null for inbound shipments)."
     )
     carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
     tracking_number = graphene.String(description="Tracking number from carrier.")
     purchase_order_items = NonNullList(
-        lambda: __import__('saleor.graphql.inventory.types', fromlist=['PurchaseOrderItem']).PurchaseOrderItem,
+        "saleor.graphql.inventory.types.PurchaseOrderItem",
         required=True,
         description="Purchase order items in this shipment.",
+    )
+    receipt = graphene.Field(
+        "saleor.graphql.inventory.types.Receipt",
+        description="Receipt for this shipment (null if not yet received).",
     )
 
     class Meta:
@@ -484,6 +484,10 @@ class Shipment(ModelObjectType[models.Shipment]):
     @staticmethod
     def resolve_purchase_order_items(root, info):
         return root.purchase_order_items.all()
+
+    @staticmethod
+    def resolve_receipt(root, info):
+        return getattr(root, "receipt", None)
 
 
 class ShipmentCountableConnection(CountableConnection):

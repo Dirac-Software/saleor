@@ -150,6 +150,7 @@ if TYPE_CHECKING:
     from ...discount.models import Promotion, PromotionRule, Voucher, VoucherCode
     from ...giftcard.models import GiftCard
     from ...graphql.core.dataloaders import DataLoader
+    from ...inventory.models import PurchaseOrder
     from ...invoice.models import Invoice
     from ...menu.models import Menu, MenuItem
     from ...order.models import Fulfillment, Order
@@ -2618,7 +2619,9 @@ class WebhookPlugin(BasePlugin):
         if webhooks := get_webhooks_for_event(event_type):
             payload = self._serialize_payload(
                 {
-                    "id": graphene.Node.to_global_id("PurchaseOrder", purchase_order.id),
+                    "id": graphene.Node.to_global_id(
+                        "PurchaseOrder", purchase_order.id
+                    ),
                 }
             )
             self.trigger_webhooks_async(

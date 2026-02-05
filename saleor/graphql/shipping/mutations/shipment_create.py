@@ -3,7 +3,6 @@ from django.core.exceptions import ValidationError
 
 from ....permission.enums import ShippingPermissions
 from ....shipping.receiving import create_shipment
-from ...account.dataloaders import AddressByIdLoader
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_SHIPPING
 from ...core.mutations import BaseMutation
@@ -29,8 +28,9 @@ class ShipmentCreateInput(BaseInputObjectType):
     )
     carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
     tracking_number = graphene.String(description="Tracking number from carrier.")
-    shipping_cost = PositiveDecimal(description="Estimated shipping cost.")
-    shipping_cost_vat = PositiveDecimal(description="Estimated VAT on shipping.")
+    shipping_cost = PositiveDecimal(
+        description="Estimated shipping cost including VAT."
+    )
     currency = graphene.String(
         description="Currency code (default: GBP).",
         default_value="GBP",
@@ -58,11 +58,12 @@ class ShipmentCreate(BaseMutation):
 
     @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
+        from ....account.models import Address
         from ....inventory.models import PurchaseOrderItem
 
         input_data = data["input"]
 
-        # Load addresses
+        # Get addresses
         _, source_address_pk = from_global_id_or_error(
             input_data["source_address_id"], "Address"
         )
@@ -70,10 +71,11 @@ class ShipmentCreate(BaseMutation):
             input_data["destination_address_id"], "Address"
         )
 
-        source_address = AddressByIdLoader(info.context).load(source_address_pk)
-        destination_address = AddressByIdLoader(info.context).load(
-            destination_address_pk
-        )
+        try:
+            source_address = Address.objects.get(pk=source_address_pk)
+            destination_address = Address.objects.get(pk=destination_address_pk)
+        except Address.DoesNotExist:
+            raise ValidationError("Address not found.") from None
 
         # Load purchase order items
         poi_pks = []
@@ -97,10 +99,9 @@ class ShipmentCreate(BaseMutation):
                 carrier=input_data.get("carrier"),
                 tracking_number=input_data.get("tracking_number"),
                 shipping_cost=input_data.get("shipping_cost"),
-                shipping_cost_vat=input_data.get("shipping_cost_vat"),
                 currency=input_data.get("currency", "GBP"),
             )
         except ValueError as e:
-            raise ValidationError(str(e))
+            raise ValidationError(str(e)) from e
 
         return ShipmentCreate(shipment=shipment)

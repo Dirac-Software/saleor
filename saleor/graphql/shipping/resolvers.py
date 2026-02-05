@@ -19,6 +19,18 @@ def resolve_shipping_zones(info, channel_slug):
     return ChannelQsContext(qs=instances, channel_slug=channel_slug)
 
 
+def resolve_shipments(info):
+    """Resolve list of shipments."""
+    database_connection_name = get_database_connection_name(info.context)
+    return models.Shipment.objects.using(database_connection_name).all()
+
+
+def resolve_shipment(info, id):
+    """Resolve a single shipment by ID."""
+    database_connection_name = get_database_connection_name(info.context)
+    return models.Shipment.objects.using(database_connection_name).filter(id=id).first()
+
+
 def resolve_price_range(info, channel_slug):
     # TODO: Add dataloader.
     channel_listing = models.ShippingMethodChannelListing.objects.using(

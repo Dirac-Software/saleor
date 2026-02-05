@@ -364,9 +364,20 @@ def allocate_stocks(
     if allocations:
         Allocation.objects.bulk_create(allocations)
 
+        # Fetch the allocations with their related stock objects
+        # This is necessary because bulk_create doesn't populate relations
+        stock_ids = {alloc.stock_id for alloc in allocations}
+        order_line_ids = {alloc.order_line_id for alloc in allocations}
+        allocations = list(
+            Allocation.objects.filter(
+                order_line_id__in=order_line_ids, stock_id__in=stock_ids
+            ).select_related(
+                "stock", "stock__warehouse", "stock__product_variant", "order_line"
+            )
+        )
+
         # Create AllocationSources for owned warehouses (batch tracking)
         # Get warehouse ownership info efficiently
-        stock_ids = {alloc.stock_id for alloc in allocations}
         owned_stock_ids = set(
             Stock.objects.filter(
                 id__in=stock_ids, warehouse__is_owned=True
@@ -400,20 +411,6 @@ def allocate_stocks(
                 transaction.on_commit(
                     lambda: manager.product_variant_out_of_stock(allocation.stock)
                 )
-
-        # Auto-confirm orders that are ready (all allocations have sources)
-        from ..order import OrderStatus
-
-        orders_to_check = set()
-        for allocation in allocations:
-            order = allocation.order_line.order
-            if order.status == OrderStatus.UNCONFIRMED:
-                orders_to_check.add(order)
-
-        for order in orders_to_check:
-            if can_confirm_order(order):
-                order.status = OrderStatus.UNFULFILLED
-                order.save(update_fields=["status"])
 
 
 def _prepare_stock_to_reserved_quantity_map(

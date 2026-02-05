@@ -6,15 +6,18 @@ from ....inventory.stock_management import start_receipt
 from ....permission.enums import ProductPermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
-from ...core.mutations import ModelMutation
-from ...core.types import ReceiptError
+from ...core.mutations import BaseMutation
 from ...core.utils import from_global_id_or_error
-from ...shipping.types import Shipment
-from ..types import Receipt
+from ..types import Receipt, ReceiptError
 
 
-class ReceiptStart(ModelMutation):
+class ReceiptStart(BaseMutation):
     """Start a new receipt for an inbound shipment."""
+
+    receipt = graphene.Field(
+        Receipt,
+        description="The created receipt.",
+    )
 
     class Arguments:
         shipment_id = graphene.ID(
@@ -24,8 +27,6 @@ class ReceiptStart(ModelMutation):
 
     class Meta:
         description = "Start receiving goods from an inbound shipment."
-        model = Receipt
-        object_type = Receipt
         permissions = (ProductPermissions.MANAGE_PRODUCTS,)
         error_type_class = ReceiptError
         error_type_field = "receipt_errors"
@@ -36,9 +37,7 @@ class ReceiptStart(ModelMutation):
         shipment_id = data["shipment_id"]
 
         # Get shipment
-        _, shipment_pk = from_global_id_or_error(
-            shipment_id, "Shipment"
-        )
+        _, shipment_pk = from_global_id_or_error(shipment_id, "Shipment")
 
         from ....shipping.models import Shipment as ShipmentModel
 
@@ -52,7 +51,7 @@ class ReceiptStart(ModelMutation):
                         code=ReceiptErrorCode.NOT_FOUND.value,
                     )
                 }
-            )
+            ) from None
 
         # Start receipt
         try:
@@ -65,6 +64,6 @@ class ReceiptStart(ModelMutation):
                         code=ReceiptErrorCode.INVALID.value,
                     )
                 }
-            )
+            ) from e
 
         return ReceiptStart(receipt=receipt)

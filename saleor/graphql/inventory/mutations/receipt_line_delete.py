@@ -9,8 +9,8 @@ from ....permission.enums import ProductPermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import BaseMutation
-from ...core.types import ReceiptError
 from ...core.utils import from_global_id_or_error
+from ..types import ReceiptError
 
 
 class ReceiptLineDelete(BaseMutation):
@@ -50,7 +50,7 @@ class ReceiptLineDelete(BaseMutation):
                         code=ReceiptErrorCode.NOT_FOUND.value,
                     )
                 }
-            )
+            ) from None
 
         # Delete line
         try:
@@ -63,6 +63,6 @@ class ReceiptLineDelete(BaseMutation):
                         code=ReceiptErrorCode.INVALID.value,
                     )
                 }
-            )
+            ) from e
 
         return ReceiptLineDelete()

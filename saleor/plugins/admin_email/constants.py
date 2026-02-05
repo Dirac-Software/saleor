@@ -50,9 +50,7 @@ STAFF_PASSWORD_RESET_DEFAULT_SUBJECT = "Reset your Saleor password"
 CONTACT_FORM_SUBMISSION_DEFAULT_SUBJECT = (
     "New Contact Form Submission from {{ business_name }}"
 )
-PENDING_ADJUSTMENTS_DEFAULT_SUBJECT = (
-    "ACTION REQUIRED: {{ count }} pending inventory adjustment(s) for Receipt #{{ receipt_id }}"
-)
+PENDING_ADJUSTMENTS_DEFAULT_SUBJECT = "ACTION REQUIRED: {{ count }} pending inventory adjustment(s) for Receipt #{{ receipt_id }}"
 
 
 PLUGIN_ID = "mirumee.notifications.admin_email"
