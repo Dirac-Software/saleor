@@ -19,9 +19,13 @@ def test_can_confirm_order_with_fully_sourced_allocations(
     order.save(update_fields=["status"])
 
     variant = order_line.variant
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -44,9 +48,13 @@ def test_cannot_confirm_order_with_nonowned_warehouse(
     order.save(update_fields=["status"])
 
     variant = order_line.variant
-    Stock.objects.create(
-        warehouse=nonowned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=nonowned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -67,9 +75,13 @@ def test_cannot_confirm_order_without_allocation_sources(order_line, owned_wareh
     order.save(update_fields=["status"])
 
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     Allocation.objects.create(order_line=order_line, stock=stock, quantity_allocated=50)
     # No AllocationSource created
@@ -88,9 +100,13 @@ def test_cannot_confirm_order_with_partial_sources(
     order.save(update_fields=["status"])
 
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     allocation = Allocation.objects.create(
         order_line=order_line, stock=stock, quantity_allocated=50
@@ -128,9 +144,13 @@ def test_can_confirm_order_with_multiple_sources(
     order.save(update_fields=["status"])
 
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     # Create two PurchaseOrderItems
     poi1 = PurchaseOrderItem.objects.create(
@@ -178,12 +198,21 @@ def test_cannot_confirm_order_with_mixed_warehouses(
 
     variant = order_line.variant
 
-    stock_owned = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock_owned, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
-    stock_nonowned = Stock.objects.create(
-        warehouse=nonowned_warehouse, product_variant=variant, quantity=100
+    stock_owned.quantity = 100
+    stock_owned.save(update_fields=["quantity"])
+
+    stock_nonowned, _ = Stock.objects.get_or_create(
+        warehouse=nonowned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock_nonowned.quantity = 100
+    stock_nonowned.save(update_fields=["quantity"])
 
     # First allocation in owned warehouse with source
     allocation1 = Allocation.objects.create(
@@ -251,9 +280,13 @@ def test_can_confirm_order_multiple_order_lines(
 
     # Allocate first line
     order_line1 = order_line
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=order_line1.variant, quantity=100
+    stock1, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=order_line1.variant,
+        defaults={"quantity": 100},
     )
+    stock1.quantity = 100
+    stock1.save(update_fields=["quantity"])
     allocate_stocks(
         [OrderLineInfo(line=order_line1, variant=order_line1.variant, quantity=50)],
         COUNTRY_CODE,
@@ -262,9 +295,13 @@ def test_can_confirm_order_multiple_order_lines(
     )
 
     # Allocate second line
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant2, quantity=100
+    stock2, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant2,
+        defaults={"quantity": 100},
     )
+    stock2.quantity = 100
+    stock2.save(update_fields=["quantity"])
     allocate_stocks(
         [OrderLineInfo(line=order_line2, variant=variant2, quantity=10)],
         COUNTRY_CODE,
@@ -311,9 +348,13 @@ def test_cannot_confirm_order_with_one_line_incomplete(
 
     # Allocate first line (properly sourced)
     order_line1 = order_line
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=order_line1.variant, quantity=100
+    stock1, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=order_line1.variant,
+        defaults={"quantity": 100},
     )
+    stock1.quantity = 100
+    stock1.save(update_fields=["quantity"])
     allocate_stocks(
         [OrderLineInfo(line=order_line1, variant=order_line1.variant, quantity=50)],
         COUNTRY_CODE,
@@ -322,9 +363,14 @@ def test_cannot_confirm_order_with_one_line_incomplete(
     )
 
     # Second line: allocation WITHOUT sources
-    stock2 = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant2, quantity=100
+    stock2, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant2,
+        defaults={"quantity": 100},
     )
+    stock2.quantity = 100
+    stock2.save(update_fields=["quantity"])
+
     Allocation.objects.create(
         order_line=order_line2, stock=stock2, quantity_allocated=10
     )

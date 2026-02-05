@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 
 from ....permission.enums import ShippingPermissions
 from ....shipping.receiving import create_shipment
+from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_SHIPPING
 from ...core.mutations import BaseMutation
@@ -91,6 +92,8 @@ class ShipmentCreate(BaseMutation):
             raise ValidationError("Some purchase order items not found.")
 
         # Create shipment
+        app = get_app_promise(info.context).get()
+
         try:
             shipment = create_shipment(
                 source_address=source_address,
@@ -100,6 +103,8 @@ class ShipmentCreate(BaseMutation):
                 tracking_number=input_data.get("tracking_number"),
                 shipping_cost=input_data.get("shipping_cost"),
                 currency=input_data.get("currency", "GBP"),
+                user=info.context.user,
+                app=app,
             )
         except ValueError as e:
             raise ValidationError(str(e)) from e

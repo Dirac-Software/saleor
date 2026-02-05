@@ -3,6 +3,7 @@
 from django.db import transaction
 
 from ..inventory import PurchaseOrderItemStatus
+from ..inventory.events import shipment_assigned_event
 from .models import Shipment
 
 """
@@ -12,18 +13,9 @@ We create a shipment
 Goods arrive at warehouse
 We record the shipping invoice
 
-What ordering should we impose on these events?
 
-I expect there will be some check in shipment session model, where we increment
-the POI quantity_received. Once we finish a session then we can click 'done' and mark
-the shipment as received.
-
-In order to make this work a shipment which tracks some POIs tht are arriving must
-exist first. We probably want to record the tracking number of a shipment when we make
-it so the warehouse guys can plan ahead. We need an invoice to do accounting so this can
-be nullable.
-
-We use a constraint that a shipment must
+A receipt requires a shipment.
+A shipment requires a PO.
 
 """
 
@@ -37,6 +29,8 @@ def create_shipment(
     tracking_number=None,
     shipping_cost=None,
     currency="GBP",
+    user=None,
+    app=None,
 ):
     """Create a new shipment for inbound goods from supplier.
 
@@ -48,6 +42,8 @@ def create_shipment(
         tracking_number: Optional tracking number
         shipping_cost: Estimated shipping cost including VAT (Decimal)
         currency: Currency for costs (default GBP)
+        user: Optional user who created the shipment
+        app: Optional app that created the shipment
 
     Returns:
         Shipment instance
@@ -81,54 +77,17 @@ def create_shipment(
         currency=currency,
     )
 
-    # Link POIs to shipment
+    # Link POIs to shipment and log events
     for poi in purchase_order_items:
         poi.shipment = shipment
         poi.save(update_fields=["shipment"])
 
-    return shipment
-
-
-@transaction.atomic
-def add_invoice_for_shipment(shipment, invoice, shipping_cost):
-    """Attach shipping invoice and finalize costs.
-
-    Args:
-        shipment: Shipment instance
-        invoice: Invoice instance for shipping costs
-        shipping_cost: Actual shipping cost from invoice including VAT (Decimal)
-
-    Returns:
-        Updated Shipment instance
-
-    Updates shipment with final costs from invoice.
-    Called when shipping invoice is received and processed.
-
-    """
-    shipment.shipping_invoice = invoice
-    shipment.shipping_cost_amount = shipping_cost
-    shipment.save(update_fields=["shipping_invoice", "shipping_cost_amount"])
+        # Log shipment assignment for audit trail
+        shipment_assigned_event(
+            purchase_order_item=poi,
+            shipment_id=shipment.id,
+            user=user,
+            app=app,
+        )
 
     return shipment
-
-
-@transaction.atomic
-def receive_shipment(shipment, items_received, finalize=False):
-    """Process receipt of shipment goods.
-
-    Args:
-        shipment: Shipment instance being received
-        items_received: Dict mapping POI IDs to actual quantities received
-                       Example: {poi_id_1: 50, poi_id_2: 100}
-        finalize: If True, finalize all POIs and handle shortages
-
-    Returns:
-        Updated Shipment instance
-
-    Can be called multiple times as goods arrive incrementally.
-    When finalize=True:
-    - Sets shipment.arrived_at to current time
-    - Finalizes all POIs (handles shortages, moves to RECEIVED status)
-
-    """
-    raise NotImplementedError("receive_shipment not yet implemented")

@@ -40,4 +40,3 @@ What am I missing (need confirmation from Paul)
 We have Shipping cost + Duty
 Shipping Cost is charged by the shipment provider (normally fedex) and several shipments appear in a single invoice. HOWEVER, one shipment is never split across invoices.
 Duties _may_ occur in a different invoice, sometimes from a shipment provider and sometimes from a freight forwarder and show duties charged by HS code. We sometimes have to break down a Duties invoice using what shipments we expect to attribute the cost per shipment per HS code.
-

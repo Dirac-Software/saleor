@@ -89,15 +89,6 @@ def delete_allocations(allocation_pks_to_delete: list[int]):
         return Allocation.objects.filter(id__in=[a.id for a in allocations]).delete()
 
 
-def get_available_poi_quantity(purchase_order_item):
-    """Calculate available quantity for a PurchaseOrderItem.
-
-    Returns the quantity not yet allocated to orders via AllocationSources.
-    Uses quantity_received if RECEIVED, otherwise quantity_ordered.
-    """
-    return purchase_order_item.available_quantity
-
-
 def can_confirm_order(order: "Order") -> bool:
     """Check if order can transition from UNCONFIRMED to UNFULFILLED.
 
@@ -134,11 +125,11 @@ def can_confirm_order(order: "Order") -> bool:
 def _allocate_sources_incremental(allocation: Allocation, quantity: int):
     """Allocate sources for an incremental quantity added to existing allocation.
 
+    Required to confirm a purchase order.
+
     Similar to allocate_sources() but only allocates the specified quantity,
     not the full allocation.quantity_allocated.
 
-    This does not change Stock quantity or quantity_allocated - this should already
-    be done as we have created the allocation
 
     Args:
         allocation: The existing Allocation to add sources to.
@@ -155,17 +146,14 @@ def _allocate_sources_incremental(allocation: Allocation, quantity: int):
 
     # Get active POIs for this stock in FIFO order (by confirmation date)
     # Only CONFIRMED or RECEIVED - exclude DRAFT and CANCELLED
-    active_statuses = [
-        PurchaseOrderItemStatus.CONFIRMED,
-        PurchaseOrderItemStatus.RECEIVED,
-    ]
     pois = (
         PurchaseOrderItem.objects.filter(
             order__destination_warehouse=allocation.stock.warehouse,
             product_variant=allocation.stock.product_variant,
-            status__in=active_statuses,
+            status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
             quantity_ordered__gt=F("quantity_allocated"),
         )
+        .annotate_available_quantity()
         .select_for_update()
         .order_by("confirmed_at", "created_at")
     )
@@ -181,7 +169,7 @@ def _allocate_sources_incremental(allocation: Allocation, quantity: int):
     }
 
     for poi in pois:
-        available = get_available_poi_quantity(poi)
+        available = poi.available_quantity
         assert available > 0, (
             "Despite checking available quantity > 0 in query poi has <0 available quantity"
         )
@@ -576,8 +564,20 @@ def deallocate_sources(allocation, quantity_to_deallocate):
         allocation: The Allocation to deallocate sources from.
         quantity_to_deallocate: How much to deallocate (can be partial or full).
 
+    Raises:
+        ValueError: If order has items that have been shipped/fulfilled.
+
     """
     from ..inventory.models import PurchaseOrderItem
+    from ..order import ORDER_ITEMS_SHIPPED_STATUS
+
+    # SAFETY: Only allow deallocation if items haven't left the warehouse
+    order = allocation.order_line.order
+    if order.status in ORDER_ITEMS_SHIPPED_STATUS:
+        raise ValueError(
+            f"Cannot deallocate from order {order.number} with status {order.status}. "
+            f"Order has items that have been shipped/fulfilled."
+        )
 
     # Get allocation sources in LIFO order (reverse of allocation - newest first)
     sources = allocation.allocation_sources.select_for_update().order_by("-pk")

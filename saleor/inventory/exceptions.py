@@ -24,6 +24,30 @@ class InvalidPurchaseOrderItemStatus(Exception):
         )
 
 
+class AllocationInvariantViolation(Exception):
+    """Raised when allocation state violates system invariants.
+
+    Non-owned (supplier) warehouses should only have allocations for UNCONFIRMED orders.
+    Once an order is confirmed/unfulfilled, its allocations must be in owned warehouses
+    with AllocationSources linking them to specific POI batches.
+
+    This exception indicates a critical data integrity issue that should never occur
+    in normal operation.
+    """
+
+    def __init__(self, warehouse_name: str, order_number: str, order_status: str):
+        self.warehouse_name = warehouse_name
+        self.order_number = order_number
+        self.order_status = order_status
+        super().__init__(
+            f"INVARIANT VIOLATION: Non-owned warehouse '{warehouse_name}' has allocation "
+            f"for order {order_number} with status '{order_status}'. "
+            f"Only UNCONFIRMED orders should have allocations at supplier warehouses. "
+            f"This indicates a data integrity issue - allocations should have been moved "
+            f"to an owned warehouse when the order was confirmed."
+        )
+
+
 class AdjustmentAlreadyProcessed(Exception):
     """Raised when trying to process an adjustment that has already been processed."""
 

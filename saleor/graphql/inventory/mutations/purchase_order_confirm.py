@@ -87,7 +87,7 @@ class PurchaseOrderConfirm(BaseMutation):
         try:
             with transaction.atomic():
                 for item in purchase_order.items.all():
-                    confirm_purchase_order_item(item)
+                    confirm_purchase_order_item(item, user=info.context.user, app=app)
 
                 # Log the event for audit trail
                 events.purchase_order_confirmed_event(

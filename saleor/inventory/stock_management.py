@@ -6,11 +6,17 @@ from django.utils import timezone
 from ..core.exceptions import InsufficientStock, InsufficientStockData
 from ..warehouse.models import Stock
 from . import PurchaseOrderItemStatus
+from .events import (
+    adjustment_created_event,
+    adjustment_processed_event,
+    purchase_order_item_confirmed_event,
+)
 from .exceptions import (
     AdjustmentAffectsConfirmedOrders,
     AdjustmentAffectsFulfilledOrders,
     AdjustmentAffectsPaidOrders,
     AdjustmentAlreadyProcessed,
+    AllocationInvariantViolation,
     InvalidPurchaseOrderItemStatus,
     ReceiptLineNotInProgress,
     ReceiptNotInProgress,
@@ -19,7 +25,9 @@ from .models import PurchaseOrderItem, PurchaseOrderItemAdjustment
 
 
 @transaction.atomic
-def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
+def confirm_purchase_order_item(
+    purchase_order_item: PurchaseOrderItem, user=None, app=None
+):
     """Confirm purchase order item and move stock from supplier to owned warehouse.
 
     This is THE ONLY WAY stock enters owned warehouses. When a POI is confirmed,
@@ -29,6 +37,7 @@ def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
     1. Moves physical stock from source to destination
     2. Tries to attach existing allocations (if any) to the stock
     3. Creates AllocationSources to link allocations to this POI (batch tracking)
+    4. Logs the confirmation event for audit trail
 
     See `saleor/warehouse/tests/test_stock_invariants.py` for description of how Stock
     must be updated and relevant tests
@@ -52,10 +61,14 @@ def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
         )
     )
 
-    destination, created = Stock.objects.select_for_update().get_or_create(
-        warehouse=purchase_order_item.order.destination_warehouse,
-        product_variant=purchase_order_item.product_variant,
-        defaults={"quantity": 0, "quantity_allocated": 0},
+    destination, created = (
+        Stock.objects.select_for_update()
+        .select_related("warehouse")
+        .get_or_create(
+            warehouse=purchase_order_item.order.destination_warehouse,
+            product_variant=purchase_order_item.product_variant,
+            defaults={"quantity": 0, "quantity_allocated": 0},
+        )
     )
 
     quantity = purchase_order_item.quantity_ordered
@@ -88,6 +101,15 @@ def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
         order = allocation.order_line.order
         if order.status == OrderStatus.UNCONFIRMED:
             orders_to_check.add(order)
+        else:
+            # INVARIANT VIOLATION: Non-owned warehouses should only have allocations
+            # for UNCONFIRMED orders. Once confirmed, allocations must be in owned
+            # warehouses with AllocationSources.
+            raise AllocationInvariantViolation(
+                warehouse_name=source.warehouse.name,
+                order_number=str(order.number),
+                order_status=order.status,
+            )
 
     # Move physical stock from source to destination
     # Note: Stock locks ensure these moves are isolated
@@ -166,6 +188,13 @@ def confirm_purchase_order_item(purchase_order_item: PurchaseOrderItem):
         if can_confirm_order(order):
             order.status = OrderStatus.UNFULFILLED
             order.save(update_fields=["status", "updated_at"])
+
+    # Log event for audit trail
+    purchase_order_item_confirmed_event(
+        purchase_order_item=purchase_order_item,
+        user=user,
+        app=app,
+    )
 
     return source
 
@@ -330,6 +359,13 @@ def process_adjustment(
     # Mark adjustment as processed
     adjustment.processed_at = timezone.now()
     adjustment.save(update_fields=["processed_at"])
+
+    # Log event for audit trail
+    adjustment_processed_event(
+        adjustment=adjustment,
+        user=user,
+        app=app,
+    )
 
     return adjustment
 
@@ -500,6 +536,12 @@ def complete_receipt(receipt, user=None, manager=None):
                 affects_payable=affects_payable,
                 notes=f"Auto-created during receipt completion (Receipt #{receipt.id})",
                 created_by=user,
+            )
+
+            # Log adjustment creation for audit trail
+            adjustment_created_event(
+                adjustment=adjustment,
+                user=user,
             )
 
             # Try to process the adjustment immediately

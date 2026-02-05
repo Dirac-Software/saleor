@@ -526,20 +526,11 @@ AllocationManager = models.Manager.from_queryset(AllocationQueryset)
 class Allocation(models.Model):
     """The OrderConsumption model.
 
-    On order creation an entry is created and Stock quantity -> quantity_allocated. We
+    On order creation an entry is created and Stock quantity_allocated is incremented. We
     consume Stock by allocating PurchaseOrderItems to Allocations.
     In order to change
-    Order state from UNCONFIRMED->UNFULFILLED:
-    1. every Allocation must have a non-null
-    PurchaseOrderItem.
-    2. sum(Allocation.quantity_allocated where OrderPurchaseItem=i) ==
-    (OrderPurchaseItem.quantity where OrderPurchaseItem=i)
-    3. All Stock must be for a Dirac owned warehouse
-
-    Order state from UNFULFILLED->{PARTIALLY_FULFILLED,FULFILLED}:
-    1. sum(Allocation.quantity_allocated where OrderPurchaseItem=i) ==
-    (OrderPurchaseItem.quantity_received where OrderPurchaseItem=i)
-
+    Order state from UNCONFIRMED->UNFULFILLED we must have
+    sum(AllocationSource.quantity) = POI.quantity on POI.
 
     """
 
@@ -555,13 +546,6 @@ class Allocation(models.Model):
         null=False,
         blank=False,
         on_delete=models.CASCADE,
-        related_name="allocations",
-    )
-    # only for an owned warehouse
-    purchase_order_item = models.ForeignKey(
-        "inventory.PurchaseOrderItem",
-        null=True,
-        on_delete=models.DO_NOTHING,
         related_name="allocations",
     )
 
@@ -585,7 +569,8 @@ class AllocationSource(models.Model):
     expiry tracking, and recalls.
 
     The sum of quantities in AllocationSources for an Allocation should equal
-    the Allocation.quantity_allocated.
+    the Allocation.quantity_allocated for an owned warehouse. This can't exist for a
+    nonowend warehouse.
     """
 
     allocation = models.ForeignKey(

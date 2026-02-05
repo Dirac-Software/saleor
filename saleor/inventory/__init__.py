@@ -13,6 +13,10 @@ class PurchaseOrderItemStatus:
         (CANCELLED, "Cancelled"),
     ]
 
+    # Statuses that contribute to available inventory for allocation
+    # Used when querying POIs for allocating sources to orders
+    ACTIVE_STATUSES = [CONFIRMED, RECEIVED]
+
 
 class PurchaseOrderItemAdjustmentReason:
     """Reasons for post-receipt inventory adjustments."""
@@ -49,4 +53,32 @@ class ReceiptStatus:
         (IN_PROGRESS, "In Progress"),
         (COMPLETED, "Completed"),
         (CANCELLED, "Cancelled"),
+    ]
+
+
+class PurchaseOrderEvents:
+    """Events that can occur during purchase order lifecycle."""
+
+    CREATED = "created"
+    CONFIRMED = "confirmed"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"
+    ITEM_ADDED = "item_added"
+    ITEM_REMOVED = "item_removed"
+    ADJUSTMENT_CREATED = "adjustment_created"
+    ADJUSTMENT_PROCESSED = "adjustment_processed"
+    SHIPMENT_ASSIGNED = "shipment_assigned"
+    NOTE_ADDED = "note_added"
+
+    CHOICES = [
+        (CREATED, "Purchase order created"),
+        (CONFIRMED, "Purchase order confirmed with supplier"),
+        (RECEIVED, "Goods received at warehouse"),
+        (CANCELLED, "Purchase order cancelled"),
+        (ITEM_ADDED, "Item added to purchase order"),
+        (ITEM_REMOVED, "Item removed from purchase order"),
+        (ADJUSTMENT_CREATED, "Inventory adjustment created"),
+        (ADJUSTMENT_PROCESSED, "Inventory adjustment processed"),
+        (SHIPMENT_ASSIGNED, "Shipment assigned"),
+        (NOTE_ADDED, "Note added"),
     ]

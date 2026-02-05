@@ -1,46 +1,42 @@
 from django.conf import settings
+from django.contrib.postgres.indexes import BTreeIndex
 from django.db import models
+from django.db.models import F, Q, Sum, Value
+from django.db.models.fields import IntegerField
+from django.db.models.functions import Coalesce, Greatest
+from django.utils.timezone import now
 from django_countries.fields import CountryField
 from prices import Money
 
+from ..app.models import App
+from ..core.utils.json_serializer import CustomJsonEncoder
 from ..product.models import ProductVariant
 from ..warehouse.models import Warehouse
-from . import PurchaseOrderItemAdjustmentReason, PurchaseOrderItemStatus, ReceiptStatus
+from . import (
+    PurchaseOrderEvents,
+    PurchaseOrderItemAdjustmentReason,
+    PurchaseOrderItemStatus,
+    ReceiptStatus,
+)
 
 """
 A PurchaseOrder is created when we confirm we will order some products from a supplier.
 We create the corresponding PurchaseOrderItems at the same time.
+We can add an Invoice using the Xero invoice id to a PurchaseOrder to get payment data
 
-The change to the PurchaseOrderItem table may in turn allow us to confirm some orders.
-We can immediately update the Stock for that warehouse _before_ the products arrive
-(this allows us to confirm and allocate products sooner), allowing us
-to collect payment sooner, which is better for cash flow. It increases the chance of us issuing refunds if stock is
-missing.
+Stock must exist in a nonowned warehouse correlating to the supplier we buy the stock
+from.
 
-We can look at Stock.quantity and start allocating some stock. The algorithm is simple;
-We take the oldest OrderLine for the ProductVariant the Stock refers to and then add an
-OrderConsumption entry saying how much stock is confirmed and changing the
-Stock.quantity to remove the allocated quantity, and adding to Stock.quantity_allocated
-with this amount. If by doing this, some Order
-has every OrderLine confirmed, we then can set that order status to UNFULLFILLED. This
-confirms the order and takes payment.
-If we cancel an order we can simply delete the OrderConfirmation (or perhaps archive it) and the products become available. If we cannot confirm some Order as
-we have less stock than anticipated we can simply reduce the quantity on the order (and email them apologising and asking if this is acceptable).
+On confirmation of a purchase order stock is moved to owned warehouses and Orders that
+are using stock from the nonowned warehouse are reallocated from the moved stock in FIFO
+priority. Purchase order confirmation occurs _before_ products arrive in the destination warehouse.
 
-If we are arranging the inbound shipment then we allocate each PurchasingOrderItem to the
-correct shipment (almost always PurchaseOrder has 1 shipment). If we are not, we can
-just set the shipment costs to be 0 (will this work with duties?).
+When we allocate stock to orders from owned warehouses, we create AllocationSources and
+update the POI quantity_allocated.
 
-When the goods are received the shipment is marked as received and the quantity received
-is updated. At this point we can potentially fulfill some Orders. We look at all
-UNFULFILLED and PARTIALLY_FULFILLED orders and see what orders are ready for pick and
-pack. This work is TODO (marking when received and when fulfilled)
-
-
-When the final invoice arrives we add an invoice with a fk from Invoice ->
-PurchaseOrder with a Xero invoice id and ensure the sum of the unit costs
-add up to what we expect from the PurchaseOrderItem. We can then see when and how much
-of the invoice we have paid.
+On Shipment arrival we create a Receipt. After receipt confirmation, we allocate
+PurchaseOrderItemAdjustment ( POIA ) to account for changes in the quantity of stock
+from this purchase order compared to what we expected.
 
 Currently we don't track VAT (it is all reclaimed anyway). This means the cash flow
 isn't fully accurate.
@@ -50,35 +46,19 @@ TODO: add a celery task to check the Stock is as expected every evening.
 
 
 class PurchaseOrder(models.Model):
-    """Products come into this world through a PurchaseOrder.
+    """Products come into owned warehouses through a PurchaseOrder.
 
-    An invoice from a supplier we have received for some products.
-
-    The Invoice stores the one to one field to the deal and as such this doesn't
-    really store that much information.
-
-    If we have a final invoice (or any invoice from Xero) then we can judge the Deal
-    to be somewhat finalised.
-
-    The shipment this deal comes on is on the Unit. This is an easier way of doing
-    the many-to-many relationship between Shipment <-> Deal as it already has the
-    constraint that a Unit exists once.
+    This is an order of goods from some supplier. One PurchaseOrder is one Invoice from a supplier.
     """
 
-    # TODO: add a check constraint that the warehouse is_owned=False.
-
-    # this must be a non-owned warehouse. A non-owned warehouse allows us to see the supplier. It
-    # allows us to correctly reduce the Stock in a non-owned warehouse to prevent
-    # double counting (the stock moves to an owned warehouse)
-
-    # we can't null this because stock must come from somewhere, and we expect that
+    # this must be a non-owned warehouse. We can't null this because stock must come from somewhere, and we expect that
     # the ProductVariants already exist for the units, which means that the variants
     # should all exist in a non-owned warehouse _before_ a deal is ingested.
     source_warehouse = models.ForeignKey(
         Warehouse, on_delete=models.DO_NOTHING, related_name="source_purchase_orders"
     )
 
-    # this has to be an owned warehouse, it is where the goods end up.
+    # this has to be an owned warehouse
     destination_warehouse = models.ForeignKey(
         Warehouse,
         on_delete=models.DO_NOTHING,
@@ -87,6 +67,36 @@ class PurchaseOrder(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class PurchaseOrderItemQuerySet(models.QuerySet):
+    def annotate_available_quantity(self):
+        """Annotate available_quantity in a single query.
+
+        Calculates: quantity_ordered + processed_adjustments - quantity_allocated
+
+        This eliminates N+1 queries when accessing available_quantity in loops.
+        """
+        return self.annotate(
+            processed_adjustments=Coalesce(
+                Sum(
+                    "adjustments__quantity_change",
+                    filter=Q(adjustments__processed_at__isnull=False),
+                ),
+                Value(0),
+                output_field=IntegerField(),
+            ),
+            _available_quantity=Greatest(
+                F("quantity_ordered")
+                + F("processed_adjustments")
+                - F("quantity_allocated"),
+                Value(0),
+                output_field=IntegerField(),
+            ),
+        )
+
+
+PurchaseOrderItemManager = models.Manager.from_queryset(PurchaseOrderItemQuerySet)
 
 
 class PurchaseOrderItem(models.Model):
@@ -112,15 +122,24 @@ class PurchaseOrderItem(models.Model):
     # via AllocationSource
     quantity_allocated = models.PositiveIntegerField(default=0)
 
+    objects = PurchaseOrderItemManager()
+
     @property
     def available_quantity(self):
         """Amount available for allocation.
 
         Calculates: quantity_ordered + processed_adjustments - quantity_allocated
 
-        Only processed adjustments (processed_at is set) are included in the calculation.
-        This allows adjustments to be created but not applied until explicitly processed.
+        Uses annotated value if available (from annotate_available_quantity()),
+        otherwise queries database. Only processed adjustments (processed_at is set)
+        are included in the calculation. This allows adjustments to be created but
+        not applied until explicitly processed.
         """
+        # Check if we have the annotated value from annotate_available_quantity()
+        if hasattr(self, "_available_quantity"):
+            return self._available_quantity
+
+        # Fallback to query (for single-object access without annotation)
         from django.db.models import Sum
 
         processed_adjustments = (
@@ -147,39 +166,43 @@ class PurchaseOrderItem(models.Model):
 
     @property
     def unit_price_amount(self):
-        """Unit price we actually pay (after invoice adjustments).
+        """Unit price per available unit after adjustments.
 
-        Calculates unit price from total_price_amount adjusted for processed
-        adjustments that affect what we owe the supplier.
+        For supplier credits (affects_payable=True): both cost and quantity adjust,
+        so unit price remains constant.
+
+        For losses we eat (affects_payable=False): only quantity decreases,
+        making unit cost more expensive.
         """
-        # Start with base total from invoice
-        total = self.total_price_amount
+        from django.db.models import Sum
 
-        # Adjust for processed adjustments that affect what we pay supplier
-        # (invoice variance, delivery short)
-        adjustment_value = sum(
-            (adj.quantity_change * (self.total_price_amount / self.quantity_ordered))
-            for adj in self.adjustments.filter(
+        if self.quantity_ordered == 0:
+            return 0
+
+        base_unit_price = self.total_price_amount / self.quantity_ordered
+
+        # Adjust COST only for supplier credits/charges (affects_payable)
+        payable_adjustment = (
+            self.adjustments.filter(
                 affects_payable=True, processed_at__isnull=False
-            )
+            ).aggregate(total=Sum("quantity_change"))["total"]
+            or 0
         )
-        adjusted_total = total + adjustment_value
+        adjusted_cost = self.total_price_amount + (payable_adjustment * base_unit_price)
 
-        # Calculate unit price from adjusted total
-        received_qty = self.quantity_ordered + sum(
-            adj.quantity_change
-            for adj in self.adjustments.filter(
-                affects_payable=True, processed_at__isnull=False
-            )
+        # Adjust QUANTITY for ALL processed adjustments (payable + non-payable)
+        all_adjustments = (
+            self.adjustments.filter(processed_at__isnull=False).aggregate(
+                total=Sum("quantity_change")
+            )["total"]
+            or 0
         )
+        adjusted_quantity = self.quantity_ordered + all_adjustments
 
-        if received_qty > 0:
-            return adjusted_total / received_qty
-        return (
-            self.total_price_amount / self.quantity_ordered
-            if self.quantity_ordered > 0
-            else 0
-        )
+        if adjusted_quantity > 0:
+            return adjusted_cost / adjusted_quantity
+
+        return base_unit_price
 
     @property
     def unit_price(self):
@@ -225,13 +248,13 @@ class PurchaseOrderItemAdjustment(models.Model):
     """Audit trail for inventory adjustments (leakage).
 
     We create this whenever we identify a change in what we expected from
-    quantity_ordered compared to what we currently have now.
+    available quantity compared to what we currently have now.
 
-    Because we need to account for where all products come from for accounting, we track
-    these here.
+    Because we need to account for where all products come from, we track
+    these changes on the POI, not the Stock.
 
-    On creation we need to call increase_stock or decrease_stock - need to change these
-    so that for an owned warehouse we will cancel / change orders.
+    TODO: add something for affects_payable for whether we have got our refund from the
+    supplier.
 
     Processing these is painful because we may have confirmed some orders!
     The possible outcomes:
@@ -296,23 +319,16 @@ class PurchaseOrderItemAdjustment(models.Model):
     def financial_impact(self):
         """Calculate the financial impact of this adjustment.
 
-        Returns the cost impact in the POI's currency.
+        Returns the cost impact in the POI's currency based on the original invoice unit price.
         Negative for losses, positive for gains.
         """
-        return self.quantity_change * self.purchase_order_item.unit_price_amount
-
-    @property
-    def gl_account_type(self):
-        """Determine which GL account type this adjustment affects.
-
-        Returns:
-            'accounts_payable': Supplier credits us (reduces what we owe)
-            'operating_expense': We eat the loss (shrinkage, damage, etc.)
-
-        """
-        if self.affects_payable:
-            return "accounts_payable"
-        return "operating_expense"
+        poi = self.purchase_order_item
+        original_unit_price = (
+            poi.total_price_amount / poi.quantity_ordered
+            if poi.quantity_ordered > 0
+            else 0
+        )
+        return self.quantity_change * original_unit_price
 
     class Meta:
         ordering = ["-created_at"]
@@ -451,3 +467,73 @@ class ReceiptLine(models.Model):
             f"ReceiptLine: {self.quantity_received}x "
             f"{self.purchase_order_item.product_variant.sku}"
         )
+
+
+class PurchaseOrderEvent(models.Model):
+    """Audit trail for purchase order operations.
+
+    Tracks all significant events during purchase order lifecycle including:
+    - Order creation and confirmation
+    - Items added/removed
+    - Adjustments created and processed
+    - Shipment assignments
+    - Status changes
+    """
+
+    date = models.DateTimeField(default=now, editable=False, db_index=True)
+    type = models.CharField(max_length=255, choices=PurchaseOrderEvents.CHOICES)
+
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        related_name="events",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        help_text="Purchase order this event relates to",
+    )
+
+    purchase_order_item = models.ForeignKey(
+        PurchaseOrderItem,
+        related_name="events",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        help_text="Specific POI this event relates to (optional)",
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        help_text="User who triggered this event",
+    )
+
+    app = models.ForeignKey(
+        App,
+        related_name="+",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="App that triggered this event",
+    )
+
+    parameters = models.JSONField(blank=True, default=dict, encoder=CustomJsonEncoder)
+
+    class Meta:
+        ordering = ("date",)
+        indexes = [
+            BTreeIndex(fields=["date"], name="inventory_poevent_date_idx"),
+            models.Index(fields=["purchase_order", "date"]),
+            models.Index(fields=["purchase_order_item", "date"]),
+            models.Index(fields=["type"]),
+        ]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(type={self.type!r}, user={self.user!r})"
+
+    def __str__(self):
+        if self.purchase_order_item:
+            return f"PO Item #{self.purchase_order_item.id}: {self.get_type_display()}"
+        return f"PO #{self.purchase_order_id}: {self.get_type_display()}"

@@ -38,6 +38,15 @@ class OrderStatus:
 
 ORDER_EDITABLE_STATUS = (OrderStatus.DRAFT, OrderStatus.UNCONFIRMED)
 
+# Statuses where items have physically left the warehouse (shipped/returned)
+# Orders in these statuses cannot have their allocations modified
+ORDER_ITEMS_SHIPPED_STATUS = (
+    OrderStatus.PARTIALLY_FULFILLED,
+    OrderStatus.FULFILLED,
+    OrderStatus.PARTIALLY_RETURNED,
+    OrderStatus.RETURNED,
+)
+
 
 class OrderOrigin:
     CHECKOUT = "checkout"  # order created from checkout

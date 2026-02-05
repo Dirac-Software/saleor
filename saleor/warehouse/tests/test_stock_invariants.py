@@ -3,11 +3,14 @@
 THE TWO FUNDAMENTAL INVARIANTS:
 
 1. Total Physical Stock - conservation of mass:
-    Stock.quantity == sum(POI.quantity_ordered OR quantity_received)
+    Stock.quantity == sum(POI.quantity_ordered + processed_adjustments)
 
     For any (owned_warehouse, variant) pair, Stock.quantity represents TOTAL physical
-    stock from POIs. Use quantity_received if POI status is RECEIVED, else quantity_ordered.
-    Consistent with standard Saleor where Stock.quantity = total physical inventory.
+    stock from POIs including processed adjustments.
+
+    Note: POI.quantity_received is just an audit trail showing what initially arrived.
+    The actual stock is always based on quantity_ordered + processed adjustments.
+    Only processed adjustments (processed_at != NULL) are included.
 
 2. Allocation Tracking - AllocationSources link Stock to POI batches:
     Stock.quantity_allocated == sum(POI.quantity_allocated)
@@ -17,7 +20,7 @@ THE TWO FUNDAMENTAL INVARIANTS:
 
 DERIVED RELATIONSHIP (follows mathematically from the above):
     Available stock: Stock.quantity - Stock.quantity_allocated == sum(POI.available_quantity)
-    Where POI.available_quantity = (quantity_ordered OR quantity_received) - quantity_allocated
+    Where POI.available_quantity = (quantity_ordered + processed_adjustments) - quantity_allocated
 
 Any time an invariant is violated we should add a test here. We should also regularly
 run an invariant validation to make sure the Stock is in the correct state.
@@ -36,25 +39,33 @@ def calculate_expected_stock_quantity(warehouse, variant):
     This is the "source of truth" calculation from the POI table.
     Stock.quantity should always equal this value.
 
-    Returns the sum of TOTAL physical stock (ordered/received) from POIs.
-    Consistent with Saleor semantics where Stock.quantity = total physical stock.
+    Returns the sum of TOTAL physical stock from POIs including processed adjustments.
+    Formula: sum(POI.quantity_ordered + processed_adjustments)
+
+    Note: quantity_received is just an audit trail showing what initially arrived.
+    The actual stock quantity is always quantity_ordered + processed_adjustments.
     """
+    from django.db.models import Sum
+
     pois = PurchaseOrderItem.objects.filter(
         order__destination_warehouse=warehouse,
         product_variant=variant,
-        status__in=[
-            PurchaseOrderItemStatus.CONFIRMED,
-            PurchaseOrderItemStatus.RECEIVED,
-        ],
+        status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
     )
 
     total = 0
     for poi in pois:
-        # Use quantity_received if RECEIVED, otherwise quantity_ordered
-        if poi.status == PurchaseOrderItemStatus.RECEIVED:
-            total += poi.quantity_received
-        else:
-            total += poi.quantity_ordered
+        # Get processed adjustments for this POI
+        processed_adjustments = (
+            poi.adjustments.filter(processed_at__isnull=False).aggregate(
+                total=Sum("quantity_change")
+            )["total"]
+            or 0
+        )
+
+        # Base is always quantity_ordered, not quantity_received
+        # quantity_received is just for audit/reference
+        total += poi.quantity_ordered + processed_adjustments
 
     return total
 
@@ -70,11 +81,8 @@ def calculate_expected_available_quantity(warehouse, variant):
     pois = PurchaseOrderItem.objects.filter(
         order__destination_warehouse=warehouse,
         product_variant=variant,
-        status__in=[
-            PurchaseOrderItemStatus.CONFIRMED,
-            PurchaseOrderItemStatus.RECEIVED,
-        ],
-    )
+        status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
+    ).annotate_available_quantity()
 
     return sum(poi.available_quantity for poi in pois)
 
@@ -88,10 +96,7 @@ def calculate_expected_poi_allocated(warehouse, variant):
     pois = PurchaseOrderItem.objects.filter(
         order__destination_warehouse=warehouse,
         product_variant=variant,
-        status__in=[
-            PurchaseOrderItemStatus.CONFIRMED,
-            PurchaseOrderItemStatus.RECEIVED,
-        ],
+        status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
     )
 
     return sum(poi.quantity_allocated for poi in pois)
@@ -128,10 +133,7 @@ def assert_stock_poi_invariant(warehouse, variant):
     pois = PurchaseOrderItem.objects.filter(
         order__destination_warehouse=warehouse,
         product_variant=variant,
-        status__in=[
-            PurchaseOrderItemStatus.CONFIRMED,
-            PurchaseOrderItemStatus.RECEIVED,
-        ],
+        status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
     )
 
     poi_debug = []
@@ -1632,4 +1634,356 @@ def test_partial_deallocation(
     assert poi.quantity_allocated == 0
 
     # and - invariants still hold
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+
+# ==============================================================================
+# ADJUSTMENT INVARIANT TESTS
+# ==============================================================================
+
+
+def test_invariant_after_delivery_shortage_with_processed_adjustment(
+    owned_warehouse,
+    variant,
+    purchase_order,
+    nonowned_warehouse,
+    staff_user,
+):
+    """Delivery shortage creates and processes adjustment, invariant holds.
+
+    Purpose: Verify INVARIANT 1 includes processed adjustments.
+
+    Flow:
+    1. Order 100 units from supplier (POI created)
+    2. Confirm POI (Stock.quantity = 100)
+    3. Receive only 90 units (shortage of 10)
+    4. Complete receipt (creates and processes -10 adjustment)
+    5. Stock.quantity should be 90 = (100 - 10)
+    6. Invariant should hold
+    """
+    from ...inventory.models import Receipt, ReceiptLine
+    from ...inventory.stock_management import (
+        complete_receipt,
+        confirm_purchase_order_item,
+    )
+    from ...shipping.models import Shipment
+
+    # given - source stock
+    Stock.objects.create(
+        warehouse=nonowned_warehouse,
+        product_variant=variant,
+        quantity=200,
+    )
+
+    # Create and confirm POI for 100 units
+    shipment = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        tracking_number="TEST-123",
+    )
+
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=100,
+        quantity_allocated=0,
+        total_price_amount=1000.0,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    confirm_purchase_order_item(poi)
+
+    # Verify stock after confirmation (before receiving)
+    stock = Stock.objects.get(warehouse=owned_warehouse, product_variant=variant)
+    assert stock.quantity == 100
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    # when - receive only 90 units (shortage)
+    receipt = Receipt.objects.create(
+        shipment=shipment,
+        created_by=staff_user,
+    )
+
+    ReceiptLine.objects.create(
+        receipt=receipt,
+        purchase_order_item=poi,
+        quantity_received=90,  # Shortage of 10
+        received_by=staff_user,
+    )
+
+    # Complete receipt (creates and processes adjustment)
+    result = complete_receipt(receipt, user=staff_user)
+
+    # then - adjustment created and processed
+    assert result["discrepancies"] == 1
+    assert len(result["adjustments_created"]) == 1
+
+    adjustment = result["adjustments_created"][0]
+    assert adjustment.quantity_change == -10
+    assert adjustment.processed_at is not None
+
+    # Stock.quantity updated to reflect shortage
+    stock.refresh_from_db()
+    assert stock.quantity == 90  # 100 - 10
+
+    # POI shows correct values
+    poi.refresh_from_db()
+    assert poi.quantity_ordered == 100
+    assert poi.quantity_received == 90  # Audit trail
+    assert poi.status == PurchaseOrderItemStatus.RECEIVED
+
+    # Invariant should hold: Stock.quantity = quantity_ordered + adjustments = 100 - 10 = 90
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+
+def test_invariant_after_overage_with_processed_adjustment(
+    owned_warehouse,
+    variant,
+    purchase_order,
+    nonowned_warehouse,
+    staff_user,
+):
+    """Overage creates and processes adjustment, invariant holds.
+
+    Purpose: Verify INVARIANT 1 with positive adjustments.
+
+    Flow:
+    1. Order 100 units from supplier
+    2. Confirm POI (Stock.quantity = 100)
+    3. Receive 110 units (overage of 10)
+    4. Complete receipt (creates and processes +10 adjustment)
+    5. Stock.quantity should be 110 = (100 + 10)
+    6. Invariant should hold
+    """
+    from ...inventory.models import Receipt, ReceiptLine
+    from ...inventory.stock_management import (
+        complete_receipt,
+        confirm_purchase_order_item,
+    )
+    from ...shipping.models import Shipment
+
+    # given - source stock
+    Stock.objects.create(
+        warehouse=nonowned_warehouse,
+        product_variant=variant,
+        quantity=200,
+    )
+
+    # Create and confirm POI
+    shipment = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        tracking_number="TEST-456",
+    )
+
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=100,
+        quantity_allocated=0,
+        total_price_amount=1000.0,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    confirm_purchase_order_item(poi)
+
+    # Verify initial state
+    stock = Stock.objects.get(warehouse=owned_warehouse, product_variant=variant)
+    assert stock.quantity == 100
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    # when - receive 110 units (overage)
+    receipt = Receipt.objects.create(
+        shipment=shipment,
+        created_by=staff_user,
+    )
+
+    ReceiptLine.objects.create(
+        receipt=receipt,
+        purchase_order_item=poi,
+        quantity_received=110,  # Overage of 10
+        received_by=staff_user,
+    )
+
+    # Complete receipt
+    result = complete_receipt(receipt, user=staff_user)
+
+    # then - adjustment created and processed
+    assert result["discrepancies"] == 1
+    adjustment = result["adjustments_created"][0]
+    assert adjustment.quantity_change == 10
+    assert adjustment.processed_at is not None
+
+    # Stock updated
+    stock.refresh_from_db()
+    assert stock.quantity == 110  # 100 + 10
+
+    # POI shows correct values
+    poi.refresh_from_db()
+    assert poi.quantity_ordered == 100
+    assert poi.quantity_received == 110  # Audit trail
+    assert poi.status == PurchaseOrderItemStatus.RECEIVED
+
+    # Invariant: Stock.quantity = quantity_ordered + adjustments = 100 + 10 = 110
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+
+def test_invariant_with_mixed_pois_some_with_processed_adjustments(
+    owned_warehouse,
+    variant,
+    purchase_order,
+    nonowned_warehouse,
+    staff_user,
+):
+    """Multiple POIs, some with processed adjustments, invariant holds.
+
+    Purpose: Verify INVARIANT 1 with complex scenario - multiple POIs with different states.
+
+    Scenario:
+    - POI 1: 100 ordered, 100 received (no adjustment)
+    - POI 2: 50 ordered, 48 received (shortage of -2, processed)
+    - POI 3: 75 ordered, 80 received (overage of +5, processed)
+
+    Expected Stock.quantity = 100 + (50-2) + (75+5) = 228
+    """
+    from ...inventory.models import Receipt, ReceiptLine
+    from ...inventory.stock_management import (
+        complete_receipt,
+        confirm_purchase_order_item,
+    )
+    from ...shipping.models import Shipment
+
+    # given - source stock
+    Stock.objects.create(
+        warehouse=nonowned_warehouse,
+        product_variant=variant,
+        quantity=500,
+    )
+
+    # POI 1: Perfect match (100 ordered, 100 received)
+    shipment1 = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        tracking_number="SHIP-1",
+    )
+    poi1 = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=100,
+        quantity_allocated=0,
+        total_price_amount=1000.0,
+        currency="USD",
+        shipment=shipment1,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+    confirm_purchase_order_item(poi1)
+
+    receipt1 = Receipt.objects.create(shipment=shipment1, created_by=staff_user)
+    ReceiptLine.objects.create(
+        receipt=receipt1,
+        purchase_order_item=poi1,
+        quantity_received=100,  # Perfect match
+        received_by=staff_user,
+    )
+    complete_receipt(receipt1, user=staff_user)
+
+    # Check after first POI
+    stock = Stock.objects.get(warehouse=owned_warehouse, product_variant=variant)
+    assert stock.quantity == 100
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    # POI 2: Shortage (50 ordered, 48 received, -2 adjustment)
+    shipment2 = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        tracking_number="SHIP-2",
+    )
+    poi2 = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=50,
+        quantity_allocated=0,
+        total_price_amount=500.0,
+        currency="USD",
+        shipment=shipment2,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+    confirm_purchase_order_item(poi2)
+
+    receipt2 = Receipt.objects.create(shipment=shipment2, created_by=staff_user)
+    ReceiptLine.objects.create(
+        receipt=receipt2,
+        purchase_order_item=poi2,
+        quantity_received=48,  # Shortage of 2
+        received_by=staff_user,
+    )
+    complete_receipt(receipt2, user=staff_user)
+
+    # Check after second POI
+    stock.refresh_from_db()
+    assert stock.quantity == 148  # 100 + (50-2)
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    # POI 3: Overage (75 ordered, 80 received, +5 adjustment)
+    shipment3 = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        tracking_number="SHIP-3",
+    )
+    poi3 = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=75,
+        quantity_allocated=0,
+        total_price_amount=750.0,
+        currency="USD",
+        shipment=shipment3,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+    confirm_purchase_order_item(poi3)
+
+    receipt3 = Receipt.objects.create(shipment=shipment3, created_by=staff_user)
+    ReceiptLine.objects.create(
+        receipt=receipt3,
+        purchase_order_item=poi3,
+        quantity_received=80,  # Overage of 5
+        received_by=staff_user,
+    )
+    complete_receipt(receipt3, user=staff_user)
+
+    # Final check: Stock.quantity = 100 + (50-2) + (75+5) = 228
+    stock.refresh_from_db()
+    assert stock.quantity == 228
+
+    # Verify each POI
+    poi1.refresh_from_db()
+    poi2.refresh_from_db()
+    poi3.refresh_from_db()
+
+    assert poi1.quantity_ordered == 100
+    assert poi1.quantity_received == 100
+    assert (
+        poi1.adjustments.filter(processed_at__isnull=False).count() == 0
+    )  # No adjustment
+
+    assert poi2.quantity_ordered == 50
+    assert poi2.quantity_received == 48
+    adj2 = poi2.adjustments.filter(processed_at__isnull=False).first()
+    assert adj2.quantity_change == -2
+
+    assert poi3.quantity_ordered == 75
+    assert poi3.quantity_received == 80
+    adj3 = poi3.adjustments.filter(processed_at__isnull=False).first()
+    assert adj3.quantity_change == 5
+
+    # Final invariant check
     assert_stock_poi_invariant(owned_warehouse, variant)

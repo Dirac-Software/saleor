@@ -32,9 +32,13 @@ def test_allocate_sources_creates_allocation_source_for_owned_warehouse(
     """When allocating in owned warehouse, AllocationSource is created."""
     # given
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     # when
     allocate_stocks(
@@ -91,9 +95,13 @@ def test_deallocate_sources_restores_poi_quantity_allocated(
     """Deallocating removes AllocationSource and restores POI.quantity_allocated."""
     # given - create allocation with source
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -129,9 +137,13 @@ def test_partial_deallocate_updates_poi_correctly(
     """Partial deallocation reduces POI.quantity_allocated correctly."""
     # given - allocate 50
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -169,9 +181,13 @@ def test_allocation_uses_fifo_across_multiple_pois(
     poi_oldest, poi_middle, poi_newest = multiple_purchase_order_items
     variant = order_line.variant
 
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=300
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 300},
     )
+    stock.quantity = 300
+    stock.save(update_fields=["quantity"])
 
     # Create 3 order lines to allocate 250 units total
     order_line_2 = order.lines.create(
@@ -236,9 +252,13 @@ def test_insufficient_poi_quantity_raises_error(
     purchase_order_item.quantity_allocated = 80
     purchase_order_item.save()
 
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     # when/then - trying to allocate 30 more (total 110 > 100 capacity) fails
     with pytest.raises(InsufficientStock):
@@ -277,9 +297,13 @@ def test_poi_quantity_allocated_invariant(
         )
         lines.append(line)
 
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     # when - allocate different amounts to each line (10 + 20 + 15 = 45)
     allocate_stocks(
@@ -312,9 +336,13 @@ def test_increase_stock_with_allocate_creates_sources(
     """increase_stock with allocate=True creates AllocationSources."""
     # given
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=50
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 50},
     )
+    stock.quantity = 50
+    stock.save(update_fields=["quantity"])
 
     # when
     increase_stock(order_line, owned_warehouse, quantity=30, allocate=True)
@@ -338,9 +366,13 @@ def test_increase_existing_allocation_creates_incremental_sources(
     """Increasing existing allocation creates additional AllocationSources."""
     # given - initial allocation of 20
     variant = order_line.variant
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=20)],
@@ -383,9 +415,13 @@ def test_order_auto_confirms_when_all_allocations_sourced(
     order.save(update_fields=["status"])
 
     variant = order_line.variant
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     # when - allocate (which creates AllocationSources)
     allocate_stocks(
@@ -410,9 +446,13 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
 
     # given - stock in owned warehouse
     variant = order_line.variant
-    Stock.objects.create(
-        warehouse=owned_warehouse, product_variant=variant, quantity=100
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
     )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
 
     # Create DRAFT POI (should be ignored)
     shipment = Shipment.objects.create(

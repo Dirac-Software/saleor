@@ -1,3 +1,4 @@
+# Models
 ## Warehouse Ownership
 All inventory comes from somewhere. ERPs tend to represent the initial locations of products as just one type Warehouses.
 
@@ -29,15 +30,17 @@ After exhausting owned warehouse stock, we then allocate from non-owned warehous
 
 
 
-## Warehouse Tasks
+# Warehouse Tasks
 - When a shipment arrives the goods need to be checked in
 - When an order is in the warehouse it needs to be picked and packed.
 
+## Receipt
+Some Shipment that has some `PurchaseOrderItem` arrives ( we can use the tracking number to find when it happens). Something calls graphql mutation `startReceiptCheckin`. We then have a graphQL mutation `checkin(product_variant, quantity)` ( note we error if the POI is not part of that shipment, also this allows us to add barcode scanning later). Then we have `finishReceiptCheckin` which will generate POIA for missing ones, set shipment received_at and change the POI status.
 
+
+### Leakage
 ## Invoice Variance
 Stock changes between Proforma (purchase order) and Final invoices for a purchase order
-We handle this at shipment reception but we need to do a little bit better.
-When we have invoice variance we may need to issue refunds / affect stock
 
 ## Delivery Short / Receipt Shortage
 Stock is missing from a delivery
