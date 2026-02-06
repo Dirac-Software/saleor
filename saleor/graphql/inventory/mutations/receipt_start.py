@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 
 from ....inventory.error_codes import ReceiptErrorCode
 from ....inventory.stock_management import start_receipt
-from ....permission.enums import ProductPermissions
+from ....permission.enums import WarehousePermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import BaseMutation
@@ -27,7 +27,7 @@ class ReceiptStart(BaseMutation):
 
     class Meta:
         description = "Start receiving goods from an inbound shipment."
-        permissions = (ProductPermissions.MANAGE_PRODUCTS,)
+        permissions = (WarehousePermissions.MANAGE_STOCK,)
         error_type_class = ReceiptError
         error_type_field = "receipt_errors"
         doc_category = DOC_CATEGORY_PRODUCTS

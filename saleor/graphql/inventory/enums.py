@@ -15,3 +15,11 @@ PurchaseOrderItemAdjustmentReasonEnum: Final[graphene.Enum] = to_enum(
     PurchaseOrderItemAdjustmentReason, type_name="PurchaseOrderItemAdjustmentReasonEnum"
 )
 PurchaseOrderItemAdjustmentReasonEnum.doc_category = DOC_CATEGORY_PRODUCTS
+
+
+class PurchaseOrderItemAdjustmentStatusEnum(graphene.Enum):
+    PENDING = "pending"
+    PROCESSED = "processed"
+
+    class Meta:
+        doc_category = DOC_CATEGORY_PRODUCTS

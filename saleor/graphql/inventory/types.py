@@ -11,7 +11,11 @@ from ..core.types import BaseInputObjectType, Error, ModelObjectType, Money, Non
 from ..meta.inputs import MetadataInput
 from ..product.dataloaders import ProductVariantByIdLoader
 from ..warehouse.dataloaders import WarehouseByIdLoader
-from .enums import PurchaseOrderItemAdjustmentReasonEnum, PurchaseOrderItemStatusEnum
+from .enums import (
+    PurchaseOrderItemAdjustmentReasonEnum,
+    PurchaseOrderItemAdjustmentStatusEnum,
+    PurchaseOrderItemStatusEnum,
+)
 
 
 class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
@@ -201,6 +205,30 @@ class PurchaseOrderItemAdjustment(ModelObjectType[models.PurchaseOrderItemAdjust
         required=True,
         description="Reason for the adjustment.",
     )
+    affects_payable = graphene.Boolean(
+        required=True,
+        description=(
+            "Whether supplier credits us for this adjustment. "
+            "True for invoice variance or delivery shortages. "
+            "False for losses we absorb (shrinkage, damage)."
+        ),
+    )
+    financial_impact = graphene.Field(
+        Money,
+        required=True,
+        description=(
+            "Financial impact of this adjustment. "
+            "Negative for losses, positive for gains. "
+            "Calculated as quantity_change × original_unit_price."
+        ),
+    )
+    status = PurchaseOrderItemAdjustmentStatusEnum(
+        required=True,
+        description="Processing status: PENDING or PROCESSED.",
+    )
+    purchase_order_number = graphene.String(
+        description="Purchase order reference number for context.",
+    )
     notes = graphene.String(description="Additional notes about the adjustment.")
     processed_at = DateTime(
         description="When the adjustment was processed (null if pending)."
@@ -222,6 +250,21 @@ class PurchaseOrderItemAdjustment(ModelObjectType[models.PurchaseOrderItemAdjust
     @staticmethod
     def resolve_purchase_order_item(root, info: ResolveInfo):
         return root.purchase_order_item
+
+    @staticmethod
+    def resolve_financial_impact(root, info: ResolveInfo):
+        from prices import Money
+
+        poi = root.purchase_order_item
+        return Money(root.financial_impact, poi.currency)
+
+    @staticmethod
+    def resolve_status(root, info: ResolveInfo):
+        return "processed" if root.processed_at else "pending"
+
+    @staticmethod
+    def resolve_purchase_order_number(root, info: ResolveInfo):
+        return str(root.purchase_order_item.order.id)
 
 
 class PurchaseOrderItemAdjustmentCountableConnection(CountableConnection):

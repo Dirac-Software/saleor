@@ -1,6 +1,6 @@
 import graphene
 
-from ...permission.enums import ProductPermissions
+from ...permission.enums import WarehousePermissions
 from ..core import ResolveInfo
 from ..core.connection import create_connection_slice, filter_connection_queryset
 from ..core.doc_category import DOC_CATEGORY_PRODUCTS
@@ -9,6 +9,7 @@ from ..core.utils import from_global_id_or_error
 from .mutations import (
     PurchaseOrderConfirm,
     PurchaseOrderCreate,
+    PurchaseOrderDelete,
     ReceiptComplete,
     ReceiptDelete,
     ReceiptLineDelete,
@@ -41,7 +42,7 @@ class InventoryQueries(graphene.ObjectType):
         ),
         description="Look up a purchase order by ID.",
         permissions=[
-            ProductPermissions.MANAGE_PRODUCTS,
+            WarehousePermissions.MANAGE_PURCHASE_ORDERS,
         ],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
@@ -49,7 +50,7 @@ class InventoryQueries(graphene.ObjectType):
         PurchaseOrderCountableConnection,
         description="List of purchase orders.",
         permissions=[
-            ProductPermissions.MANAGE_PRODUCTS,
+            WarehousePermissions.MANAGE_PURCHASE_ORDERS,
         ],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
@@ -62,7 +63,7 @@ class InventoryQueries(graphene.ObjectType):
         ),
         description="Look up a receipt by ID.",
         permissions=[
-            ProductPermissions.MANAGE_PRODUCTS,
+            WarehousePermissions.MANAGE_STOCK,
         ],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
@@ -70,15 +71,19 @@ class InventoryQueries(graphene.ObjectType):
         ReceiptCountableConnection,
         description="List of goods receipts.",
         permissions=[
-            ProductPermissions.MANAGE_PRODUCTS,
+            WarehousePermissions.MANAGE_STOCK,
         ],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
-    pending_adjustments = FilterConnectionField(
+    purchase_order_item_adjustments = FilterConnectionField(
         PurchaseOrderItemAdjustmentCountableConnection,
-        description="List all pending purchase order item adjustments (not yet processed).",
+        processed=graphene.Argument(
+            graphene.Boolean,
+            description="Filter by processed status. True=processed, False=pending, null=all.",
+        ),
+        description="List purchase order item adjustments with optional filtering.",
         permissions=[
-            ProductPermissions.MANAGE_PRODUCTS,
+            WarehousePermissions.MANAGE_STOCK,
         ],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
@@ -91,7 +96,7 @@ class InventoryQueries(graphene.ObjectType):
         ),
         description="Look up a purchase order item adjustment by ID.",
         permissions=[
-            ProductPermissions.MANAGE_PRODUCTS,
+            WarehousePermissions.MANAGE_STOCK,
         ],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
@@ -125,12 +130,24 @@ class InventoryQueries(graphene.ObjectType):
         return create_connection_slice(qs, info, kwargs, ReceiptCountableConnection)
 
     @staticmethod
-    def resolve_pending_adjustments(root, info: ResolveInfo, **kwargs):
+    def resolve_purchase_order_item_adjustments(root, info: ResolveInfo, **kwargs):
         from ...inventory.models import PurchaseOrderItemAdjustment
 
-        return PurchaseOrderItemAdjustment.objects.filter(
-            processed_at__isnull=True
-        ).order_by("-created_at")
+        processed = kwargs.pop("processed", None)
+        qs = PurchaseOrderItemAdjustment.objects.all()
+
+        if processed is True:
+            qs = qs.filter(processed_at__isnull=False)
+        elif processed is False:
+            qs = qs.filter(processed_at__isnull=True)
+
+        qs = qs.order_by("-created_at")
+        qs = filter_connection_queryset(
+            qs, kwargs, allow_replica=info.context.allow_replica
+        )
+        return create_connection_slice(
+            qs, info, kwargs, PurchaseOrderItemAdjustmentCountableConnection
+        )
 
     @staticmethod
     def resolve_purchase_order_item_adjustment(root, info: ResolveInfo, *, id):
@@ -143,6 +160,7 @@ class InventoryQueries(graphene.ObjectType):
 class InventoryMutations(graphene.ObjectType):
     create_purchase_order = PurchaseOrderCreate.Field()
     confirm_purchase_order = PurchaseOrderConfirm.Field()
+    delete_purchase_order = PurchaseOrderDelete.Field()
 
     # Receipt workflow mutations
     start_receipt = ReceiptStart.Field()

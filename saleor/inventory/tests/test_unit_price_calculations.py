@@ -66,7 +66,7 @@ def test_unit_price_amount_with_non_payable_adjustment(
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-2,  # Lost 2 units
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,  # We eat the loss
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -127,7 +127,7 @@ def test_unit_price_amount_with_multiple_non_payable_adjustments(
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-2,
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -136,7 +136,7 @@ def test_unit_price_amount_with_multiple_non_payable_adjustments(
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-1,
-        reason=PurchaseOrderItemAdjustmentReason.DAMAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_DAMAGE,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -173,7 +173,7 @@ def test_unit_price_amount_with_mixed_adjustments(
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-1,
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -200,7 +200,7 @@ def test_unit_price_amount_ignores_unprocessed_adjustments(
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-2,
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,
         processed_at=None,  # Not processed yet
         created_by=staff_user,
@@ -223,7 +223,7 @@ def test_unit_price_amount_with_positive_adjustment(
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=5,  # Received 5 extra
-        reason=PurchaseOrderItemAdjustmentReason.CYCLE_COUNT_POS,
+        reason=PurchaseOrderItemAdjustmentReason.CYCLE_COUNT_POSITIVE,
         affects_payable=False,  # Free bonus units
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -262,7 +262,7 @@ def test_unit_price_amount_all_units_lost(purchase_order_item_with_price, staff_
     PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-10,  # All 10 units lost
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -286,7 +286,7 @@ def test_financial_impact_uses_original_unit_price(
     first_adj = PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-2,
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -299,7 +299,7 @@ def test_financial_impact_uses_original_unit_price(
     second_adj = PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-1,
-        reason=PurchaseOrderItemAdjustmentReason.DAMAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_DAMAGE,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -321,7 +321,7 @@ def test_financial_impact_consistent_regardless_of_order(
     adj1 = PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-2,
-        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_UNKNOWN,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,
@@ -330,7 +330,7 @@ def test_financial_impact_consistent_regardless_of_order(
     adj2 = PurchaseOrderItemAdjustment.objects.create(
         purchase_order_item=poi,
         quantity_change=-3,
-        reason=PurchaseOrderItemAdjustmentReason.DAMAGE,
+        reason=PurchaseOrderItemAdjustmentReason.SHRINKAGE_DAMAGE,
         affects_payable=False,
         processed_at=staff_user.date_joined,
         created_by=staff_user,

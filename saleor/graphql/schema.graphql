@@ -1039,7 +1039,7 @@ type Query {
   """
   Look up a purchase order by ID.
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
   """
   purchaseOrder(
     """ID of the purchase order."""
@@ -1049,7 +1049,7 @@ type Query {
   """
   List of purchase orders.
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
   """
   purchaseOrders(
     """Return the elements in the list that come before the specified cursor."""
@@ -1072,7 +1072,7 @@ type Query {
   """
   Look up a receipt by ID.
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   receipt(
     """ID of the receipt."""
@@ -1082,7 +1082,7 @@ type Query {
   """
   List of goods receipts.
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   receipts(
     """Return the elements in the list that come before the specified cursor."""
@@ -1103,11 +1103,14 @@ type Query {
   ): ReceiptCountableConnection @doc(category: "Products")
 
   """
-  List all pending purchase order item adjustments (not yet processed).
+  List purchase order item adjustments with optional filtering.
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
-  pendingAdjustments(
+  purchaseOrderItemAdjustments(
+    """Filter by processed status. True=processed, False=pending, null=all."""
+    processed: Boolean
+
     """Return the elements in the list that come before the specified cursor."""
     before: String
 
@@ -1128,7 +1131,7 @@ type Query {
   """
   Look up a purchase order item adjustment by ID.
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   purchaseOrderItemAdjustment(
     """ID of the adjustment."""
@@ -3128,6 +3131,8 @@ enum PermissionEnum @doc(category: "Users") {
   MANAGE_SHIPPING
   MANAGE_SETTINGS
   MANAGE_TRANSLATIONS
+  MANAGE_PURCHASE_ORDERS
+  MANAGE_STOCK
 }
 
 """
@@ -13089,8 +13094,10 @@ type Shipment implements Node @doc(category: "Shipping") {
   """Destination address (where shipment is going)."""
   destination: Address!
 
-  """Shipping cost including VAT (estimated until invoice added)."""
-  shippingCost: Money!
+  """
+  Shipping cost including VAT (estimated until invoice added, null if not set).
+  """
+  shippingCost: Money
 
   """Shipping invoice (null if not yet received)."""
   shippingInvoice: Invoice
@@ -14181,6 +14188,22 @@ type PurchaseOrderItemAdjustment implements Node {
   """Reason for the adjustment."""
   reason: PurchaseOrderItemAdjustmentReasonEnum!
 
+  """
+  Whether supplier credits us for this adjustment. True for invoice variance or delivery shortages. False for losses we absorb (shrinkage, damage).
+  """
+  affectsPayable: Boolean!
+
+  """
+  Financial impact of this adjustment. Negative for losses, positive for gains. Calculated as quantity_change × original_unit_price.
+  """
+  financialImpact: Money!
+
+  """Processing status: PENDING or PROCESSED."""
+  status: PurchaseOrderItemAdjustmentStatusEnum!
+
+  """Purchase order reference number for context."""
+  purchaseOrderNumber: String
+
   """Additional notes about the adjustment."""
   notes: String
 
@@ -14202,6 +14225,11 @@ enum PurchaseOrderItemAdjustmentReasonEnum @doc(category: "Products") {
   CYCLE_COUNT_POS
   INVOICE_VARIANCE
   DELIVERY_SHORT
+}
+
+enum PurchaseOrderItemAdjustmentStatusEnum {
+  PENDING
+  PROCESSED
 }
 
 input GiftCardSortingInput @doc(category: "Gift cards") {
@@ -18083,7 +18111,7 @@ type Mutation {
   """
   Creates a new purchase order from a supplier. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
   """
   createPurchaseOrder(
     """Fields required to create a purchase order."""
@@ -18093,7 +18121,7 @@ type Mutation {
   """
   Confirms a purchase order with the supplier. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
   """
   confirmPurchaseOrder(
     """ID of the purchase order to confirm."""
@@ -18101,9 +18129,19 @@ type Mutation {
   ): PurchaseOrderConfirm @doc(category: "Products")
 
   """
+  Deletes a draft purchase order. 
+  
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+  """
+  deletePurchaseOrder(
+    """ID of the purchase order to delete."""
+    id: ID!
+  ): PurchaseOrderDelete @doc(category: "Products")
+
+  """
   Start receiving goods from an inbound shipment. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   startReceipt(
     """ID of the shipment to receive."""
@@ -18113,7 +18151,7 @@ type Mutation {
   """
   Record receiving an item during a receipt. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   receiveItem(
     """Optional notes about this item."""
@@ -18132,7 +18170,7 @@ type Mutation {
   """
   Complete a goods receipt. Automatically creates adjustments for discrepancies between ordered and received quantities. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   completeReceipt(
     """ID of the receipt to complete."""
@@ -18142,7 +18180,7 @@ type Mutation {
   """
   Delete a draft receipt and revert all quantity updates. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   deleteReceipt(
     """ID of the receipt to delete."""
@@ -18152,7 +18190,7 @@ type Mutation {
   """
   Delete a receipt line and revert the quantity update. Use when an item was scanned by mistake. 
   
-  Requires one of the following permissions: MANAGE_PRODUCTS.
+  Requires one of the following permissions: MANAGE_STOCK.
   """
   deleteReceiptLine(
     """ID of the receipt line to delete."""
@@ -27231,7 +27269,7 @@ type InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEv
 """
 Creates a new purchase order from a supplier. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
 """
 type PurchaseOrderCreate {
   purchaseOrderErrors: [PurchaseOrderError!]! @deprecated(reason: "Use `errors` field instead.")
@@ -27269,6 +27307,8 @@ enum PurchaseOrderErrorCode @doc(category: "Products") {
   INVALID_CURRENCY
   INVALID_COUNTRY
   REQUIRED
+  INVALID
+  NOT_FOUND
   GRAPHQL_ERROR
 }
 
@@ -27309,7 +27349,7 @@ input PurchaseOrderItemInput @doc(category: "Products") {
 """
 Confirms a purchase order with the supplier. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
 """
 type PurchaseOrderConfirm @doc(category: "Products") {
   """The confirmed purchase order."""
@@ -27319,9 +27359,20 @@ type PurchaseOrderConfirm @doc(category: "Products") {
 }
 
 """
+Deletes a draft purchase order. 
+
+Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+"""
+type PurchaseOrderDelete @doc(category: "Products") {
+  purchaseOrderErrors: [PurchaseOrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [PurchaseOrderError!]!
+  purchaseOrder: PurchaseOrder
+}
+
+"""
 Start receiving goods from an inbound shipment. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_STOCK.
 """
 type ReceiptStart @doc(category: "Products") {
   """The created receipt."""
@@ -27360,7 +27411,7 @@ enum ReceiptErrorCode @doc(category: "Products") {
 """
 Record receiving an item during a receipt. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_STOCK.
 """
 type ReceiptReceiveItem @doc(category: "Products") {
   """The created receipt line."""
@@ -27372,7 +27423,7 @@ type ReceiptReceiveItem @doc(category: "Products") {
 """
 Complete a goods receipt. Automatically creates adjustments for discrepancies between ordered and received quantities. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_STOCK.
 """
 type ReceiptComplete @doc(category: "Products") {
   """The completed receipt."""
@@ -27393,7 +27444,7 @@ type ReceiptComplete @doc(category: "Products") {
 """
 Delete a draft receipt and revert all quantity updates. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_STOCK.
 """
 type ReceiptDelete @doc(category: "Products") {
   receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")
@@ -27403,7 +27454,7 @@ type ReceiptDelete @doc(category: "Products") {
 """
 Delete a receipt line and revert the quantity update. Use when an item was scanned by mistake. 
 
-Requires one of the following permissions: MANAGE_PRODUCTS.
+Requires one of the following permissions: MANAGE_STOCK.
 """
 type ReceiptLineDelete @doc(category: "Products") {
   receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")

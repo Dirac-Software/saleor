@@ -1,6 +1,7 @@
 """Shipment lifecycle management for inbound goods."""
 
 from django.db import transaction
+from prices import Money
 
 from ..inventory import PurchaseOrderItemStatus
 from ..inventory.events import shipment_assigned_event
@@ -68,14 +69,17 @@ def create_shipment(
             )
 
     # Create the shipment
-    shipment = Shipment.objects.create(  # type: ignore[misc]
-        source=source_address,
-        destination=destination_address,
-        carrier=carrier,
-        tracking_number=tracking_number,
-        shipping_cost_amount=shipping_cost or 0,
-        currency=currency,
-    )
+    shipment_data = {
+        "source": source_address,
+        "destination": destination_address,
+        "carrier": carrier,
+        "tracking_number": tracking_number,
+    }
+
+    if shipping_cost is not None:
+        shipment_data["shipping_cost"] = Money(shipping_cost, currency)
+
+    shipment = Shipment.objects.create(**shipment_data)  # type: ignore[misc]
 
     # Link POIs to shipment and log events
     for poi in purchase_order_items:

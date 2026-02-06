@@ -4,7 +4,7 @@ from django_countries import countries
 
 from ....inventory import PurchaseOrderItemStatus, events, models
 from ....inventory.error_codes import PurchaseOrderErrorCode
-from ....permission.enums import ProductPermissions
+from ....permission.enums import WarehousePermissions
 from ....warehouse.models import Warehouse
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
@@ -30,7 +30,7 @@ class PurchaseOrderCreate(DeprecatedModelMutation):
         description = "Creates a new purchase order from a supplier."
         model = models.PurchaseOrder
         object_type = PurchaseOrder
-        permissions = (ProductPermissions.MANAGE_PRODUCTS,)
+        permissions = (WarehousePermissions.MANAGE_PURCHASE_ORDERS,)
         error_type_class = PurchaseOrderError
         error_type_field = "purchase_order_errors"
         support_meta_field = True

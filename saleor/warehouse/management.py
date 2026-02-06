@@ -146,6 +146,8 @@ def _allocate_sources_incremental(allocation: Allocation, quantity: int):
 
     # Get active POIs for this stock in FIFO order (by confirmation date)
     # Only CONFIRMED or RECEIVED - exclude DRAFT and CANCELLED
+    # NOTE: Cannot use annotate_available_quantity() with select_for_update()
+    # because PostgreSQL doesn't allow FOR UPDATE with GROUP BY clause
     pois = (
         PurchaseOrderItem.objects.filter(
             order__destination_warehouse=allocation.stock.warehouse,
@@ -153,7 +155,6 @@ def _allocate_sources_incremental(allocation: Allocation, quantity: int):
             status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
             quantity_ordered__gt=F("quantity_allocated"),
         )
-        .annotate_available_quantity()
         .select_for_update()
         .order_by("confirmed_at", "created_at")
     )
@@ -372,9 +373,22 @@ def allocate_stocks(
             ).values_list("id", flat=True)
         )
 
+        # Track orders to check for auto-confirmation
+        orders_to_check = set()
+
         for allocation in allocations:
             if allocation.stock_id in owned_stock_ids:
                 allocate_sources(allocation)
+                # Check if order can be auto-confirmed after adding sources
+                from ..order import OrderStatus
+                if allocation.order_line.order.status == OrderStatus.UNCONFIRMED:
+                    orders_to_check.add(allocation.order_line.order)
+
+        # Auto-confirm orders that now have all allocations with sources
+        for order in orders_to_check:
+            if can_confirm_order(order):
+                order.status = OrderStatus.UNFULFILLED
+                order.save(update_fields=["status", "updated_at"])
 
         stocks_to_update_map = {alloc.stock_id: alloc.stock for alloc in allocations}
         quantity_from_allocations: dict[int, int] = defaultdict(int)

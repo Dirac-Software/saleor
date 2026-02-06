@@ -13,6 +13,8 @@ class PurchaseOrderErrorCode(Enum):
     INVALID_CURRENCY = "invalid_currency"
     INVALID_COUNTRY = "invalid_country"
     REQUIRED = "required"
+    INVALID = "invalid"
+    NOT_FOUND = "not_found"
     GRAPHQL_ERROR = "graphql_error"
 
 

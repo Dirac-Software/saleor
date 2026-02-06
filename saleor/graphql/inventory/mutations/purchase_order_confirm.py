@@ -5,8 +5,7 @@ from django.db import transaction
 from ....inventory import PurchaseOrderItemStatus, events, models
 from ....inventory.error_codes import PurchaseOrderErrorCode
 from ....inventory.stock_management import confirm_purchase_order_item
-from ....permission.enums import ProductPermissions
-from ....webhook.event_types import WebhookEventAsyncType
+from ....permission.enums import WarehousePermissions
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
@@ -38,7 +37,7 @@ class PurchaseOrderConfirm(BaseMutation):
 
     class Meta:
         description = "Confirms a purchase order with the supplier."
-        permissions = (ProductPermissions.MANAGE_PRODUCTS,)
+        permissions = (WarehousePermissions.MANAGE_PURCHASE_ORDERS,)
         error_type_class = PurchaseOrderError
         error_type_field = "purchase_order_errors"
         doc_category = DOC_CATEGORY_PRODUCTS
@@ -109,13 +108,6 @@ class PurchaseOrderConfirm(BaseMutation):
                     )
                 }
             ) from e
-
-        # Trigger async webhook
-        cls.call_event(
-            manager.event_delivery_retry,
-            WebhookEventAsyncType.PURCHASE_ORDER_CONFIRMED,
-            purchase_order,
-        )
 
         # Refresh to get updated items
         purchase_order.refresh_from_db()

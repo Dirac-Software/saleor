@@ -44,7 +44,7 @@ query Receipts {
 """
 
 
-def test_query_receipt(staff_api_client, permission_manage_products, receipt):
+def test_query_receipt(staff_api_client, permission_manage_stock, receipt):
     """Test querying a single receipt."""
     # given
     variables = {"id": graphene.Node.to_global_id("Receipt", receipt.pk)}
@@ -53,7 +53,7 @@ def test_query_receipt(staff_api_client, permission_manage_products, receipt):
     response = staff_api_client.post_graphql(
         QUERY_RECEIPT,
         variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_stock],
     )
 
     # then
@@ -64,12 +64,12 @@ def test_query_receipt(staff_api_client, permission_manage_products, receipt):
     assert receipt_data["shipment"]["id"] is not None
 
 
-def test_query_receipts(staff_api_client, permission_manage_products, receipt):
+def test_query_receipts(staff_api_client, permission_manage_stock, receipt):
     """Test querying list of receipts."""
     # when
     response = staff_api_client.post_graphql(
         QUERY_RECEIPTS,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_stock],
     )
 
     # then

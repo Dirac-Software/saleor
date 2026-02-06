@@ -315,6 +315,10 @@ class Warehouse(ModelWithMetadata, ModelWithExternalReference):
                 fields=["click_and_collect_option"],
             ),
         ]
+        permissions = [
+            ("manage_purchase_orders", "Can manage purchase orders"),
+            ("manage_stock", "Can manage stock"),
+        ]
 
     def __str__(self):
         return self.name

@@ -104,6 +104,12 @@ def setup_order_with_allocation_sources(
         manager=get_plugins_manager(allow_replica=False),
     )
 
+    # Reset order to UNCONFIRMED for the test
+    # (allocate_stocks auto-confirms if all allocations have sources)
+    order.refresh_from_db()
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
+
 
 @patch("saleor.order.actions.handle_fully_paid_order", wraps=handle_fully_paid_order)
 @patch(
@@ -883,6 +889,12 @@ def test_order_confirm_succeeds_with_allocation_sources(
         channel_USD,
         manager=get_plugins_manager(allow_replica=False),
     )
+
+    # Reset order to UNCONFIRMED for the test
+    # (allocate_stocks auto-confirms if all allocations have sources)
+    order_unconfirmed.refresh_from_db()
+    order_unconfirmed.status = OrderStatus.UNCONFIRMED
+    order_unconfirmed.save(update_fields=["status"])
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
 

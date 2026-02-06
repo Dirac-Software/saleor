@@ -85,6 +85,11 @@ class SitePermissions(BasePermissionEnum):
     MANAGE_TRANSLATIONS = "site.manage_translations"
 
 
+class WarehousePermissions(BasePermissionEnum):
+    MANAGE_PURCHASE_ORDERS = "warehouse.manage_purchase_orders"
+    MANAGE_STOCK = "warehouse.manage_stock"
+
+
 PERMISSIONS_ENUMS = [
     AccountPermissions,
     AppPermission,
@@ -102,6 +107,7 @@ PERMISSIONS_ENUMS = [
     ProductTypePermissions,
     ShippingPermissions,
     SitePermissions,
+    WarehousePermissions,
 ]
 
 

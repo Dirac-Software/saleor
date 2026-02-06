@@ -1,5 +1,6 @@
 import pytest
 
+from ....inventory.models import PurchaseOrder, PurchaseOrderItem
 from ....warehouse.models import Warehouse
 
 # Note: pytest_plugins can only be defined in top-level conftest.py
@@ -34,3 +35,23 @@ def supplier_warehouse(address, shipping_zone, channel_USD):
     warehouse.shipping_zones.add(shipping_zone)
     warehouse.channels.add(channel_USD)
     return warehouse
+
+
+@pytest.fixture
+def draft_purchase_order(supplier_warehouse, warehouse, variant):
+    """Draft purchase order with items in DRAFT status."""
+    from decimal import Decimal
+
+    purchase_order = PurchaseOrder.objects.create(
+        source_warehouse=supplier_warehouse,
+        destination_warehouse=warehouse,
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=100,
+        total_price_amount=Decimal("1050.00"),
+        currency="GBP",
+        country_of_origin="CN",
+    )
+    return purchase_order

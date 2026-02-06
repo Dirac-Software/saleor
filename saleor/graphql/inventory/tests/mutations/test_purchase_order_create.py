@@ -42,7 +42,7 @@ mutation createPurchaseOrder($input: PurchaseOrderCreateInput!) {
 
 
 def test_create_purchase_order_success(
-    staff_api_client, permission_manage_products, variant, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
 ):
     """Successfully create a purchase order with valid data."""
     # given
@@ -72,7 +72,7 @@ def test_create_purchase_order_success(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -98,7 +98,7 @@ def test_create_purchase_order_success(
 
 
 def test_create_purchase_order_source_warehouse_must_be_non_owned(
-    staff_api_client, permission_manage_products, variant, warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, warehouse
 ):
     """Source warehouse must be a supplier (non-owned)."""
     # given - using owned warehouse as source (invalid)
@@ -126,7 +126,7 @@ def test_create_purchase_order_source_warehouse_must_be_non_owned(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -140,7 +140,7 @@ def test_create_purchase_order_source_warehouse_must_be_non_owned(
 
 
 def test_create_purchase_order_destination_warehouse_must_be_owned(
-    staff_api_client, permission_manage_products, variant, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, supplier_warehouse
 ):
     """Destination warehouse must be owned."""
     # given - using non-owned warehouse as destination (invalid)
@@ -170,7 +170,7 @@ def test_create_purchase_order_destination_warehouse_must_be_owned(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -184,7 +184,7 @@ def test_create_purchase_order_destination_warehouse_must_be_owned(
 
 
 def test_create_purchase_order_at_least_one_item_required(
-    staff_api_client, permission_manage_products, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, warehouse, supplier_warehouse
 ):
     """At least one item is required."""
     # given
@@ -204,7 +204,7 @@ def test_create_purchase_order_at_least_one_item_required(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -218,7 +218,7 @@ def test_create_purchase_order_at_least_one_item_required(
 
 
 def test_create_purchase_order_quantity_must_be_positive(
-    staff_api_client, permission_manage_products, variant, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
 ):
     """Quantity must be greater than 0."""
     # given
@@ -248,7 +248,7 @@ def test_create_purchase_order_quantity_must_be_positive(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -263,7 +263,7 @@ def test_create_purchase_order_quantity_must_be_positive(
 
 
 def test_create_purchase_order_invalid_variant_id(
-    staff_api_client, permission_manage_products, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, warehouse, supplier_warehouse
 ):
     """Invalid variant IDs should be rejected."""
     # given
@@ -292,7 +292,7 @@ def test_create_purchase_order_invalid_variant_id(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -306,7 +306,7 @@ def test_create_purchase_order_invalid_variant_id(
 
 
 def test_create_purchase_order_invalid_country_code(
-    staff_api_client, permission_manage_products, variant, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
 ):
     """Invalid country codes should be rejected."""
     # given
@@ -336,7 +336,7 @@ def test_create_purchase_order_invalid_country_code(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -387,7 +387,7 @@ def test_create_purchase_order_requires_permission(
 
 
 def test_create_purchase_order_initial_status_is_draft(
-    staff_api_client, permission_manage_products, variant, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
 ):
     """Verify initial status is DRAFT."""
     # given
@@ -417,7 +417,7 @@ def test_create_purchase_order_initial_status_is_draft(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -429,7 +429,7 @@ def test_create_purchase_order_initial_status_is_draft(
 
 
 def test_create_purchase_order_quantity_received_starts_at_zero(
-    staff_api_client, permission_manage_products, variant, warehouse, supplier_warehouse
+    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
 ):
     """Verify quantity_received starts at 0."""
     # given
@@ -459,7 +459,7 @@ def test_create_purchase_order_quantity_received_starts_at_zero(
     response = staff_api_client.post_graphql(
         MUTATION_CREATE_PURCHASE_ORDER,
         variables=variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then

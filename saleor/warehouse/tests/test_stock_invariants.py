@@ -639,6 +639,7 @@ def test_invariant_when_confirming_poi_moves_allocations_from_supplier(
     5. Invariant should hold
     """
     from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order import OrderStatus
     from ...order.fetch import OrderLineInfo
     from ...plugins.manager import get_plugins_manager
     from ...shipping.models import Shipment
@@ -647,6 +648,11 @@ def test_invariant_when_confirming_poi_moves_allocations_from_supplier(
 
     # CRITICAL: Use order_line.variant for ALL operations
     variant = order_line.variant
+
+    # Order must be UNCONFIRMED for allocation at supplier warehouse
+    order = order_line.order
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
 
     # given - stock at supplier
     Stock.objects.create(
@@ -736,10 +742,15 @@ def test_invariant_when_multiple_customer_orders_then_confirm_poi(
     4. Invariant should hold
     """
     from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order import OrderStatus
     from ...order.fetch import OrderLineInfo
     from ...plugins.manager import get_plugins_manager
     from ...shipping.models import Shipment
     from ..management import allocate_stocks
+
+    # Order must be UNCONFIRMED for allocation at supplier warehouse
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
 
     # given - supplier stock
     Stock.objects.create(
@@ -855,11 +866,16 @@ def test_invariant_when_poi_quantity_less_than_allocations(
     5. Invariant should hold (only owned warehouse part)
     """
     from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order import OrderStatus
     from ...order.fetch import OrderLineInfo
     from ...plugins.manager import get_plugins_manager
     from ...shipping.models import Shipment
     from ..management import allocate_stocks
     from ..models import Allocation
+
+    # Order must be UNCONFIRMED for allocation at supplier warehouse
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
 
     # given - supplier stock
     Stock.objects.create(
@@ -1069,10 +1085,15 @@ def test_invariant_with_mixed_allocations_owned_and_nonowned(
     4. Invariant should hold throughout
     """
     from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order import OrderStatus
     from ...order.fetch import OrderLineInfo
     from ...plugins.manager import get_plugins_manager
     from ...shipping.models import Shipment
     from ..management import allocate_stocks
+
+    # Order must be UNCONFIRMED for allocation at supplier warehouse
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
 
     # given - supplier stock
     Stock.objects.create(
@@ -1213,10 +1234,15 @@ def test_invariant_stress_test_realistic_daily_operations(
     - Throughout: Invariant should ALWAYS hold
     """
     from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order import OrderStatus
     from ...order.fetch import OrderLineInfo
     from ...plugins.manager import get_plugins_manager
     from ...shipping.models import Shipment
     from ..management import allocate_stocks, deallocate_stock
+
+    # Order must be UNCONFIRMED for allocation at supplier warehouse
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
 
     # Setup: Supplier has stock
     Stock.objects.create(

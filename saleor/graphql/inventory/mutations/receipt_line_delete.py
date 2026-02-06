@@ -5,7 +5,7 @@ from ....inventory.error_codes import ReceiptErrorCode
 from ....inventory.exceptions import ReceiptLineNotInProgress
 from ....inventory.models import ReceiptLine as ReceiptLineModel
 from ....inventory.stock_management import delete_receipt_line
-from ....permission.enums import ProductPermissions
+from ....permission.enums import WarehousePermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.mutations import BaseMutation
@@ -27,7 +27,7 @@ class ReceiptLineDelete(BaseMutation):
             "Delete a receipt line and revert the quantity update. "
             "Use when an item was scanned by mistake."
         )
-        permissions = (ProductPermissions.MANAGE_PRODUCTS,)
+        permissions = (WarehousePermissions.MANAGE_STOCK,)
         error_type_class = ReceiptError
         error_type_field = "receipt_errors"
         doc_category = DOC_CATEGORY_PRODUCTS

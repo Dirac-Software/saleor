@@ -64,7 +64,13 @@ def test_confirm_poi_with_existing_allocations(
     variant, order_line, nonowned_warehouse, owned_warehouse, purchase_order
 ):
     """Confirming POI attaches existing allocations and creates AllocationSources."""
+    from ...order import OrderStatus
     from ...warehouse.models import AllocationSource
+
+    # given - order must be UNCONFIRMED for allocation at supplier warehouse
+    order = order_line.order
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
 
     # given - stock with allocation at supplier
     source = Stock.objects.create(
@@ -195,6 +201,13 @@ def test_confirm_poi_verifies_source_stock_state(
     variant, order_line, nonowned_warehouse, owned_warehouse, purchase_order
 ):
     """Source stock quantities are correct after POI confirmation with allocations."""
+    from ...order import OrderStatus
+
+    # given - order must be UNCONFIRMED for allocation at supplier warehouse
+    order = order_line.order
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
+
     # given - stock with both quantity and allocated at supplier
     source = Stock.objects.create(
         product_variant=variant,
@@ -243,6 +256,7 @@ def test_confirm_poi_with_split_allocation(
     variant, nonowned_warehouse, owned_warehouse, purchase_order, channel_USD
 ):
     """When POI capacity < allocation, split allocation between warehouses."""
+    from ...order import OrderStatus
     from ...order.models import Order, OrderLine
 
     # given - allocation for 10 units at source
@@ -257,6 +271,7 @@ def test_confirm_poi_with_split_allocation(
         channel=channel_USD,
         billing_address=purchase_order.source_warehouse.address,
         shipping_address=purchase_order.source_warehouse.address,
+        status=OrderStatus.UNCONFIRMED,
         lines_count=1,
     )
     order_line = OrderLine.objects.create(
@@ -333,6 +348,7 @@ def test_confirm_poi_with_multiple_allocations_fifo(
     variant, nonowned_warehouse, owned_warehouse, purchase_order, channel_USD
 ):
     """Multiple allocations are moved in FIFO order (oldest order first)."""
+    from ...order import OrderStatus
     from ...order.models import Order, OrderLine
     from ...warehouse.models import AllocationSource
 
@@ -349,6 +365,7 @@ def test_confirm_poi_with_multiple_allocations_fifo(
         channel=channel_USD,
         billing_address=purchase_order.source_warehouse.address,
         shipping_address=purchase_order.source_warehouse.address,
+        status=OrderStatus.UNCONFIRMED,
         lines_count=1,
     )
     order_line1 = OrderLine.objects.create(
@@ -371,6 +388,7 @@ def test_confirm_poi_with_multiple_allocations_fifo(
         channel=channel_USD,
         billing_address=purchase_order.source_warehouse.address,
         shipping_address=purchase_order.source_warehouse.address,
+        status=OrderStatus.UNCONFIRMED,
         lines_count=1,
     )
     order_line2 = OrderLine.objects.create(
@@ -393,6 +411,7 @@ def test_confirm_poi_with_multiple_allocations_fifo(
         channel=channel_USD,
         billing_address=purchase_order.source_warehouse.address,
         shipping_address=purchase_order.source_warehouse.address,
+        status=OrderStatus.UNCONFIRMED,
         lines_count=1,
     )
     order_line3 = OrderLine.objects.create(

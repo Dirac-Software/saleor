@@ -450,8 +450,7 @@ class Shipment(ModelObjectType[models.Shipment]):
     )
     shipping_cost = graphene.Field(
         Money,
-        required=True,
-        description="Shipping cost including VAT (estimated until invoice added).",
+        description="Shipping cost including VAT (estimated until invoice added, null if not set).",
     )
     shipping_invoice = graphene.Field(
         "saleor.graphql.invoice.types.Invoice",

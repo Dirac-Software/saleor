@@ -1,5 +1,6 @@
 import graphene
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from ....permission.enums import ShippingPermissions
 from ....shipping.receiving import create_shipment
@@ -58,6 +59,7 @@ class ShipmentCreate(BaseMutation):
         doc_category = DOC_CATEGORY_SHIPPING
 
     @classmethod
+    @transaction.atomic
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
         from ....account.models import Address
         from ....inventory.models import PurchaseOrderItem

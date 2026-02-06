@@ -380,6 +380,18 @@ class Shipment(models.Model):
     # these are estimates until a shipping invoice is final. Do we need to store the
     # estimates in a separate place
     # we get these by manually breaking down an invoice
+    shipping_cost_amount = models.DecimalField(
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        default=Decimal("0.0"),
+        null=True,
+        blank=True,
+    )
+    currency = models.CharField(
+        max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH,
+        null=True,
+        blank=True,
+    )
     shipping_cost = MoneyField(
         amount_field="shipping_cost_amount", currency_field="currency"
     )

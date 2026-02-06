@@ -48,7 +48,7 @@ query PurchaseOrders {
 
 
 def test_query_purchase_order(
-    staff_api_client, permission_manage_products, purchase_order
+    staff_api_client, permission_manage_purchase_orders, purchase_order
 ):
     """Test querying a single purchase order."""
     # given
@@ -58,7 +58,7 @@ def test_query_purchase_order(
     response = staff_api_client.post_graphql(
         QUERY_PURCHASE_ORDER,
         variables,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then
@@ -73,13 +73,13 @@ def test_query_purchase_order(
 
 
 def test_query_purchase_orders(
-    staff_api_client, permission_manage_products, purchase_order
+    staff_api_client, permission_manage_purchase_orders, purchase_order
 ):
     """Test querying list of purchase orders."""
     # when
     response = staff_api_client.post_graphql(
         QUERY_PURCHASE_ORDERS,
-        permissions=[permission_manage_products],
+        permissions=[permission_manage_purchase_orders],
     )
 
     # then

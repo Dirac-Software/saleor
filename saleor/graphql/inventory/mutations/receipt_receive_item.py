@@ -5,7 +5,7 @@ from ....inventory.error_codes import ReceiptErrorCode
 from ....inventory.exceptions import ReceiptNotInProgress
 from ....inventory.models import Receipt as ReceiptModel
 from ....inventory.stock_management import receive_item
-from ....permission.enums import ProductPermissions
+from ....permission.enums import WarehousePermissions
 from ....product.models import ProductVariant
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
@@ -41,7 +41,7 @@ class ReceiptReceiveItem(BaseMutation):
 
     class Meta:
         description = "Record receiving an item during a receipt."
-        permissions = (ProductPermissions.MANAGE_PRODUCTS,)
+        permissions = (WarehousePermissions.MANAGE_STOCK,)
         error_type_class = ReceiptError
         error_type_field = "receipt_errors"
         doc_category = DOC_CATEGORY_PRODUCTS
