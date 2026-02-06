@@ -10,6 +10,7 @@ from django.conf import settings
 from django.contrib.sites.models import Site
 from django.db import transaction
 from django.db.models import F
+from django.utils.timezone import now
 
 from ..account.models import User
 from ..app.models import App
@@ -1338,10 +1339,19 @@ def _create_fulfillment_lines(
 
     if lines_info:
         if should_decrease_stock:
+            # Save FulfillmentLine objects first so they have PKs for FulfillmentSource
+            FulfillmentLine.objects.bulk_create(fulfillment_lines)
+
+            # Create mapping from (order_line_id, warehouse_id) -> FulfillmentLine
+            fulfillment_line_map = {
+                (fl.order_line_id, warehouse_pk): fl for fl in fulfillment_lines
+            }
+
             decrease_stock(
                 lines_info,
                 manager,
                 allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
+                fulfillment_line_map=fulfillment_line_map,
             )
 
         _increase_order_line_quantity(lines_info)
@@ -1448,7 +1458,11 @@ def create_fulfillments(
             if tracking_number:
                 call_event(manager.tracking_number_updated, fulfillment)
 
-        FulfillmentLine.objects.bulk_create(fulfillment_lines)
+        # Only create fulfillment_lines that haven't been saved yet
+        # (some may have been saved early for FulfillmentSource tracking)
+        unsaved_fulfillment_lines = [fl for fl in fulfillment_lines if fl.pk is None]
+        if unsaved_fulfillment_lines:
+            FulfillmentLine.objects.bulk_create(unsaved_fulfillment_lines)
         order.refresh_from_db()
         if auto_approved:
             order_fulfilled(
@@ -1463,6 +1477,8 @@ def create_fulfillments(
                 auto,
             )
         else:
+            for fulfillment in fulfillments:
+                auto_create_pick_for_fulfillment(fulfillment, user)
             order_awaits_fulfillment_approval(
                 fulfillments,
                 user,
@@ -2170,3 +2186,161 @@ def _process_refund(
         )
     )
     return amount
+
+
+@transaction.atomic
+def auto_create_pick_for_fulfillment(fulfillment, user=None):
+    """Auto-create a Pick document for a fulfillment waiting for approval.
+
+    Args:
+        fulfillment: Fulfillment waiting for approval
+        user: User creating the pick (optional)
+
+    Returns:
+        Pick instance
+
+    """
+    from .models import Pick, PickItem
+
+    if hasattr(fulfillment, "pick"):
+        return fulfillment.pick
+
+    pick = Pick.objects.create(
+        fulfillment=fulfillment,
+        created_by=user,
+    )
+
+    pick_items = []
+    for fulfillment_line in fulfillment.lines.all():
+        pick_items.append(
+            PickItem(
+                pick=pick,
+                order_line=fulfillment_line.order_line,
+                quantity_to_pick=fulfillment_line.quantity,
+                quantity_picked=0,
+            )
+        )
+
+    PickItem.objects.bulk_create(pick_items)
+
+    return pick
+
+
+@transaction.atomic
+def start_pick(pick, user=None):
+    """Start a pick session.
+
+    Args:
+        pick: Pick to start
+        user: User starting the pick (warehouse staff)
+
+    Returns:
+        Pick instance
+
+    Raises:
+        ValueError: If pick is not in NOT_STARTED status
+
+    """
+    from . import PickStatus
+
+    if pick.status != PickStatus.NOT_STARTED:
+        raise ValueError(
+            f"Pick {pick.id} cannot be started. Current status: {pick.get_status_display()}"
+        )
+
+    pick.status = PickStatus.IN_PROGRESS
+    pick.started_at = now()
+    pick.started_by = user
+    pick.save(update_fields=["status", "started_at", "started_by"])
+
+    return pick
+
+
+@transaction.atomic
+def update_pick_item(pick_item, quantity_picked, user=None, notes=""):
+    """Update quantity picked for a pick item.
+
+    Args:
+        pick_item: PickItem to update
+        quantity_picked: New quantity picked
+        user: User who picked the items
+        notes: Optional notes about picking this item
+
+    Returns:
+        PickItem instance
+
+    Raises:
+        ValueError: If pick is not in progress or quantity exceeds expected
+
+    """
+    from . import PickStatus
+
+    if pick_item.pick.status != PickStatus.IN_PROGRESS:
+        raise ValueError(
+            f"Pick {pick_item.pick.id} is not in progress. "
+            f"Current status: {pick_item.pick.get_status_display()}"
+        )
+
+    if quantity_picked > pick_item.quantity_to_pick:
+        raise ValueError(
+            f"Quantity picked ({quantity_picked}) cannot exceed "
+            f"quantity to pick ({pick_item.quantity_to_pick})"
+        )
+
+    pick_item.quantity_picked = quantity_picked
+    pick_item.picked_by = user
+    if notes:
+        pick_item.notes = notes
+
+    if pick_item.is_fully_picked and pick_item.picked_at is None:
+        pick_item.picked_at = now()
+
+    pick_item.save(
+        update_fields=["quantity_picked", "picked_by", "notes", "picked_at"]
+    )
+
+    return pick_item
+
+
+@transaction.atomic
+def complete_pick(pick, user=None):
+    """Complete a pick document.
+
+    Args:
+        pick: Pick to complete
+        user: User completing the pick
+
+    Returns:
+        Pick instance
+
+    Raises:
+        ValueError: If pick is not in progress or items not fully picked
+
+    """
+    from . import PickStatus
+
+    if pick.status != PickStatus.IN_PROGRESS:
+        raise ValueError(
+            f"Pick {pick.id} cannot be completed. "
+            f"Current status: {pick.get_status_display()}"
+        )
+
+    unfulfilled_items = []
+    for item in pick.items.all():
+        if not item.is_fully_picked:
+            unfulfilled_items.append(
+                f"OrderLine {item.order_line_id}: {item.quantity_picked}/{item.quantity_to_pick}"
+            )
+
+    if unfulfilled_items:
+        raise ValueError(
+            f"Cannot complete pick {pick.id}. "
+            f"The following items are not fully picked: {', '.join(unfulfilled_items)}"
+        )
+
+    pick.status = PickStatus.COMPLETED
+    pick.completed_at = now()
+    pick.completed_by = user
+    pick.save(update_fields=["status", "completed_at", "completed_by"])
+
+    return pick

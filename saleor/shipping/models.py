@@ -19,7 +19,7 @@ from ..core.utils.translations import Translation
 from ..core.weight import convert_weight, get_default_weight_unit, zero_weight
 from ..permission.enums import ShippingPermissions
 from ..tax.models import TaxClass
-from . import PostalCodeRuleInclusionType, ShippingMethodType
+from . import IncoTerm, PostalCodeRuleInclusionType, ShippingMethodType
 from .postal_codes import filter_shipping_methods_by_postal_code_rules
 
 if TYPE_CHECKING:
@@ -396,6 +396,13 @@ class Shipment(models.Model):
         amount_field="shipping_cost_amount", currency_field="currency"
     )
 
+    inco_term = models.CharField(
+        max_length=3,
+        blank=True,
+        null=True,
+        choices=IncoTerm.CHOICES,
+    )
+
     # instead of using a duties invoice we can get these from the unit price, hs code on
     # a ProductVariant and the shipment source and destination.
     # duties_cost = MoneyField(
@@ -423,10 +430,43 @@ class Shipment(models.Model):
     )
 
     # for an inbound shipment we need this
-    arrived_at = models.DateTimeField(null=True)
+    arrived_at = models.DateTimeField(null=True, blank=True)
     # for an outbound shipment we need this
-    departed_at = models.DateTimeField(null=True)
+    departed_at = models.DateTimeField(null=True, blank=True)
 
-    carrier = models.CharField(null=True)
+    carrier = models.CharField(null=True, blank=True)
     # we can propogate this up to the order.
-    tracking_number = models.CharField(null=True)
+    tracking_number = models.CharField(null=True, blank=True)
+
+    inco_term = models.CharField(
+        max_length=3,
+        choices=IncoTerm.CHOICES,
+        default=IncoTerm.DDP,
+    )
+
+    shipment_processed_at = models.DateTimeField(null=True, blank=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        super().clean()
+
+        if self.inco_term and self.shipping_cost_amount is not None:
+            if self.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
+                if self.shipping_cost_amount != Decimal("0"):
+                    raise ValidationError(
+                        {
+                            "shipping_cost_amount": f"Shipping cost must be 0 for incoterm {self.inco_term} (buyer pays shipping)"
+                        }
+                    )
+            else:
+                if self.shipping_cost_amount == Decimal("0"):
+                    raise ValidationError(
+                        {
+                            "shipping_cost_amount": f"Shipping cost must be greater than 0 for incoterm {self.inco_term} (seller pays shipping)"
+                        }
+                    )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

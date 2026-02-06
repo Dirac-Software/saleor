@@ -115,7 +115,9 @@ def test_draft_order_complete(
     # given
     order = draft_order
     order.user = customer_user
-    order.save(update_fields=["user"])
+    order.shipping_price_net_amount = Decimal("10.00")
+    order.shipping_price_gross_amount = Decimal("12.30")
+    order.save(update_fields=["user", "shipping_price_net_amount", "shipping_price_gross_amount"])
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
 
@@ -140,24 +142,20 @@ def test_draft_order_complete(
     assert data["status"] == order.status.upper()
     assert data["origin"] == OrderOrigin.DRAFT.upper()
     assert order.search_vector
-    assert order.status == OrderStatus.UNFULFILLED
+    assert order.status == OrderStatus.UNCONFIRMED
 
     for line in order.lines.all():
         allocation = line.allocations.get()
         assert allocation.quantity_allocated == line.quantity_unfulfilled
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is unconfirmed)
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
     product_variant_out_of_stock_webhook_mock.assert_called_once_with(
         Stock.objects.last()
@@ -982,13 +980,15 @@ def test_draft_order_complete_anonymous_user_no_email(
     order = draft_order
     order.user_email = ""
     order.user = None
+    order.shipping_price_net_amount = Decimal("10.00")
+    order.shipping_price_gross_amount = Decimal("12.30")
     order.save()
     order_id = graphene.Node.to_global_id("Order", order.id)
     variables = {"id": order_id}
     response = staff_api_client.post_graphql(DRAFT_ORDER_COMPLETE_MUTATION, variables)
     content = get_graphql_content(response)
     data = content["data"]["draftOrderComplete"]["order"]
-    assert data["status"] == OrderStatus.UNFULFILLED.upper()
+    assert data["status"] == OrderStatus.UNCONFIRMED.upper()
 
 
 def test_draft_order_complete_drops_shipping_address(
@@ -1759,6 +1759,8 @@ def test_draft_order_complete_triggers_webhooks(
     order = draft_order
     order.should_refresh_prices = True
     order.status = OrderStatus.DRAFT
+    order.shipping_price_net_amount = Decimal("10.00")
+    order.shipping_price_gross_amount = Decimal("12.30")
     order.save()
     permission_group_manage_orders.user_set.add(staff_api_client.user)
 
@@ -1772,34 +1774,21 @@ def test_draft_order_complete_triggers_webhooks(
     content = get_graphql_content(response)
     assert not content["data"]["draftOrderComplete"]["errors"]
 
-    # confirm that event delivery was generated for each async webhook.
-    order_confirmed_delivery = EventDelivery.objects.get(
-        webhook_id=additional_order_webhook.id,
-        event_type=WebhookEventAsyncType.ORDER_CONFIRMED,
-    )
-    order_updated_delivery = EventDelivery.objects.get(
+    # Order goes to UNCONFIRMED (not UNFULFILLED) since no allocations exist yet
+    # So only ORDER_CREATED event is fired, not ORDER_CONFIRMED
+    order_created_delivery = EventDelivery.objects.get(
         webhook_id=additional_order_webhook.id,
         event_type=WebhookEventAsyncType.ORDER_CREATED,
     )
-    order_deliveries = [
-        order_confirmed_delivery,
-        order_updated_delivery,
-    ]
 
-    mocked_send_webhook_request_async.assert_has_calls(
-        [
-            call(
-                kwargs={"event_delivery_id": delivery.id, "telemetry_context": ANY},
-                queue=settings.ORDER_WEBHOOK_EVENTS_CELERY_QUEUE_NAME,
-                MessageGroupId="example.com:saleorappadditional",
-            )
-            for delivery in order_deliveries
-        ],
-        any_order=True,
+    mocked_send_webhook_request_async.assert_called_once_with(
+        kwargs={"event_delivery_id": order_created_delivery.id, "telemetry_context": ANY},
+        queue=settings.ORDER_WEBHOOK_EVENTS_CELERY_QUEUE_NAME,
+        MessageGroupId="example.com:saleorappadditional",
     )
 
-    # confirm each sync webhook was called without saving event delivery
-    assert mocked_send_webhook_request_sync.call_count == 2
+    # confirm sync webhooks were called (shipping filter + tax calculation + extra call)
+    assert mocked_send_webhook_request_sync.call_count == 3
     assert not EventDelivery.objects.exclude(
         webhook_id=additional_order_webhook.id
     ).exists()

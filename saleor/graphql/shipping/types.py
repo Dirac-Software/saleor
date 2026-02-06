@@ -48,7 +48,7 @@ from .dataloaders import (
     ShippingMethodsByShippingZoneIdAndChannelSlugLoader,
     ShippingMethodsByShippingZoneIdLoader,
 )
-from .enums import PostalCodeRuleInclusionTypeEnum, ShippingMethodTypeEnum
+from .enums import IncoTermEnum, PostalCodeRuleInclusionTypeEnum, ShippingMethodTypeEnum
 
 
 class ShippingMethodChannelListing(
@@ -464,6 +464,10 @@ class Shipment(ModelObjectType[models.Shipment]):
     )
     carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
     tracking_number = graphene.String(description="Tracking number from carrier.")
+    inco_term = IncoTermEnum(description="Incoterm defining shipping cost responsibility.")
+    shipment_processed_at = DateTime(
+        description="When shipment was processed/finalized."
+    )
     purchase_order_items = NonNullList(
         "saleor.graphql.inventory.types.PurchaseOrderItem",
         required=True,

@@ -9,8 +9,10 @@ from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_SHIPPING
 from ...core.mutations import BaseMutation
 from ...core.scalars import PositiveDecimal
+from ...core.scalars import DateTime
 from ...core.types import BaseInputObjectType, NonNullList, ShippingError
 from ...core.utils import from_global_id_or_error
+from ..enums import IncoTermEnum
 from ..types import Shipment
 
 
@@ -37,6 +39,8 @@ class ShipmentCreateInput(BaseInputObjectType):
         description="Currency code (default: GBP).",
         default_value="GBP",
     )
+    inco_term = IncoTermEnum(description="Incoterm defining shipping cost responsibility.")
+    shipment_processed_at = DateTime(description="When shipment was processed/finalized.")
 
     class Meta:
         doc_category = DOC_CATEGORY_SHIPPING
@@ -105,6 +109,8 @@ class ShipmentCreate(BaseMutation):
                 tracking_number=input_data.get("tracking_number"),
                 shipping_cost=input_data.get("shipping_cost"),
                 currency=input_data.get("currency", "GBP"),
+                inco_term=input_data.get("inco_term"),
+                shipment_processed_at=input_data.get("shipment_processed_at"),
                 user=info.context.user,
                 app=app,
             )

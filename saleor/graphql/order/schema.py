@@ -70,7 +70,11 @@ from .mutations.order_note_update import OrderNoteUpdate
 from .mutations.order_refund import OrderRefund
 from .mutations.order_update import OrderUpdate
 from .mutations.order_update_shipping import OrderUpdateShipping
+from .mutations.order_update_shipping_cost import OrderUpdateShippingCost
 from .mutations.order_void import OrderVoid
+from .mutations.pick_complete import PickComplete
+from .mutations.pick_start import PickStart
+from .mutations.pick_update_item import PickUpdateItem
 from .resolvers import (
     resolve_draft_orders,
     resolve_homepage_events,
@@ -80,7 +84,13 @@ from .resolvers import (
     resolve_orders_total,
 )
 from .sorters import OrderSortField, OrderSortingInput
-from .types import Order, OrderCountableConnection, OrderEventCountableConnection
+from .types import (
+    Order,
+    OrderCountableConnection,
+    OrderEventCountableConnection,
+    Pick,
+    PickCountableConnection,
+)
 
 
 def search_string_in_kwargs(kwargs: dict) -> bool:
@@ -201,6 +211,19 @@ class OrderQueries(graphene.ObjectType):
         token=graphene.Argument(UUID, description="The order's token.", required=True),
         doc_category=DOC_CATEGORY_ORDERS,
     )
+    pick = PermissionsField(
+        Pick,
+        description="Look up a pick by ID.",
+        id=graphene.Argument(graphene.ID, description="ID of a pick.", required=True),
+        permissions=[OrderPermissions.MANAGE_ORDERS],
+        doc_category=DOC_CATEGORY_ORDERS,
+    )
+    picks = FilterConnectionField(
+        PickCountableConnection,
+        description="List of picks for warehouse picking workflow.",
+        permissions=[OrderPermissions.MANAGE_ORDERS],
+        doc_category=DOC_CATEGORY_ORDERS,
+    )
 
     @staticmethod
     def resolve_homepage_events(_root, info: ResolveInfo, **kwargs):
@@ -289,6 +312,21 @@ class OrderQueries(graphene.ObjectType):
     def resolve_order_by_token(_root, info: ResolveInfo, *, token):
         return resolve_order_by_token(info, token)
 
+    @staticmethod
+    def resolve_pick(_root, info: ResolveInfo, *, id):
+        _, pick_id = from_global_id_or_error(id, Pick)
+        return models.Pick.objects.filter(id=pick_id).first()
+
+    @staticmethod
+    def resolve_picks(_root, info: ResolveInfo, **kwargs):
+        qs = models.Pick.objects.all()
+        qs = filter_connection_queryset(
+            qs, kwargs, allow_replica=info.context.allow_replica
+        )
+        return create_connection_slice_for_sync_webhook_control_context(
+            qs, info, kwargs, PickCountableConnection, allow_sync_webhooks=False
+        )
+
 
 class OrderMutations(graphene.ObjectType):
     draft_order_complete = DraftOrderComplete.Field()
@@ -335,6 +373,11 @@ class OrderMutations(graphene.ObjectType):
     order_refund = OrderRefund.Field()
     order_update = OrderUpdate.Field()
     order_update_shipping = OrderUpdateShipping.Field()
+    order_update_shipping_cost = OrderUpdateShippingCost.Field()
     order_void = OrderVoid.Field()
     order_bulk_cancel = OrderBulkCancel.Field()
     order_bulk_create = OrderBulkCreate.Field()
+
+    pick_start = PickStart.Field()
+    pick_update_item = PickUpdateItem.Field()
+    pick_complete = PickComplete.Field()

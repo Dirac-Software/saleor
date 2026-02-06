@@ -11,6 +11,9 @@ Allocations in non-owned warehouses do NOT need AllocationSources.
 """
 
 import pytest
+from decimal import Decimal
+from prices import Money
+from django.utils import timezone
 from django.db.models import Sum
 
 from ...core.exceptions import InsufficientStock
@@ -459,6 +462,10 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
         tracking_number="DRAFT-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     draft_poi = PurchaseOrderItem.objects.create(
         order=purchase_order,

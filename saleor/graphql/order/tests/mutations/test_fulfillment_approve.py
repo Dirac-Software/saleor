@@ -3,8 +3,14 @@ from unittest.mock import patch
 import graphene
 
 from .....giftcard.models import GiftCard
-from .....order import FulfillmentStatus, OrderEvents, OrderStatus
-from .....order.actions import fulfill_order_lines
+from .....order import FulfillmentStatus, OrderEvents, OrderStatus, PickStatus
+from .....order.actions import (
+    auto_create_pick_for_fulfillment,
+    complete_pick,
+    fulfill_order_lines,
+    start_pick,
+    update_pick_item,
+)
 from .....order.error_codes import OrderErrorCode
 from .....order.fetch import OrderLineInfo
 from .....order.models import OrderLine
@@ -538,3 +544,230 @@ def test_fulfillment_approve_trigger_webhook_event(
         "fulfillment": fulfillment,
         "notify_customer": True,
     }
+
+
+def test_fulfillment_approve_fails_without_pick(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "must have a Pick" in data["errors"][0]["message"]
+
+
+def test_fulfillment_approve_fails_when_pick_not_started(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    assert pick.status == PickStatus.NOT_STARTED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "Pick must be completed" in data["errors"][0]["message"]
+    assert "Not Started" in data["errors"][0]["message"]
+
+
+def test_fulfillment_approve_fails_when_pick_in_progress(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.IN_PROGRESS
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "Pick must be completed" in data["errors"][0]["message"]
+    assert "In Progress" in data["errors"][0]["message"]
+
+
+@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
+def test_fulfillment_approve_succeeds_when_pick_completed(
+    mock_email_fulfillment,
+    mock_fulfillment_approved,
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+    warehouse,
+):
+    from .....shipping.models import Shipment
+    from decimal import Decimal
+    from django.utils import timezone
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        tracking_number="TEST-123",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term="DDP",
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.COMPLETED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": True}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert not data["errors"]
+    assert data["fulfillment"]["status"] == FulfillmentStatus.FULFILLED.upper()
+    assert data["order"]["status"] == OrderStatus.FULFILLED.upper()
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.FULFILLED
+
+    assert mock_email_fulfillment.call_count == 1
+    events = fulfillment.order.events.all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.type == OrderEvents.FULFILLMENT_FULFILLED_ITEMS
+    assert event.user == staff_api_client.user
+    mock_fulfillment_approved.assert_called_once_with(fulfillment, True)
+
+
+def test_fulfillment_approve_fails_without_shipment(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.COMPLETED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "must have a Shipment" in data["errors"][0]["message"]
+
+
+@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
+def test_fulfillment_approve_succeeds_with_shipment_and_completed_pick(
+    mock_email_fulfillment,
+    mock_fulfillment_approved,
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+    warehouse,
+):
+    from .....shipping.models import Shipment
+    from decimal import Decimal
+    from django.utils import timezone
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        tracking_number="TEST-COMPLETE",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term="DDP",
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.COMPLETED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": True}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert not data["errors"]
+    assert data["fulfillment"]["status"] == FulfillmentStatus.FULFILLED.upper()
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.FULFILLED
+    assert fulfillment.shipment == shipment
+
+    mock_fulfillment_approved.assert_called_once_with(fulfillment, True)

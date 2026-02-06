@@ -152,23 +152,11 @@ class ShippingMethodUpdateMixin:
 
     @classmethod
     def assign_shipping_price(cls, order, shipping_channel_listing):
-        if not shipping_channel_listing:
-            order.base_shipping_price = zero_money(order.currency)
-            order.undiscounted_base_shipping_price = zero_money(order.currency)
-            return
-
-        if (
-            order.shipping_method
-            and order.shipping_address
-            and order.is_shipping_required()
-        ):
-            undiscounted_shipping_price = shipping_channel_listing.price
-            order.undiscounted_base_shipping_price = undiscounted_shipping_price
-            order.base_shipping_price = undiscounted_shipping_price
-
-        else:
-            order.base_shipping_price = zero_money(order.currency)
-            order.undiscounted_base_shipping_price = zero_money(order.currency)
+        # Never auto-calculate shipping prices for orders
+        # All shipping costs must be set manually via orderUpdateShippingCost
+        # This ensures accurate pricing for ERP workflows where costs come from
+        # external quotes, carrier APIs, or manual negotiations
+        pass
 
     @classmethod
     def update_shipping_discount(cls, order: models.Order):

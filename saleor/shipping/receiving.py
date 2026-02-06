@@ -1,10 +1,13 @@
 """Shipment lifecycle management for inbound goods."""
 
+from decimal import Decimal
+
 from django.db import transaction
 from prices import Money
 
 from ..inventory import PurchaseOrderItemStatus
 from ..inventory.events import shipment_assigned_event
+from . import IncoTerm
 from .models import Shipment
 
 """
@@ -30,6 +33,8 @@ def create_shipment(
     tracking_number=None,
     shipping_cost=None,
     currency="GBP",
+    inco_term=None,
+    shipment_processed_at=None,
     user=None,
     app=None,
 ):
@@ -43,6 +48,8 @@ def create_shipment(
         tracking_number: Optional tracking number
         shipping_cost: Estimated shipping cost including VAT (Decimal)
         currency: Currency for costs (default GBP)
+        inco_term: Incoterm defining shipping cost responsibility
+        shipment_processed_at: When shipment was processed/finalized
         user: Optional user who created the shipment
         app: Optional app that created the shipment
 
@@ -50,7 +57,8 @@ def create_shipment(
         Shipment instance
 
     Raises:
-        ValueError: If POIs are not CONFIRMED or already assigned to a shipment
+        ValueError: If POIs are not CONFIRMED or already assigned to a shipment,
+                   or if shipping cost violates incoterm rules
 
     Links POIs to shipment for tracking physical movement.
     Costs start as estimates until invoice is added.
@@ -68,12 +76,28 @@ def create_shipment(
                 f"POI {poi.id} is already assigned to shipment {poi.shipment.id}"
             )
 
+    # Validate shipping cost based on incoterm
+    if inco_term and shipping_cost is not None:
+        shipping_cost_decimal = Decimal(str(shipping_cost))
+        if inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
+            if shipping_cost_decimal != Decimal("0"):
+                raise ValueError(
+                    f"Shipping cost must be 0 for incoterm {inco_term} (buyer pays shipping)"
+                )
+        else:
+            if shipping_cost_decimal == Decimal("0"):
+                raise ValueError(
+                    f"Shipping cost must be greater than 0 for incoterm {inco_term} (seller pays shipping)"
+                )
+
     # Create the shipment
     shipment_data = {
         "source": source_address,
         "destination": destination_address,
         "carrier": carrier,
         "tracking_number": tracking_number,
+        "inco_term": inco_term,
+        "shipment_processed_at": shipment_processed_at,
     }
 
     if shipping_cost is not None:

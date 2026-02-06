@@ -1,15 +1,16 @@
 """Dedicated tests for the Stock ↔ POI invariants in owned warehouses.
 
-THE TWO FUNDAMENTAL INVARIANTS:
+THE THREE FUNDAMENTAL INVARIANTS:
 
 1. Total Physical Stock - conservation of mass:
-    Stock.quantity == sum(POI.quantity_ordered + processed_adjustments)
+    Stock.quantity == sum(POI.quantity_ordered + processed_adjustments - POI.quantity_fulfilled)
 
-    For any (owned_warehouse, variant) pair, Stock.quantity represents TOTAL physical
-    stock from POIs including processed adjustments.
+    For any (owned_warehouse, variant) pair, Stock.quantity represents physical stock
+    currently in the warehouse. This equals what we received from suppliers (quantity_ordered
+    + adjustments) minus what we've shipped to customers (quantity_fulfilled).
 
     Note: POI.quantity_received is just an audit trail showing what initially arrived.
-    The actual stock is always based on quantity_ordered + processed adjustments.
+    The actual stock is always based on quantity_ordered + processed_adjustments - quantity_fulfilled.
     Only processed adjustments (processed_at != NULL) are included.
 
 2. Allocation Tracking - AllocationSources link Stock to POI batches:
@@ -18,15 +19,24 @@ THE TWO FUNDAMENTAL INVARIANTS:
     For owned warehouses, AllocationSources ensure that Stock.quantity_allocated
     always matches the sum of POI.quantity_allocated across all active POIs.
 
+3. Fulfillment Tracking - FulfillmentSources provide audit trail:
+    sum(FulfillmentSource.quantity) == sum(POI.quantity_fulfilled)
+
+    When items are fulfilled, AllocationSources are converted to FulfillmentSources
+    and POI.quantity_fulfilled is incremented.
+
 DERIVED RELATIONSHIP (follows mathematically from the above):
     Available stock: Stock.quantity - Stock.quantity_allocated == sum(POI.available_quantity)
-    Where POI.available_quantity = (quantity_ordered + processed_adjustments) - quantity_allocated
+    Where POI.available_quantity = (quantity_ordered + processed_adjustments - quantity_allocated - quantity_fulfilled)
 
 Any time an invariant is violated we should add a test here. We should also regularly
 run an invariant validation to make sure the Stock is in the correct state.
 """
 
 import pytest
+from decimal import Decimal
+from prices import Money
+from django.utils import timezone
 
 from ...inventory import PurchaseOrderItemStatus
 from ...inventory.models import PurchaseOrderItem
@@ -39,11 +49,10 @@ def calculate_expected_stock_quantity(warehouse, variant):
     This is the "source of truth" calculation from the POI table.
     Stock.quantity should always equal this value.
 
-    Returns the sum of TOTAL physical stock from POIs including processed adjustments.
-    Formula: sum(POI.quantity_ordered + processed_adjustments)
+    Returns physical stock currently in warehouse.
+    Formula: sum(POI.quantity_ordered + processed_adjustments - quantity_fulfilled)
 
-    Note: quantity_received is just an audit trail showing what initially arrived.
-    The actual stock quantity is always quantity_ordered + processed_adjustments.
+    This equals what we received from suppliers minus what we shipped to customers.
     """
     from django.db.models import Sum
 
@@ -63,9 +72,8 @@ def calculate_expected_stock_quantity(warehouse, variant):
             or 0
         )
 
-        # Base is always quantity_ordered, not quantity_received
-        # quantity_received is just for audit/reference
-        total += poi.quantity_ordered + processed_adjustments
+        # Physical stock in warehouse = received from supplier - shipped to customers
+        total += poi.quantity_ordered + processed_adjustments - poi.quantity_fulfilled
 
     return total
 
@@ -103,14 +111,19 @@ def calculate_expected_poi_allocated(warehouse, variant):
 
 
 def assert_stock_poi_invariant(warehouse, variant):
-    """Assert the TWO FUNDAMENTAL INVARIANTS hold for a specific warehouse/variant pair.
+    """Assert ALL FUNDAMENTAL INVARIANTS hold for a specific warehouse/variant pair.
 
     This is THE assertion that proves Stock is a client of POI.
 
     Checks:
-    1. INVARIANT 1: Stock.quantity == sum(POI.quantity_ordered OR quantity_received)
+    1. INVARIANT 1: Stock.quantity == sum(POI.quantity_ordered + adjustments - fulfilled)
     2. INVARIANT 2: Stock.quantity_allocated == sum(POI.quantity_allocated)
-    3. DERIVED (bonus check): Stock.quantity - Stock.quantity_allocated == sum(POI.available_quantity)
+    3. INVARIANT 3: For each POI: sum(FulfillmentSource.quantity) == POI.quantity_fulfilled
+    4. INVARIANT 4: For each Allocation in owned warehouse: sum(AllocationSource.quantity) == Allocation.quantity_allocated
+    5. INVARIANT 5: For each POI: quantity_ordered + adjustments == allocated + fulfilled + available (conservation)
+    6. INVARIANT 6: No negative quantities
+    7. INVARIANT 7: Logical constraints (allocated + fulfilled <= ordered + adjustments)
+    8. DERIVED: Stock.quantity - Stock.quantity_allocated == sum(POI.available_quantity)
     """
     from ...inventory import PurchaseOrderItemStatus
     from ...inventory.models import PurchaseOrderItem
@@ -177,6 +190,118 @@ def assert_stock_poi_invariant(warehouse, variant):
         f"  POIs:\n" + "\n".join(poi_debug if poi_debug else ["    None"])
     )
 
+    # Check INVARIANT 3: FulfillmentSource audit trail matches POI.quantity_fulfilled
+    from ..models import FulfillmentSource
+    from django.db.models import Sum
+
+    for poi in pois:
+        fulfillment_source_sum = (
+            FulfillmentSource.objects.filter(purchase_order_item=poi).aggregate(
+                total=Sum("quantity")
+            )["total"]
+            or 0
+        )
+        assert fulfillment_source_sum == poi.quantity_fulfilled, (
+            f"INVARIANT 3 VIOLATED for POI #{poi.id}:\n"
+            f"  POI.quantity_fulfilled: {poi.quantity_fulfilled}\n"
+            f"  sum(FulfillmentSource.quantity): {fulfillment_source_sum}\n"
+            f"  FulfillmentSource audit trail doesn't match fulfilled quantity!"
+        )
+
+    # Check INVARIANT 4: AllocationSource batch tracking (owned warehouses only)
+    from ..models import Allocation, AllocationSource
+
+    if warehouse.is_owned:
+        allocations = Allocation.objects.filter(
+            stock__warehouse=warehouse, stock__product_variant=variant
+        )
+        for allocation in allocations:
+            allocation_source_sum = (
+                AllocationSource.objects.filter(allocation=allocation).aggregate(
+                    total=Sum("quantity")
+                )["total"]
+                or 0
+            )
+            assert allocation_source_sum == allocation.quantity_allocated, (
+                f"INVARIANT 4 VIOLATED for Allocation #{allocation.id}:\n"
+                f"  Allocation.quantity_allocated: {allocation.quantity_allocated}\n"
+                f"  sum(AllocationSource.quantity): {allocation_source_sum}\n"
+                f"  AllocationSource batch tracking doesn't match allocated quantity!"
+            )
+
+    # Check INVARIANT 5: POI conservation of mass
+    for poi in pois:
+        processed_adjustments = (
+            poi.adjustments.filter(processed_at__isnull=False).aggregate(
+                total=Sum("quantity_change")
+            )["total"]
+            or 0
+        )
+        total_received = poi.quantity_ordered + processed_adjustments
+        total_accounted = (
+            poi.quantity_allocated + poi.quantity_fulfilled + poi.available_quantity
+        )
+        assert total_received == total_accounted, (
+            f"INVARIANT 5 VIOLATED for POI #{poi.id} (conservation of mass):\n"
+            f"  Received: quantity_ordered ({poi.quantity_ordered}) + "
+            f"adjustments ({processed_adjustments}) = {total_received}\n"
+            f"  Accounted: allocated ({poi.quantity_allocated}) + "
+            f"fulfilled ({poi.quantity_fulfilled}) + "
+            f"available ({poi.available_quantity}) = {total_accounted}\n"
+            f"  Units are missing or created from nothing!"
+        )
+
+    # Check INVARIANT 6: No negative quantities
+    for poi in pois:
+        assert poi.quantity_allocated >= 0, (
+            f"INVARIANT 6 VIOLATED for POI #{poi.id}: "
+            f"quantity_allocated ({poi.quantity_allocated}) is negative!"
+        )
+        assert poi.quantity_fulfilled >= 0, (
+            f"INVARIANT 6 VIOLATED for POI #{poi.id}: "
+            f"quantity_fulfilled ({poi.quantity_fulfilled}) is negative!"
+        )
+        assert poi.available_quantity >= 0, (
+            f"INVARIANT 6 VIOLATED for POI #{poi.id}: "
+            f"available_quantity ({poi.available_quantity}) is negative!"
+        )
+
+    if stock:
+        assert stock.quantity >= 0, (
+            f"INVARIANT 6 VIOLATED for Stock: quantity ({stock.quantity}) is negative!"
+        )
+        assert stock.quantity_allocated >= 0, (
+            f"INVARIANT 6 VIOLATED for Stock: "
+            f"quantity_allocated ({stock.quantity_allocated}) is negative!"
+        )
+
+    # Check INVARIANT 7: Logical constraints
+    for poi in pois:
+        processed_adjustments = (
+            poi.adjustments.filter(processed_at__isnull=False).aggregate(
+                total=Sum("quantity_change")
+            )["total"]
+            or 0
+        )
+        max_allowed = poi.quantity_ordered + processed_adjustments
+        actual_used = poi.quantity_allocated + poi.quantity_fulfilled
+        assert actual_used <= max_allowed, (
+            f"INVARIANT 7 VIOLATED for POI #{poi.id}:\n"
+            f"  Max available: quantity_ordered ({poi.quantity_ordered}) + "
+            f"adjustments ({processed_adjustments}) = {max_allowed}\n"
+            f"  Actually used: allocated ({poi.quantity_allocated}) + "
+            f"fulfilled ({poi.quantity_fulfilled}) = {actual_used}\n"
+            f"  Cannot allocate + fulfill more than we have!"
+        )
+
+    if stock:
+        assert stock.quantity_allocated <= stock.quantity, (
+            f"INVARIANT 7 VIOLATED for Stock:\n"
+            f"  Stock.quantity: {stock.quantity}\n"
+            f"  Stock.quantity_allocated: {stock.quantity_allocated}\n"
+            f"  Cannot allocate more than physical stock!"
+        )
+
 
 # ==============================================================================
 # INVARIANT TESTS
@@ -219,6 +344,10 @@ def test_invariant_after_single_poi_confirmation(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -261,6 +390,10 @@ def test_invariant_with_multiple_pois_same_variant(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     # Create 3 POIs with different quantities
@@ -310,6 +443,10 @@ def test_invariant_with_partially_allocated_pois(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     # Create POIs
@@ -381,6 +518,10 @@ def test_invariant_with_fully_allocated_poi(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -429,6 +570,10 @@ def test_invariant_excludes_draft_pois(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     PurchaseOrderItem.objects.create(
@@ -493,6 +638,10 @@ def test_invariant_with_multiple_variants_in_same_warehouse(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     # Create POIs for each variant
@@ -559,6 +708,10 @@ def test_invariant_after_allocation_and_deallocation(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -687,6 +840,10 @@ def test_invariant_when_confirming_poi_moves_allocations_from_supplier(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -814,6 +971,10 @@ def test_invariant_when_multiple_customer_orders_then_confirm_poi(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -915,6 +1076,10 @@ def test_invariant_when_poi_quantity_less_than_allocations(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -1016,6 +1181,10 @@ def test_invariant_when_order_auto_confirms_after_poi_confirmation(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -1110,6 +1279,10 @@ def test_invariant_with_mixed_allocations_owned_and_nonowned(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi1 = PurchaseOrderItem.objects.create(
@@ -1182,6 +1355,10 @@ def test_invariant_with_mixed_allocations_owned_and_nonowned(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-456",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi2 = PurchaseOrderItem.objects.create(
@@ -1290,6 +1467,10 @@ def test_invariant_stress_test_realistic_daily_operations(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="SHIP-001",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi1 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1351,6 +1532,10 @@ def test_invariant_stress_test_realistic_daily_operations(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="SHIP-002",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi2 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1402,6 +1587,10 @@ def test_allocation_creates_allocation_sources(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1466,6 +1655,10 @@ def test_stock_quantity_constant_during_allocation(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1535,6 +1728,10 @@ def test_allocation_spans_poi_batches_fifo(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-1",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi1 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1553,6 +1750,10 @@ def test_allocation_spans_poi_batches_fifo(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-2",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi2 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1613,6 +1814,10 @@ def test_partial_deallocation(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1706,6 +1911,10 @@ def test_invariant_after_delivery_shortage_with_processed_adjustment(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-123",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -1803,6 +2012,10 @@ def test_invariant_after_overage_with_processed_adjustment(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-456",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     poi = PurchaseOrderItem.objects.create(
@@ -1897,6 +2110,10 @@ def test_invariant_with_mixed_pois_some_with_processed_adjustments(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="SHIP-1",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi1 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1930,6 +2147,10 @@ def test_invariant_with_mixed_pois_some_with_processed_adjustments(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="SHIP-2",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi2 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1963,6 +2184,10 @@ def test_invariant_with_mixed_pois_some_with_processed_adjustments(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="SHIP-3",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     poi3 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -2013,3 +2238,101 @@ def test_invariant_with_mixed_pois_some_with_processed_adjustments(
 
     # Final invariant check
     assert_stock_poi_invariant(owned_warehouse, variant)
+
+
+def test_invariant_after_order_fulfillment(
+    owned_warehouse,
+    purchase_order_item,
+    order_line,
+    channel_USD,
+    site_settings,
+):
+    """Invariants hold after creating, allocating, and fulfilling orders."""
+    from ...order.actions import create_fulfillments
+    from ...order.fetch import OrderLineInfo
+    from ...plugins.manager import get_plugins_manager
+    from ..management import allocate_stocks
+
+    variant = order_line.variant
+    order = order_line.order
+
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
+    )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
+
+    # Set order_line quantity to 50
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    allocate_stocks(
+        [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
+        "US",
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    stock.refresh_from_db()
+    purchase_order_item.refresh_from_db()
+    assert stock.quantity == 100
+    assert stock.quantity_allocated == 50
+    assert purchase_order_item.quantity_allocated == 50
+    assert purchase_order_item.quantity_fulfilled == 0
+
+    create_fulfillments(
+        user=None,
+        app=None,
+        order=order,
+        fulfillment_lines_for_warehouses={
+            owned_warehouse.pk: [{"order_line": order_line, "quantity": 30}]
+        },
+        manager=get_plugins_manager(allow_replica=False),
+        site_settings=site_settings,
+        notify_customer=False,
+    )
+
+    stock.refresh_from_db()
+    purchase_order_item.refresh_from_db()
+
+    assert stock.quantity == 70
+    assert stock.quantity_allocated == 20
+    assert purchase_order_item.quantity_allocated == 20
+    assert purchase_order_item.quantity_fulfilled == 30
+
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    expected_stock = calculate_expected_stock_quantity(owned_warehouse, variant)
+    assert stock.quantity == expected_stock
+
+    assert stock.quantity == 100 - 30
+
+    create_fulfillments(
+        user=None,
+        app=None,
+        order=order,
+        fulfillment_lines_for_warehouses={
+            owned_warehouse.pk: [{"order_line": order_line, "quantity": 20}]
+        },
+        manager=get_plugins_manager(allow_replica=False),
+        site_settings=site_settings,
+        notify_customer=False,
+    )
+
+    stock.refresh_from_db()
+    purchase_order_item.refresh_from_db()
+
+    assert stock.quantity == 50
+    assert stock.quantity_allocated == 0
+    assert purchase_order_item.quantity_allocated == 0
+    assert purchase_order_item.quantity_fulfilled == 50
+
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+    assert stock.quantity == 100 - 50

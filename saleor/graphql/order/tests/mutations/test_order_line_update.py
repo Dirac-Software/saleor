@@ -1447,3 +1447,156 @@ def test_order_line_update_specific_product_voucher_discount_multiple_lines(
         * tax_rate,
         currency,
     )
+
+
+ORDER_LINE_UPDATE_WITH_PRICE_MUTATION = """
+    mutation OrderLineUpdate($lineId: ID!, $quantity: Int!, $price: PositiveDecimal) {
+        orderLineUpdate(id: $lineId, input: {quantity: $quantity, price: $price}) {
+            errors {
+                field
+                message
+                code
+            }
+            orderLine {
+                id
+                quantity
+                unitPrice {
+                    gross {
+                        amount
+                    }
+                }
+                undiscountedUnitPrice {
+                    gross {
+                        amount
+                    }
+                }
+            }
+        }
+    }
+"""
+
+
+def test_order_line_update_with_custom_price_on_draft_order(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.save(update_fields=["status"])
+    
+    line = order.lines.first()
+    original_price = line.unit_price_gross_amount
+    new_price = Decimal("99.99")
+    assert original_price != new_price
+    
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    variables = {"lineId": line_id, "quantity": line.quantity, "price": str(new_price)}
+    
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_WITH_PRICE_MUTATION, variables
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["orderLineUpdate"]
+    
+    assert not data["errors"]
+    assert data["orderLine"]["quantity"] == line.quantity
+    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == new_price
+    assert Decimal(data["orderLine"]["undiscountedUnitPrice"]["gross"]["amount"]) == new_price
+    
+    line.refresh_from_db()
+    assert line.unit_price_gross_amount == new_price
+    assert line.undiscounted_unit_price_amount == new_price
+
+
+def test_order_line_update_with_custom_price_on_confirmed_order_fails(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.UNFULFILLED
+    order.save(update_fields=["status"])
+    
+    line = order.lines.first()
+    new_price = Decimal("99.99")
+    
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    variables = {"lineId": line_id, "quantity": line.quantity, "price": str(new_price)}
+    
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_WITH_PRICE_MUTATION, variables
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["orderLineUpdate"]
+    
+    assert data["errors"]
+    assert data["errors"][0]["field"] == "price"
+    assert data["errors"][0]["code"] == OrderErrorCode.CANNOT_DISCOUNT.name
+
+
+def test_order_line_update_quantity_without_price_still_works(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.save(update_fields=["status"])
+    
+    line = order.lines.first()
+    original_price = line.unit_price_gross_amount
+    original_quantity = line.quantity
+    new_quantity = original_quantity + 1
+    
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    variables = {"lineId": line_id, "quantity": new_quantity, "price": None}
+    
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_WITH_PRICE_MUTATION, variables
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["orderLineUpdate"]
+    
+    assert not data["errors"]
+    assert data["orderLine"]["quantity"] == new_quantity
+    
+    line.refresh_from_db()
+    assert line.quantity == new_quantity
+    assert line.unit_price_gross_amount == original_price
+
+
+def test_order_line_update_both_quantity_and_price(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.save(update_fields=["status"])
+    
+    line = order.lines.first()
+    original_quantity = line.quantity
+    new_quantity = original_quantity + 2
+    new_price = Decimal("49.99")
+    
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    variables = {"lineId": line_id, "quantity": new_quantity, "price": str(new_price)}
+    
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_WITH_PRICE_MUTATION, variables
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["orderLineUpdate"]
+    
+    assert not data["errors"]
+    assert data["orderLine"]["quantity"] == new_quantity
+    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == new_price
+    
+    line.refresh_from_db()
+    assert line.quantity == new_quantity
+    assert line.unit_price_gross_amount == new_price

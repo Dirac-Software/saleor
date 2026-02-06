@@ -177,6 +177,7 @@ from .enums import (
     OrderGrantedRefundStatusEnum,
     OrderOriginEnum,
     OrderStatusEnum,
+    PickStatusEnum,
 )
 from .utils import validate_draft_order
 
@@ -871,6 +872,11 @@ class Fulfillment(
         description="Total refunded amount assigned to this fulfillment.",
         required=False,
     )
+    pick = graphene.Field(
+        lambda: Pick,
+        description="Pick associated with this fulfillment for warehouse picking workflow.",
+        required=False,
+    )
 
     class Meta:
         default_resolver = (
@@ -968,6 +974,13 @@ class Fulfillment(
             .load(fulfillment.order_id)
             .then(_resolve_total_refund_amount)
         )
+
+    @staticmethod
+    def resolve_pick(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        try:
+            return root.node.pick
+        except models.Pick.DoesNotExist:
+            return None
 
 
 class OrderLine(
@@ -3140,3 +3153,93 @@ class OrderCountableConnection(CountableConnection):
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
         node = Order
+
+
+class PickItem(ModelObjectType[models.PickItem]):
+    order_line = graphene.Field(
+        OrderLine,
+        description="The order line being picked.",
+        required=True,
+    )
+    quantity_to_pick = graphene.Int(
+        description="Quantity that needs to be picked.",
+        required=True,
+    )
+    quantity_picked = graphene.Int(
+        description="Quantity physically picked from warehouse.",
+        required=True,
+    )
+    is_fully_picked = graphene.Boolean(
+        description="Whether this item has been fully picked.",
+        required=True,
+    )
+    picked_at = DateTime(
+        description="When this item was marked as fully picked.",
+    )
+    picked_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who picked this item.",
+    )
+    notes = graphene.String(
+        description="Notes about picking this specific item.",
+    )
+
+    class Meta:
+        description = "Represents a line item in a pick document."
+        interfaces = [graphene.relay.Node]
+        model = models.PickItem
+        doc_category = DOC_CATEGORY_ORDERS
+
+
+class Pick(ModelObjectType[models.Pick]):
+    fulfillment = graphene.Field(
+        Fulfillment,
+        description="The fulfillment being picked.",
+        required=True,
+    )
+    status = PickStatusEnum(
+        description="Current status of the pick.",
+        required=True,
+    )
+    items = graphene.List(
+        graphene.NonNull(PickItem),
+        description="Items to be picked in this pick document.",
+        required=True,
+    )
+    created_at = DateTime(
+        description="When the pick was created.",
+        required=True,
+    )
+    started_at = DateTime(
+        description="When picking was started.",
+    )
+    completed_at = DateTime(
+        description="When picking was completed.",
+    )
+    created_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="User who created the pick.",
+    )
+    started_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who started picking.",
+    )
+    completed_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who completed picking.",
+    )
+    notes = graphene.String(
+        description="Notes about this pick.",
+    )
+
+    class Meta:
+        description = "Represents a pick document for order fulfillment."
+        interfaces = [graphene.relay.Node]
+        model = models.Pick
+        doc_category = DOC_CATEGORY_ORDERS
+
+
+class PickCountableConnection(CountableConnection):
+    class Meta:
+        doc_category = DOC_CATEGORY_ORDERS
+        node = Pick

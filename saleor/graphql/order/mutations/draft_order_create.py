@@ -55,6 +55,10 @@ class OrderLineInput(BaseInputObjectType):
     quantity = graphene.Int(
         description="Number of variant items ordered.", required=True
     )
+    price = PositiveDecimal(
+        required=False,
+        description="Custom price of the item. Only works for draft orders.",
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS

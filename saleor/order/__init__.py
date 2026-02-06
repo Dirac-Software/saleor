@@ -86,6 +86,18 @@ class FulfillmentStatus:
     ]
 
 
+class PickStatus:
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+    CHOICES = [
+        (NOT_STARTED, "Not Started"),
+        (IN_PROGRESS, "In Progress"),
+        (COMPLETED, "Completed"),
+    ]
+
+
 class OrderEvents:
     """The different order event types."""
 

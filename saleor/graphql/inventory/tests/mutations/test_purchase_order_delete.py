@@ -1,5 +1,4 @@
 import graphene
-import pytest
 
 from .....inventory import PurchaseOrderItemStatus
 from .....inventory.error_codes import PurchaseOrderErrorCode
@@ -135,9 +134,7 @@ def test_delete_purchase_order_not_found(
     assert error["field"] == "id"
 
 
-def test_delete_purchase_order_no_permission(
-    staff_api_client, draft_purchase_order
-):
+def test_delete_purchase_order_no_permission(staff_api_client, draft_purchase_order):
     # given
     po_id = graphene.Node.to_global_id("PurchaseOrder", draft_purchase_order.id)
 

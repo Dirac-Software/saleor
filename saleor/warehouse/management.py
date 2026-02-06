@@ -381,6 +381,7 @@ def allocate_stocks(
                 allocate_sources(allocation)
                 # Check if order can be auto-confirmed after adding sources
                 from ..order import OrderStatus
+
                 if allocation.order_line.order.status == OrderStatus.UNCONFIRMED:
                     orders_to_check.add(allocation.order_line.order)
 
@@ -571,12 +572,14 @@ def _create_allocations(
     return [], allocations
 
 
-def deallocate_sources(allocation, quantity_to_deallocate):
+def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None):
     """Remove AllocationSources for an allocation and restore POI quantity_allocated.
 
     Args:
         allocation: The Allocation to deallocate sources from.
         quantity_to_deallocate: How much to deallocate (can be partial or full).
+        fulfillment_line: Optional FulfillmentLine. If provided, creates FulfillmentSource
+            records and increments POI.quantity_fulfilled. If None, this is a cancellation.
 
     Raises:
         ValueError: If order has items that have been shipped/fulfilled.
@@ -584,14 +587,18 @@ def deallocate_sources(allocation, quantity_to_deallocate):
     """
     from ..inventory.models import PurchaseOrderItem
     from ..order import ORDER_ITEMS_SHIPPED_STATUS
+    from .models import FulfillmentSource
 
-    # SAFETY: Only allow deallocation if items haven't left the warehouse
-    order = allocation.order_line.order
-    if order.status in ORDER_ITEMS_SHIPPED_STATUS:
-        raise ValueError(
-            f"Cannot deallocate from order {order.number} with status {order.status}. "
-            f"Order has items that have been shipped/fulfilled."
-        )
+    # SAFETY: Only allow deallocation for cancellations if items haven't left the warehouse
+    # During fulfillment (when fulfillment_line is provided), deallocation is part of the
+    # normal fulfillment flow, so we skip this check
+    if fulfillment_line is None:
+        order = allocation.order_line.order
+        if order.status in ORDER_ITEMS_SHIPPED_STATUS:
+            raise ValueError(
+                f"Cannot deallocate from order {order.number} with status {order.status}. "
+                f"Order has items that have been shipped/fulfilled."
+            )
 
     # Get allocation sources in LIFO order (reverse of allocation - newest first)
     sources = allocation.allocation_sources.select_for_update().order_by("-pk")
@@ -600,6 +607,7 @@ def deallocate_sources(allocation, quantity_to_deallocate):
     sources_to_delete = []
     sources_to_update = []
     pois_to_update_map = {}
+    fulfillment_sources_to_create = []
 
     for source in sources:
         if remaining <= 0:
@@ -607,15 +615,29 @@ def deallocate_sources(allocation, quantity_to_deallocate):
 
         deallocate_from_source = min(source.quantity, remaining)
 
-        # Track POI quantity_allocated restoration
+        # Track POI updates
         if source.purchase_order_item_id not in pois_to_update_map:
             poi = source.purchase_order_item
             pois_to_update_map[source.purchase_order_item_id] = poi
             poi.quantity_allocated = F("quantity_allocated") - deallocate_from_source
+            if fulfillment_line:
+                poi.quantity_fulfilled = F("quantity_fulfilled") + deallocate_from_source
         else:
-            # Already in map, accumulate the decrease
+            # Already in map, accumulate the changes
             poi = pois_to_update_map[source.purchase_order_item_id]
             poi.quantity_allocated = F("quantity_allocated") - deallocate_from_source
+            if fulfillment_line:
+                poi.quantity_fulfilled = F("quantity_fulfilled") + deallocate_from_source
+
+        # Create FulfillmentSource if fulfilling (not cancelling)
+        if fulfillment_line:
+            fulfillment_sources_to_create.append(
+                FulfillmentSource(
+                    fulfillment_line=fulfillment_line,
+                    purchase_order_item=source.purchase_order_item,
+                    quantity=deallocate_from_source,
+                )
+            )
 
         if deallocate_from_source == source.quantity:
             # Fully deallocate this source
@@ -628,17 +650,26 @@ def deallocate_sources(allocation, quantity_to_deallocate):
         remaining -= deallocate_from_source
 
     # Apply changes
+    if fulfillment_sources_to_create:
+        FulfillmentSource.objects.bulk_create(fulfillment_sources_to_create)
     if sources_to_delete:
         AllocationSource.objects.filter(id__in=sources_to_delete).delete()
     if sources_to_update:
         AllocationSource.objects.bulk_update(sources_to_update, ["quantity"])
     if pois_to_update_map:
+        update_fields = ["quantity_allocated"]
+        if fulfillment_line:
+            update_fields.append("quantity_fulfilled")
         PurchaseOrderItem.objects.bulk_update(
-            pois_to_update_map.values(), ["quantity_allocated"]
+            pois_to_update_map.values(), update_fields
         )
 
 
-def deallocate_stock(order_lines_data: list["OrderLineInfo"], manager: PluginsManager):
+def deallocate_stock(
+    order_lines_data: list["OrderLineInfo"],
+    manager: PluginsManager,
+    fulfillment_line_map: dict | None = None,
+):
     """Deallocate stocks for given `order_lines`.
 
     Function lock for update stocks and allocations related to given `order_lines`.
@@ -646,6 +677,10 @@ def deallocate_stock(order_lines_data: list["OrderLineInfo"], manager: PluginsMa
     as needed of available in stock for order line, until deallocated all required
     quantity for the order line. If there is less quantity in stocks then
     raise an exception.
+
+    Args:
+        fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
+            FulfillmentLine. When provided, creates FulfillmentSource audit trail.
     """
     lines = [line_info.line for line_info in order_lines_data]
     lines_allocations = allocation_with_stock_qs_select_for_update().filter(
@@ -671,7 +706,15 @@ def deallocate_stock(order_lines_data: list["OrderLineInfo"], manager: PluginsMa
             if quantity_to_deallocate > 0:
                 # Deallocate sources for owned warehouses (batch tracking)
                 if allocation.stock.warehouse.is_owned:
-                    deallocate_sources(allocation, quantity_to_deallocate)
+                    # Look up FulfillmentLine if this is a fulfillment (not cancellation)
+                    fulfillment_line = None
+                    if fulfillment_line_map:
+                        fulfillment_line = fulfillment_line_map.get(
+                            (allocation.order_line_id, allocation.stock.warehouse_id)
+                        )
+                    deallocate_sources(
+                        allocation, quantity_to_deallocate, fulfillment_line
+                    )
 
                 allocation.quantity_allocated = (
                     allocation.quantity_allocated - quantity_to_deallocate
@@ -834,13 +877,15 @@ def increase_allocations(
     )
 
 
-def decrease_allocations(lines_info: list["OrderLineInfo"], manager):
+def decrease_allocations(
+    lines_info: list["OrderLineInfo"], manager, fulfillment_line_map: dict | None = None
+):
     """Decrease allocations for provided order lines."""
     lines_to_deallocate = get_order_lines_to_deallocate(lines_info)
     if not lines_to_deallocate:
         return
     try:
-        deallocate_stock(lines_info, manager)
+        deallocate_stock(lines_info, manager, fulfillment_line_map)
     except AllocationError as exc:
         # Deallocate sources before zeroing allocations
         allocations = list(
@@ -862,6 +907,7 @@ def decrease_stock(
     order_lines_info: list["OrderLineInfo"],
     manager,
     allow_stock_to_be_exceeded: bool = False,
+    fulfillment_line_map: dict | None = None,
 ):
     """Decrease stocks quantities for given `order_lines` in given warehouses.
 
@@ -871,8 +917,12 @@ def decrease_stock(
     the function raise InsufficientStock exception. When the stock has enough quantity
     function decrease it by given value.
     If allow_stock_to_be_exceeded flag is True then quantity could be < 0.
+
+    Args:
+        fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
+            FulfillmentLine. When provided, creates FulfillmentSource audit trail.
     """
-    decrease_allocations(order_lines_info, manager)
+    decrease_allocations(order_lines_info, manager, fulfillment_line_map)
 
     order_lines_info = get_order_lines_with_track_inventory(order_lines_info)
     if not order_lines_info:

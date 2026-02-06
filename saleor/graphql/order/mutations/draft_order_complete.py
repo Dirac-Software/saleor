@@ -27,7 +27,11 @@ from ....order.utils import (
     update_order_display_gross_prices,
 )
 from ....permission.enums import OrderPermissions
-from ....warehouse.management import allocate_preorders, allocate_stocks
+from ....warehouse.management import (
+    allocate_preorders,
+    allocate_stocks,
+    can_confirm_order,
+)
 from ....warehouse.reservations import is_reservation_enabled
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
@@ -137,9 +141,39 @@ class DraftOrderComplete(BaseMutation):
             update_user_fields = cls.update_user_fields(order)
             update_fields.extend(update_user_fields)
             channel = order.channel
+
+            # Determine if order should be auto-confirmed
+            # Only auto-confirm if BOTH conditions are met:
+            # 1. Channel setting allows auto-confirmation
+            # 2. Order can be confirmed (all allocations in owned warehouses with sources)
+            should_auto_confirm = (
+                channel.automatically_confirm_all_new_orders
+                and can_confirm_order(order)
+            )
+
+            # Validate shipping cost is set if auto-confirming
+            # Default inco_term is DDP (seller pays) which requires shipping cost > $0
+            # Only EXW (buyer pays) allows $0 shipping cost
+            if should_auto_confirm and order.is_shipping_required():
+                from ....shipping import IncoTerm
+
+                if order.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
+                    # EXW: buyer pays shipping, $0 is valid
+                    pass
+                else:
+                    # DDP/DAP/FOB/etc: seller pays shipping, must have cost
+                    if not order.shipping_price_net_amount or order.shipping_price_net_amount <= 0:
+                        raise ValidationError(
+                            f"Cannot auto-confirm order with inco_term '{order.inco_term}' without shipping cost. "
+                            f"Seller is responsible for shipping under {order.inco_term} terms. "
+                            "Either set the shipping cost first, disable auto-confirmation, "
+                            "or change inco_term to 'EXW' if buyer pays shipping.",
+                            code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
+                        )
+
             order.status = (
                 OrderStatus.UNFULFILLED
-                if channel.automatically_confirm_all_new_orders
+                if should_auto_confirm
                 else OrderStatus.UNCONFIRMED
             )
 

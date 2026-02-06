@@ -42,7 +42,11 @@ mutation createPurchaseOrder($input: PurchaseOrderCreateInput!) {
 
 
 def test_create_purchase_order_success(
-    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
+    staff_api_client,
+    permission_manage_purchase_orders,
+    variant,
+    warehouse,
+    supplier_warehouse,
 ):
     """Successfully create a purchase order with valid data."""
     # given
@@ -218,7 +222,11 @@ def test_create_purchase_order_at_least_one_item_required(
 
 
 def test_create_purchase_order_quantity_must_be_positive(
-    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
+    staff_api_client,
+    permission_manage_purchase_orders,
+    variant,
+    warehouse,
+    supplier_warehouse,
 ):
     """Quantity must be greater than 0."""
     # given
@@ -306,7 +314,11 @@ def test_create_purchase_order_invalid_variant_id(
 
 
 def test_create_purchase_order_invalid_country_code(
-    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
+    staff_api_client,
+    permission_manage_purchase_orders,
+    variant,
+    warehouse,
+    supplier_warehouse,
 ):
     """Invalid country codes should be rejected."""
     # given
@@ -387,7 +399,11 @@ def test_create_purchase_order_requires_permission(
 
 
 def test_create_purchase_order_initial_status_is_draft(
-    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
+    staff_api_client,
+    permission_manage_purchase_orders,
+    variant,
+    warehouse,
+    supplier_warehouse,
 ):
     """Verify initial status is DRAFT."""
     # given
@@ -429,7 +445,11 @@ def test_create_purchase_order_initial_status_is_draft(
 
 
 def test_create_purchase_order_quantity_received_starts_at_zero(
-    staff_api_client, permission_manage_purchase_orders, variant, warehouse, supplier_warehouse
+    staff_api_client,
+    permission_manage_purchase_orders,
+    variant,
+    warehouse,
+    supplier_warehouse,
 ):
     """Verify quantity_received starts at 0."""
     # given

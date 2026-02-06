@@ -952,6 +952,39 @@ type Query {
     token: UUID!
   ): Order @doc(category: "Orders") @deprecated
 
+  """
+  Look up a pick by ID.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pick(
+    """ID of a pick."""
+    id: ID!
+  ): Pick @doc(category: "Orders")
+
+  """
+  List of picks for warehouse picking workflow.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  picks(
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): PickCountableConnection @doc(category: "Orders")
+
   """Look up a navigation menu by ID or name."""
   menu(
     """Slug of a channel for which the data should be returned."""
@@ -11658,6 +11691,9 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """Total refunded amount assigned to this fulfillment."""
   totalRefundedAmount: Money
+
+  """Pick associated with this fulfillment for warehouse picking workflow."""
+  pick: Pick
 }
 
 enum FulfillmentStatus @doc(category: "Orders") {
@@ -11923,6 +11959,75 @@ enum OrderDiscountType @doc(category: "Discounts") {
   MANUAL
   PROMOTION
   ORDER_PROMOTION
+}
+
+"""Represents a pick document for order fulfillment."""
+type Pick implements Node @doc(category: "Orders") {
+  """The ID of the object."""
+  id: ID!
+
+  """The fulfillment being picked."""
+  fulfillment: Fulfillment!
+
+  """Current status of the pick."""
+  status: PickStatus!
+
+  """Items to be picked in this pick document."""
+  items: [PickItem!]!
+
+  """When the pick was created."""
+  createdAt: DateTime!
+
+  """When picking was started."""
+  startedAt: DateTime
+
+  """When picking was completed."""
+  completedAt: DateTime
+
+  """User who created the pick."""
+  createdBy: User
+
+  """Warehouse staff who started picking."""
+  startedBy: User
+
+  """Warehouse staff who completed picking."""
+  completedBy: User
+
+  """Notes about this pick."""
+  notes: String
+}
+
+enum PickStatus @doc(category: "Orders") {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+"""Represents a line item in a pick document."""
+type PickItem implements Node @doc(category: "Orders") {
+  """The ID of the object."""
+  id: ID!
+
+  """The order line being picked."""
+  orderLine: OrderLine!
+
+  """Quantity that needs to be picked."""
+  quantityToPick: Int!
+
+  """Quantity physically picked from warehouse."""
+  quantityPicked: Int!
+
+  """Whether this item has been fully picked."""
+  isFullyPicked: Boolean!
+
+  """When this item was marked as fully picked."""
+  pickedAt: DateTime
+
+  """Warehouse staff who picked this item."""
+  pickedBy: User
+
+  """Notes about picking this specific item."""
+  notes: String
 }
 
 enum OrderAction @doc(category: "Payments") {
@@ -13114,11 +13219,31 @@ type Shipment implements Node @doc(category: "Shipping") {
   """Tracking number from carrier."""
   trackingNumber: String
 
+  """Incoterm defining shipping cost responsibility."""
+  incoTerm: IncoTermEnum
+
+  """When shipment was processed/finalized."""
+  shipmentProcessedAt: DateTime
+
   """Purchase order items in this shipment."""
   purchaseOrderItems: [PurchaseOrderItem!]!
 
   """Receipt for this shipment (null if not yet received)."""
   receipt: Receipt
+}
+
+enum IncoTermEnum @doc(category: "Shipping") {
+  EXW
+  FCA
+  CPT
+  CIP
+  DAP
+  DPU
+  DDP
+  FAS
+  FOB
+  CFR
+  CIF
 }
 
 """Represents a line item in a purchase order."""
@@ -13663,6 +13788,8 @@ input OrderFilterInput @doc(category: "Orders") {
   giftCardBought: Boolean
   numbers: [String!]
   checkoutIds: [ID!]
+  inventoryReady: Boolean
+  warehouse: [ID!]
 }
 
 enum OrderStatusFilter @doc(category: "Orders") {
@@ -13775,6 +13902,14 @@ input OrderWhereInput @doc(category: "Orders") {
 
   """Filter by shipping address of the order."""
   shippingAddress: AddressFilterInput
+
+  """
+  Filter by inventory readiness. Returns orders where all inventory has physically arrived in owned warehouses, all shipments have been received (quantity_received > 0), and all adjustments have been processed (processed_at IS NOT NULL).
+  """
+  inventoryReady: Boolean
+
+  """Filter by warehouse containing order allocations."""
+  warehouse: GlobalIDFilterInput
 
   """List of conditions that must be met."""
   AND: [OrderWhereInput!]
@@ -14046,6 +14181,23 @@ input DraftOrderWhereInput @doc(category: "Orders") {
 
   """A list of conditions of which at least one must be met."""
   OR: [DraftOrderWhereInput!]
+}
+
+type PickCountableConnection @doc(category: "Orders") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [PickCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type PickCountableEdge @doc(category: "Orders") {
+  """The item at the end of the edge."""
+  node: Pick!
+
+  """A cursor for use in pagination."""
+  cursor: String!
 }
 
 type MenuCountableConnection @doc(category: "Menu") {
@@ -17785,6 +17937,19 @@ type Mutation {
   ): OrderUpdateShipping @doc(category: "Orders")
 
   """
+  Manually updates the shipping cost of an order. Provide net cost and VAT percentage (defaults to 20% UK standard rate). Gross cost is auto-calculated. Only works for draft and unconfirmed orders. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderUpdateShippingCost(
+    """ID of the order to update shipping cost."""
+    id: ID!
+
+    """Fields required to update shipping cost."""
+    input: OrderUpdateShippingCostInput!
+  ): OrderUpdateShippingCost @doc(category: "Orders")
+
+  """
   Void an order. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -17821,6 +17986,42 @@ type Mutation {
     """
     stockUpdatePolicy: StockUpdatePolicyEnum
   ): OrderBulkCreate @doc(category: "Orders")
+
+  """
+  Start picking items from warehouse for fulfillment. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pickStart(
+    """ID of the pick to start."""
+    pickId: ID!
+  ): PickStart @doc(category: "Orders")
+
+  """
+  Update quantity picked for a pick item. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pickUpdateItem(
+    """Optional notes about picking this item."""
+    notes: String
+
+    """ID of the pick item to update."""
+    pickItemId: ID!
+
+    """Quantity picked."""
+    quantityPicked: Int!
+  ): PickUpdateItem @doc(category: "Orders")
+
+  """
+  Complete a pick document after all items have been picked. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pickComplete(
+    """ID of the pick to complete."""
+    pickId: ID!
+  ): PickComplete @doc(category: "Orders")
 
   """
   Delete metadata of an object. To use it, you need to have access to the modified object.
@@ -21647,6 +21848,12 @@ input ShipmentCreateInput @doc(category: "Shipping") {
 
   """Currency code (default: GBP)."""
   currency: String = "GBP"
+
+  """Incoterm defining shipping cost responsibility."""
+  incoTerm: IncoTermEnum
+
+  """When shipment was processed/finalized."""
+  shipmentProcessedAt: DateTime
 }
 
 """
@@ -25450,6 +25657,11 @@ input OrderLineCreateInput @doc(category: "Orders") {
   """Number of variant items ordered."""
   quantity: Int!
 
+  """
+  Custom price of the item.When the line with the same variant will be provided multiple times, the last price will be used.
+  """
+  price: PositiveDecimal
+
   """Product variant ID."""
   variantId: ID!
 
@@ -25457,11 +25669,6 @@ input OrderLineCreateInput @doc(category: "Orders") {
   Flag that allow force splitting the same variant into multiple lines by skipping the matching logic.
   """
   forceNewLine: Boolean = false
-
-  """
-  Custom price of the item.When the line with the same variant will be provided multiple times, the last price will be used.
-  """
-  price: PositiveDecimal
 }
 
 """
@@ -26135,6 +26342,9 @@ type OrderLineUpdate @doc(category: "Orders") {
 input OrderLineInput @doc(category: "Orders") {
   """Number of variant items ordered."""
   quantity: Int!
+
+  """Custom price of the item. Only works for draft orders."""
+  price: PositiveDecimal
 }
 
 """
@@ -26375,6 +26585,33 @@ input OrderUpdateShippingInput @doc(category: "Orders") {
   ID of the selected shipping method, pass null to remove currently assigned shipping method.
   """
   shippingMethod: ID
+}
+
+"""
+Manually updates the shipping cost of an order. Provide net cost and VAT percentage (defaults to 20% UK standard rate). Gross cost is auto-calculated. Only works for draft and unconfirmed orders. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderUpdateShippingCost @doc(category: "Orders") {
+  """Order with updated shipping cost."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+input OrderUpdateShippingCostInput @doc(category: "Orders") {
+  """Net shipping cost amount (excluding VAT)."""
+  shippingCostNet: PositiveDecimal!
+
+  """
+  VAT percentage to apply to shipping cost. Defaults to 20% (UK standard rate). Common UK rates: 20% (standard), 5% (reduced), 0% (zero-rated).
+  """
+  vatPercentage: PositiveDecimal
+
+  """
+  Incoterm (International Commercial Terms) defining shipping responsibility. Default is 'DDP' (Delivered Duty Paid) - seller pays all shipping costs. Use 'EXW' (Ex Works) to allow $0 shipping cost when buyer pays shipping. Other options: FOB, DAP, CIF, etc.
+  """
+  incoTerm: String
 }
 
 """
@@ -26800,6 +27037,42 @@ enum StockUpdatePolicyEnum {
   SKIP
   UPDATE
   FORCE
+}
+
+"""
+Start picking items from warehouse for fulfillment. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type PickStart @doc(category: "Orders") {
+  """The started pick."""
+  pick: Pick
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Update quantity picked for a pick item. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type PickUpdateItem @doc(category: "Orders") {
+  """The updated pick item."""
+  pickItem: PickItem
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Complete a pick document after all items have been picked. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type PickComplete @doc(category: "Orders") {
+  """The completed pick."""
+  pick: Pick
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
 }
 
 """

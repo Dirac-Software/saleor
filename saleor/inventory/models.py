@@ -73,7 +73,7 @@ class PurchaseOrderItemQuerySet(models.QuerySet):
     def annotate_available_quantity(self):
         """Annotate available_quantity in a single query.
 
-        Calculates: quantity_ordered + processed_adjustments - quantity_allocated
+        Calculates: quantity_ordered + processed_adjustments - quantity_allocated - quantity_fulfilled
 
         This eliminates N+1 queries when accessing available_quantity in loops.
         """
@@ -89,7 +89,8 @@ class PurchaseOrderItemQuerySet(models.QuerySet):
             _available_quantity=Greatest(
                 F("quantity_ordered")
                 + F("processed_adjustments")
-                - F("quantity_allocated"),
+                - F("quantity_allocated")
+                - F("quantity_fulfilled"),
                 Value(0),
                 output_field=IntegerField(),
             ),
@@ -121,6 +122,9 @@ class PurchaseOrderItem(models.Model):
     # Tracks how much of this batch has been allocated to customer orders
     # via AllocationSource
     quantity_allocated = models.PositiveIntegerField(default=0)
+    # Tracks how much of this batch has been fulfilled (shipped out)
+    # via FulfillmentSource
+    quantity_fulfilled = models.PositiveIntegerField(default=0)
 
     objects = PurchaseOrderItemManager()
 
@@ -128,7 +132,7 @@ class PurchaseOrderItem(models.Model):
     def available_quantity(self):
         """Amount available for allocation.
 
-        Calculates: quantity_ordered + processed_adjustments - quantity_allocated
+        Calculates: quantity_ordered + processed_adjustments - quantity_allocated - quantity_fulfilled
 
         Uses annotated value if available (from annotate_available_quantity()),
         otherwise queries database. Only processed adjustments (processed_at is set)
@@ -150,7 +154,7 @@ class PurchaseOrderItem(models.Model):
         )
 
         base = self.quantity_ordered + processed_adjustments
-        return max(0, base - self.quantity_allocated)
+        return max(0, base - self.quantity_allocated - self.quantity_fulfilled)
 
     @property
     def quantity_received(self):

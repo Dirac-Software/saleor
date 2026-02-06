@@ -68,10 +68,22 @@ class OrderLineUpdate(
                 }
             )
 
+        if "price" in data and not instance.order.is_draft():
+            raise ValidationError(
+                {
+                    "price": ValidationError(
+                        "Price can only be changed on draft orders.",
+                        code=OrderErrorCode.CANNOT_DISCOUNT.value,
+                    )
+                }
+            )
+
         return cleaned_input
 
     @classmethod
     def save(cls, info: ResolveInfo, instance, cleaned_input, instance_tracker=None):
+        from prices import Money
+
         manager = get_plugin_manager_promise(info.context).get()
 
         order_is_unconfirmed = instance.order.is_unconfirmed()
@@ -106,6 +118,23 @@ class OrderLineUpdate(
                     "Cannot set new quantity because of insufficient stock.",
                     code=OrderErrorCode.INSUFFICIENT_STOCK.value,
                 ) from e
+
+            if "price" in cleaned_input:
+                custom_price = cleaned_input["price"]
+                currency = instance.currency
+                instance.base_unit_price = Money(custom_price, currency)
+                instance.undiscounted_base_unit_price = Money(custom_price, currency)
+                instance.undiscounted_unit_price = Money(custom_price, currency)
+                instance.unit_price = Money(custom_price, currency)
+                instance.save(
+                    update_fields=[
+                        "base_unit_price_amount",
+                        "undiscounted_base_unit_price_amount",
+                        "undiscounted_unit_price_amount",
+                        "unit_price_gross_amount",
+                    ]
+                )
+
             invalidate_order_prices(order)
             recalculate_order_weight(order)
             order.save(update_fields=["should_refresh_prices", "weight", "updated_at"])

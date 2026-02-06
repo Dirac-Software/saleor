@@ -596,6 +596,36 @@ class AllocationSource(models.Model):
         ordering = ("pk",)
 
 
+class FulfillmentSource(models.Model):
+    """Tracks which PurchaseOrderItem batches fulfilled which orders.
+
+    Created when an AllocationSource is converted to fulfillment. Provides
+    audit trail of which POI batches went into which customer orders for
+    COGS calculation, returns processing, and supplier quality tracking.
+    """
+
+    fulfillment_line = models.ForeignKey(
+        "order.FulfillmentLine",
+        on_delete=models.CASCADE,
+        related_name="fulfillment_sources",
+    )
+    purchase_order_item = models.ForeignKey(
+        "inventory.PurchaseOrderItem",
+        on_delete=models.CASCADE,
+        related_name="fulfillment_sources",
+    )
+    quantity = models.PositiveIntegerField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("pk",)
+        indexes = [
+            models.Index(fields=["fulfillment_line", "purchase_order_item"]),
+            models.Index(fields=["purchase_order_item", "-created_at"]),
+        ]
+
+
 class PreorderAllocation(models.Model):
     """Not used by Dirac."""
 

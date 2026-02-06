@@ -1,9 +1,11 @@
+from decimal import Decimal
 from unittest import mock
 
 import pytest
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from prices import Money
 
 from ...channel import AllocationStrategy
 from ...core.exceptions import InsufficientStock
@@ -1401,6 +1403,10 @@ def test_allocate_prioritizes_owned_over_non_owned_high_stock_strategy(
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
         tracking_number="TEST-OWNED",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1483,6 +1489,10 @@ def test_allocate_falls_back_to_non_owned_when_owned_insufficient(
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
         tracking_number="TEST-OWNED-2",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -1576,6 +1586,10 @@ def test_allocate_sorting_order_prioritizes_owned_first(
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
         tracking_number="TEST-OWNED-3",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
     PurchaseOrderItem.objects.create(
         order=purchase_order,

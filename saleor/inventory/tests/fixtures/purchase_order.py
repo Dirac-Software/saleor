@@ -1,4 +1,5 @@
 import pytest
+from decimal import Decimal
 from django.utils import timezone
 from prices import Money
 
@@ -15,7 +16,10 @@ def shipment(nonowned_warehouse, owned_warehouse):
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
         tracking_number="TEST-SHIPMENT",
-        shipping_cost=Money(100.00, "USD"),
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
 
@@ -79,6 +83,10 @@ def multiple_purchase_order_items(purchase_order, variant):
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
         tracking_number="TEST-FIFO",
+        shipping_cost=Money(Decimal("100.00"), "USD"),
+        carrier="TEST-CARRIER",
+        arrived_at=timezone.now(),
+        departed_at=timezone.now(),
     )
 
     now = timezone.now()
