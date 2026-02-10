@@ -19,7 +19,7 @@ from ..core.utils.translations import Translation
 from ..core.weight import convert_weight, get_default_weight_unit, zero_weight
 from ..permission.enums import ShippingPermissions
 from ..tax.models import TaxClass
-from . import IncoTerm, PostalCodeRuleInclusionType, ShippingMethodType
+from . import IncoTerm, PostalCodeRuleInclusionType, ShipmentType, ShippingMethodType
 from .postal_codes import filter_shipping_methods_by_postal_code_rules
 
 if TYPE_CHECKING:
@@ -377,6 +377,12 @@ class Shipment(models.Model):
         "account.Address", related_name="inbound_shipments", on_delete=models.DO_NOTHING
     )
 
+    shipment_type = models.CharField(
+        max_length=10,
+        choices=ShipmentType.CHOICES,
+        help_text="Whether this shipment is inbound (from supplier) or outbound (to customer)",
+    )
+
     # these are estimates until a shipping invoice is final. Do we need to store the
     # estimates in a separate place
     # we get these by manually breaking down an invoice
@@ -435,8 +441,11 @@ class Shipment(models.Model):
     departed_at = models.DateTimeField(null=True, blank=True)
 
     carrier = models.CharField(null=True, blank=True)
-    # we can propogate this up to the order.
-    tracking_number = models.CharField(null=True, blank=True)
+    tracking_url = models.CharField(
+        null=True,
+        blank=True,
+        help_text="Tracking URL or number. Can be used to fetch shipment status from carrier APIs.",
+    )
 
     inco_term = models.CharField(
         max_length=3,
@@ -453,19 +462,41 @@ class Shipment(models.Model):
 
         if self.inco_term and self.shipping_cost_amount is not None:
             if self.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
-                if self.shipping_cost_amount != Decimal("0"):
+                if self.shipping_cost_amount != Decimal(0):
                     raise ValidationError(
                         {
                             "shipping_cost_amount": f"Shipping cost must be 0 for incoterm {self.inco_term} (buyer pays shipping)"
                         }
                     )
             else:
-                if self.shipping_cost_amount == Decimal("0"):
+                if self.shipping_cost_amount == Decimal(0):
                     raise ValidationError(
                         {
                             "shipping_cost_amount": f"Shipping cost must be greater than 0 for incoterm {self.inco_term} (seller pays shipping)"
                         }
                     )
+
+        if self.shipment_type == ShipmentType.OUTBOUND:
+            if self.arrived_at is not None:
+                raise ValidationError(
+                    {
+                        "arrived_at": (
+                            "Outbound shipments cannot have arrived_at timestamp. "
+                            "Use departed_at instead."
+                        )
+                    }
+                )
+
+        elif self.shipment_type == ShipmentType.INBOUND:
+            if self.departed_at is not None:
+                raise ValidationError(
+                    {
+                        "departed_at": (
+                            "Inbound shipments cannot have departed_at timestamp. "
+                            "Use arrived_at instead."
+                        )
+                    }
+                )
 
     def save(self, *args, **kwargs):
         self.full_clean()

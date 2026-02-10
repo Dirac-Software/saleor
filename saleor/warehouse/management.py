@@ -621,13 +621,17 @@ def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None
             pois_to_update_map[source.purchase_order_item_id] = poi
             poi.quantity_allocated = F("quantity_allocated") - deallocate_from_source
             if fulfillment_line:
-                poi.quantity_fulfilled = F("quantity_fulfilled") + deallocate_from_source
+                poi.quantity_fulfilled = (
+                    F("quantity_fulfilled") + deallocate_from_source
+                )
         else:
             # Already in map, accumulate the changes
             poi = pois_to_update_map[source.purchase_order_item_id]
             poi.quantity_allocated = F("quantity_allocated") - deallocate_from_source
             if fulfillment_line:
-                poi.quantity_fulfilled = F("quantity_fulfilled") + deallocate_from_source
+                poi.quantity_fulfilled = (
+                    F("quantity_fulfilled") + deallocate_from_source
+                )
 
         # Create FulfillmentSource if fulfilling (not cancelling)
         if fulfillment_line:
@@ -681,6 +685,7 @@ def deallocate_stock(
     Args:
         fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
             FulfillmentLine. When provided, creates FulfillmentSource audit trail.
+
     """
     lines = [line_info.line for line_info in order_lines_data]
     lines_allocations = allocation_with_stock_qs_select_for_update().filter(
@@ -895,7 +900,15 @@ def decrease_allocations(
         )
         for allocation in allocations:
             if allocation.stock.warehouse.is_owned:
-                deallocate_sources(allocation, allocation.quantity_allocated)
+                # Look up FulfillmentLine if this is a fulfillment (not cancellation)
+                fulfillment_line = None
+                if fulfillment_line_map:
+                    fulfillment_line = fulfillment_line_map.get(
+                        (allocation.order_line_id, allocation.stock.warehouse_id)
+                    )
+                deallocate_sources(
+                    allocation, allocation.quantity_allocated, fulfillment_line
+                )
 
         Allocation.objects.filter(id__in=[a.id for a in allocations]).update(
             quantity_allocated=0
@@ -921,6 +934,7 @@ def decrease_stock(
     Args:
         fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
             FulfillmentLine. When provided, creates FulfillmentSource audit trail.
+
     """
     decrease_allocations(order_lines_info, manager, fulfillment_line_map)
 

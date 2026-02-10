@@ -239,9 +239,18 @@ def graphql_address_data():
         "phone": "+48321321888",
         "metadata": [
             {"key": "public", "value": "public_value"},
-            {"key": "vat_number", "value": "PL1234567890"},
         ],
     }
+
+
+@pytest.fixture
+def graphql_address_data_with_vat(graphql_address_data):
+    data = graphql_address_data.copy()
+    data["metadata"] = [
+        {"key": "public", "value": "public_value"},
+        {"key": "vat_number", "value": "PL1234567890"},
+    ]
+    return data
 
 
 @pytest.fixture
@@ -1249,7 +1258,7 @@ def async_subscription_webhooks_with_root_objects(
     subscription_fulfillment_created_webhook,
     subscription_fulfillment_approved_webhook,
     subscription_fulfillment_metadata_updated_webhook,
-    subscription_fulfillment_tracking_number_updated,
+    subscription_fulfillment_tracking_url_updated,
     subscription_customer_created_webhook,
     subscription_customer_updated_webhook,
     subscription_customer_deleted_webhook,
@@ -1518,7 +1527,7 @@ def async_subscription_webhooks_with_root_objects(
             fulfillment,
         ],
         events.FULFILLMENT_TRACKING_NUMBER_UPDATED: [
-            subscription_fulfillment_tracking_number_updated,
+            subscription_fulfillment_tracking_url_updated,
             fulfillment,
         ],
         events.CUSTOMER_CREATED: [subscription_customer_created_webhook, customer_user],

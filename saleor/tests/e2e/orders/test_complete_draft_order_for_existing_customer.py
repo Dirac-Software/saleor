@@ -130,4 +130,4 @@ def test_complete_draft_order_for_existing_customer_CORE_0237(
     order = order["order"]
     assert order["user"]["id"] == user_id
     assert order["user"]["email"] == user_email
-    assert order["status"] == "UNFULFILLED"
+    assert order["status"] == "UNCONFIRMED"

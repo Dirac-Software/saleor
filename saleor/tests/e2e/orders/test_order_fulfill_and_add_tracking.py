@@ -118,7 +118,7 @@ def test_order_fulfill_and_add_tracking_CORE_0219(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
 
     # Step 2 - Mark order as paid
     order_paid_data = mark_order_paid(
@@ -127,7 +127,7 @@ def test_order_fulfill_and_add_tracking_CORE_0219(
     )
     assert order_paid_data["order"]["isPaid"] is True
     assert order_paid_data["order"]["paymentStatus"] == "FULLY_CHARGED"
-    assert order_paid_data["order"]["status"] == "UNFULFILLED"
+    assert order_paid_data["order"]["status"] == "UNCONFIRMED"
 
     # Step 3 - Fulfill the order and check the status
     input = {
@@ -154,10 +154,10 @@ def test_order_fulfill_and_add_tracking_CORE_0219(
     assert order["status"] == "FULFILLED"
 
     # Step 4 - Add tracking number to the order
-    tracking_number = "test"
+    tracking_url = "test"
     data = order_add_tracking(
         e2e_staff_api_client,
         fulfillment_id,
-        tracking_number,
+        tracking_url,
     )
-    assert data["fulfillments"][0]["trackingNumber"] == tracking_number
+    assert data["fulfillments"][0]["trackingUrl"] == tracking_url

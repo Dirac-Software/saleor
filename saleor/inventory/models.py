@@ -247,6 +247,29 @@ class PurchaseOrderItem(models.Model):
         help_text="When status changed to CONFIRMED (ordered from supplier)",
     )
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        from ..shipping import ShipmentType
+
+        super().clean()
+
+        if self.shipment_id:
+            if self.shipment.shipment_type != ShipmentType.INBOUND:
+                raise ValidationError(
+                    {
+                        "shipment": (
+                            f"Cannot link purchase order item to {self.shipment.shipment_type} shipment. "
+                            "Purchase order items can only be linked to inbound shipments."
+                        )
+                    }
+                )
+
+    def save(self, *args, **kwargs):
+        if self.shipment_id:
+            self.clean()
+        super().save(*args, **kwargs)
+
 
 class PurchaseOrderItemAdjustment(models.Model):
     """Audit trail for inventory adjustments (leakage).

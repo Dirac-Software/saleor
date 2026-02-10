@@ -137,4 +137,4 @@ def test_order_products_on_fixed_promotion_CORE_2101(
     assert total == order["order"]["total"]["gross"]["amount"]
     assert total == float(total_gross_amount)
 
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"

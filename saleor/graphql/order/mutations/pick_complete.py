@@ -52,7 +52,7 @@ class PickComplete(BaseMutation):
             ) from None
 
         try:
-            pick = complete_pick(pick, user=info.context.user)
+            pick = complete_pick(pick, user=info.context.user, auto_approve=True)
         except ValueError as e:
             raise ValidationError(
                 {

@@ -8,8 +8,7 @@ from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_SHIPPING
 from ...core.mutations import BaseMutation
-from ...core.scalars import PositiveDecimal
-from ...core.scalars import DateTime
+from ...core.scalars import DateTime, PositiveDecimal
 from ...core.types import BaseInputObjectType, NonNullList, ShippingError
 from ...core.utils import from_global_id_or_error
 from ..enums import IncoTermEnum
@@ -31,7 +30,7 @@ class ShipmentCreateInput(BaseInputObjectType):
         description="Purchase order items to include in shipment.",
     )
     carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
-    tracking_number = graphene.String(description="Tracking number from carrier.")
+    tracking_url = graphene.String(description="Tracking URL or number from carrier.")
     shipping_cost = PositiveDecimal(
         description="Estimated shipping cost including VAT."
     )
@@ -39,8 +38,12 @@ class ShipmentCreateInput(BaseInputObjectType):
         description="Currency code (default: GBP).",
         default_value="GBP",
     )
-    inco_term = IncoTermEnum(description="Incoterm defining shipping cost responsibility.")
-    shipment_processed_at = DateTime(description="When shipment was processed/finalized.")
+    inco_term = IncoTermEnum(
+        description="Incoterm defining shipping cost responsibility."
+    )
+    shipment_processed_at = DateTime(
+        description="When shipment was processed/finalized."
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_SHIPPING
@@ -106,7 +109,7 @@ class ShipmentCreate(BaseMutation):
                 destination_address=destination_address,
                 purchase_order_items=purchase_order_items,
                 carrier=input_data.get("carrier"),
-                tracking_number=input_data.get("tracking_number"),
+                tracking_url=input_data.get("tracking_url"),
                 shipping_cost=input_data.get("shipping_cost"),
                 currency=input_data.get("currency", "GBP"),
                 inco_term=input_data.get("inco_term"),

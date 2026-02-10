@@ -96,4 +96,4 @@ def test_order_staff_can_overwrite_prices_CORE_0202(
     order_variant_price = order_line["unitPrice"]["gross"]["amount"]
     assert order_variant_price != regular_variant_price
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"

@@ -119,18 +119,24 @@ class OrderLineUpdate(
                     code=OrderErrorCode.INSUFFICIENT_STOCK.value,
                 ) from e
 
-            if "price" in cleaned_input:
-                custom_price = cleaned_input["price"]
+            if "price" in cleaned_input and cleaned_input["price"] is not None:
+                from decimal import Decimal
+
+                custom_price = Decimal(str(cleaned_input["price"]))
                 currency = instance.currency
                 instance.base_unit_price = Money(custom_price, currency)
                 instance.undiscounted_base_unit_price = Money(custom_price, currency)
-                instance.undiscounted_unit_price = Money(custom_price, currency)
-                instance.unit_price = Money(custom_price, currency)
+                instance.undiscounted_unit_price_net_amount = custom_price
+                instance.undiscounted_unit_price_gross_amount = custom_price
+                instance.unit_price_net_amount = custom_price
+                instance.unit_price_gross_amount = custom_price
                 instance.save(
                     update_fields=[
                         "base_unit_price_amount",
                         "undiscounted_base_unit_price_amount",
-                        "undiscounted_unit_price_amount",
+                        "undiscounted_unit_price_net_amount",
+                        "undiscounted_unit_price_gross_amount",
+                        "unit_price_net_amount",
                         "unit_price_gross_amount",
                     ]
                 )

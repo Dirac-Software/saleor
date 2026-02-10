@@ -10,15 +10,16 @@ Key invariant: Allocations in owned warehouses MUST have AllocationSources.
 Allocations in non-owned warehouses do NOT need AllocationSources.
 """
 
-import pytest
 from decimal import Decimal
-from prices import Money
-from django.utils import timezone
+
+import pytest
 from django.db.models import Sum
+from django.utils import timezone
 
 from ...core.exceptions import InsufficientStock
 from ...order.fetch import OrderLineInfo
 from ...plugins.manager import get_plugins_manager
+from ...shipping import ShipmentType
 from ..management import (
     allocate_stocks,
     deallocate_stock,
@@ -458,14 +459,18 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
     stock.save(update_fields=["quantity"])
 
     # Create DRAFT POI (should be ignored)
+    from ...shipping import IncoTerm
+
     shipment = Shipment.objects.create(
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
-        tracking_number="DRAFT-123",
-        shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="DRAFT-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     draft_poi = PurchaseOrderItem.objects.create(
         order=purchase_order,

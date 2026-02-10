@@ -1,6 +1,6 @@
 import datetime
 from decimal import Decimal
-from unittest.mock import ANY, call, patch
+from unittest.mock import ANY, patch
 
 import graphene
 from django.db.models import Sum
@@ -117,7 +117,13 @@ def test_draft_order_complete(
     order.user = customer_user
     order.shipping_price_net_amount = Decimal("10.00")
     order.shipping_price_gross_amount = Decimal("12.30")
-    order.save(update_fields=["user", "shipping_price_net_amount", "shipping_price_gross_amount"])
+    order.save(
+        update_fields=[
+            "user",
+            "shipping_price_net_amount",
+            "shipping_price_gross_amount",
+        ]
+    )
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
 
@@ -1782,7 +1788,10 @@ def test_draft_order_complete_triggers_webhooks(
     )
 
     mocked_send_webhook_request_async.assert_called_once_with(
-        kwargs={"event_delivery_id": order_created_delivery.id, "telemetry_context": ANY},
+        kwargs={
+            "event_delivery_id": order_created_delivery.id,
+            "telemetry_context": ANY,
+        },
         queue=settings.ORDER_WEBHOOK_EVENTS_CELERY_QUEUE_NAME,
         MessageGroupId="example.com:saleorappadditional",
     )

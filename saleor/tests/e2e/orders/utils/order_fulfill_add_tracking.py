@@ -17,7 +17,7 @@ mutation OrderFulfillmentUpdateTracking(
       fulfillments {
         id
         status
-        trackingNumber
+        trackingUrl
       }
     }
   }
@@ -28,12 +28,12 @@ mutation OrderFulfillmentUpdateTracking(
 def order_add_tracking(
     staff_api_client,
     fulfillment_id,
-    tracking_number,
+    tracking_url,
 ):
     variables = {
         "id": fulfillment_id,
         "input": {
-            "trackingNumber": tracking_number,
+            "trackingUrl": tracking_url,
             "notifyCustomer": True,
         },
     }

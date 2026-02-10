@@ -127,7 +127,9 @@ def test_order_fulfill_blocked_when_goods_not_received(
             "lines": [
                 {
                     "orderLineId": order_line_id,
-                    "stocks": [{"quantity": order_line.quantity, "warehouse": warehouse_id}],
+                    "stocks": [
+                        {"quantity": order_line.quantity, "warehouse": warehouse_id}
+                    ],
                 },
             ],
         },
@@ -147,7 +149,10 @@ def test_order_fulfill_blocked_when_goods_not_received(
     assert data["errors"]
     error = data["errors"][0]
     assert error["code"] == OrderErrorCode.CANNOT_FULFILL_UNRECEIVED_STOCK.name
-    assert "received" in error["message"].lower() or "not arrived" in error["message"].lower()
+    assert (
+        "received" in error["message"].lower()
+        or "not arrived" in error["message"].lower()
+    )
 
     # Order should still be UNFULFILLED (not fulfilled)
     order.refresh_from_db()
@@ -240,7 +245,9 @@ def test_order_fulfill_succeeds_when_goods_received(
             "lines": [
                 {
                     "orderLineId": order_line_id,
-                    "stocks": [{"quantity": order_line.quantity, "warehouse": warehouse_id}],
+                    "stocks": [
+                        {"quantity": order_line.quantity, "warehouse": warehouse_id}
+                    ],
                 },
             ],
         },
@@ -338,7 +345,9 @@ def test_order_fulfill_blocked_when_partial_receipt(
             "lines": [
                 {
                     "orderLineId": order_line_id,
-                    "stocks": [{"quantity": 10, "warehouse": warehouse_id}],  # Try to fulfill all 10
+                    "stocks": [
+                        {"quantity": 10, "warehouse": warehouse_id}
+                    ],  # Try to fulfill all 10
                 },
             ],
         },

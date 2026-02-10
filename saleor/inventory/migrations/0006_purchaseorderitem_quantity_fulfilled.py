@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('inventory', '0005_purchaseorderevent'),
+        ("inventory", "0005_purchaseorderevent"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='purchaseorderitem',
-            name='quantity_fulfilled',
+            model_name="purchaseorderitem",
+            name="quantity_fulfilled",
             field=models.PositiveIntegerField(default=0),
         ),
     ]

@@ -101,7 +101,7 @@ def test_unable_to_void_order_marked_as_paid_CORE_0211(
     assert order_data["payments"][0]["id"] == payment_id
     assert order_data["payments"][0]["gateway"] == "manual"
     assert order_data["paymentStatus"] == "FULLY_CHARGED"
-    assert order_data["status"] == "UNFULFILLED"
+    assert order_data["status"] == "UNCONFIRMED"
 
     # Step 2 - Void the payment
     order = raw_order_void(

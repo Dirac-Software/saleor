@@ -257,8 +257,7 @@ def filter_inventory_ready(qs, _, value):
 
     if value is True:
         return filter_orders_with_inventory_ready(qs)
-    else:
-        return get_orders_missing_inventory(qs)
+    return get_orders_missing_inventory(qs)
 
 
 def filter_warehouse(qs, _, value):
@@ -441,6 +440,33 @@ class OrderFilter(DraftOrderFilter):
                 message="'ids' and 'numbers` are not allowed to use together in filter."
             )
         return super().is_valid()
+
+
+def filter_fulfillment_status(qs, _, value):
+    if value:
+        qs = qs.filter(status__in=value)
+    return qs
+
+
+def filter_fulfillment_warehouse(qs, _, value):
+    if value:
+        warehouse_ids = [
+            from_global_id_or_error(warehouse_id, "Warehouse")[1]
+            for warehouse_id in value
+        ]
+        qs = qs.filter(lines__stock__warehouse_id__in=warehouse_ids).distinct()
+    return qs
+
+
+class FulfillmentFilter(MetadataFilterBase):
+    status = ListObjectTypeFilter(
+        input_class=FulfillmentStatusEnum, method=filter_fulfillment_status
+    )
+    warehouse = GlobalIDMultipleChoiceFilter(method=filter_fulfillment_warehouse)
+
+    class Meta:
+        model = Fulfillment
+        fields = ["status", "warehouse"]
 
 
 class OrderStatusEnumFilterInput(BaseInputObjectType):

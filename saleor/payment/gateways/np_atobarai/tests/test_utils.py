@@ -27,7 +27,7 @@ def test_notify_dashboard(order):
 
 def test_get_fulfillment_for_order(order):
     # given
-    expected_fulfillment = order.fulfillments.create(tracking_number="123")
+    expected_fulfillment = order.fulfillments.create(tracking_url="123")
 
     # when
     fulfillment = get_fulfillment_for_order(order)
@@ -38,8 +38,8 @@ def test_get_fulfillment_for_order(order):
 
 def test_get_fulfillment_for_order_multiple_fulfillments_one_valid(order):
     # then
-    expected_fulfillment = order.fulfillments.create(tracking_number="123")
-    order.fulfillments.create(tracking_number="234", status=FulfillmentStatus.REFUNDED)
+    expected_fulfillment = order.fulfillments.create(tracking_url="123")
+    order.fulfillments.create(tracking_url="234", status=FulfillmentStatus.REFUNDED)
 
     # when
     fulfillment = get_fulfillment_for_order(order)
@@ -55,7 +55,7 @@ def test_get_fulfillment_for_order_no_fulfillment(order):
         get_fulfillment_for_order(order)
 
 
-def test_get_fulfillment_for_order_no_fulfillment_with_tracking_number(order):
+def test_get_fulfillment_for_order_no_fulfillment_with_tracking_url(order):
     # given
     order.fulfillments.create()
 
@@ -67,7 +67,7 @@ def test_get_fulfillment_for_order_no_fulfillment_with_tracking_number(order):
 
 def test_get_fulfillment_for_order_no_refundable_fulfillment(order):
     # given
-    order.fulfillments.create(tracking_number="123", status=FulfillmentStatus.REFUNDED)
+    order.fulfillments.create(tracking_url="123", status=FulfillmentStatus.REFUNDED)
 
     # then
     with pytest.raises(PaymentError, match=r".* not exist .*"):
@@ -77,8 +77,8 @@ def test_get_fulfillment_for_order_no_refundable_fulfillment(order):
 
 def test_get_fulfillment_for_order_multiple_fulfillments(order, fulfillment):
     # given
-    order.fulfillments.create(tracking_number="123")
-    order.fulfillments.create(tracking_number="234")
+    order.fulfillments.create(tracking_url="123")
+    order.fulfillments.create(tracking_url="234")
 
     # then
     with pytest.raises(PaymentError, match=r"More than one .* exist .*"):

@@ -114,4 +114,4 @@ def test_order_with_the_same_variant_in_multiple_lines_and_overwrite_prices_core
     ]
     assert second_product_variant_price != product_variant_price
     assert second_product_variant_price == new_price
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"

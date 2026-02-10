@@ -3,11 +3,9 @@ from typing import cast
 import graphene
 from django.core.exceptions import ValidationError
 
-from ....core.taxes import TaxedMoney
 from ....order import models
 from ....order.actions import call_order_event
 from ....order.error_codes import OrderErrorCode
-from ....order.utils import invalidate_order_prices
 from ....permission.enums import OrderPermissions
 from ....webhook.event_types import WebhookEventAsyncType
 from ...core import ResolveInfo
@@ -74,9 +72,7 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         error_type_field = "order_errors"
 
     @classmethod
-    def perform_mutation(
-        cls, _root, info: ResolveInfo, /, *, id: str, input
-    ):
+    def perform_mutation(cls, _root, info: ResolveInfo, /, *, id: str, input):
         order = cls.get_node_or_error(
             info,
             id,
@@ -100,13 +96,14 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             )
 
         from decimal import Decimal
+
         from ....shipping import IncoTerm
 
         net_amount = input["shipping_cost_net"]
-        vat_percentage = input.get("vat_percentage", Decimal("20"))
+        vat_percentage = input.get("vat_percentage", Decimal(20))
         inco_term = input.get("inco_term")
 
-        vat_multiplier = Decimal("1") + (vat_percentage / Decimal("100"))
+        vat_multiplier = Decimal(1) + (vat_percentage / Decimal(100))
         gross_amount = net_amount * vat_multiplier
 
         if inco_term and inco_term not in [choice[0] for choice in IncoTerm.CHOICES]:
@@ -123,12 +120,13 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         order.shipping_price_gross_amount = gross_amount
         order.base_shipping_price_amount = net_amount
         order.undiscounted_base_shipping_price_amount = net_amount
-        order.shipping_tax_rate = vat_percentage / Decimal("100")
+        order.shipping_tax_rate = vat_percentage / Decimal(100)
+        order.shipping_method_name = "Manual Shipping Cost"
 
         if inco_term:
             order.inco_term = inco_term
 
-        invalidate_order_prices(order)
+        order.should_refresh_prices = False
 
         update_fields = [
             "shipping_price_net_amount",
@@ -136,6 +134,7 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             "base_shipping_price_amount",
             "undiscounted_base_shipping_price_amount",
             "shipping_tax_rate",
+            "shipping_method_name",
             "should_refresh_prices",
             "updated_at",
         ]

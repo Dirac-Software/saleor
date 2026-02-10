@@ -297,8 +297,8 @@ def test_get_default_order_payload(order_line):
 def test_get_default_fulfillment_payload(fulfillment, digital_content, site_settings):
     # given
     order = fulfillment.order
-    fulfillment.tracking_number = "http://tracking.url.com/123"
-    fulfillment.save(update_fields=["tracking_number"])
+    fulfillment.tracking_url = "http://tracking.url.com/123"
+    fulfillment.save(update_fields=["tracking_url"])
     line = order.lines.first()
     line.variant = digital_content.product_variant
     line.save(update_fields=["variant"])
@@ -325,8 +325,8 @@ def test_get_default_fulfillment_payload(fulfillment, digital_content, site_sett
     assert payload == {
         "order": order_payload,
         "fulfillment": {
-            "tracking_number": fulfillment.tracking_number,
-            "is_tracking_number_url": fulfillment.is_tracking_number_url,
+            "tracking_url": fulfillment.tracking_url,
+            "is_tracking_url_url": fulfillment.is_tracking_url_url,
         },
         "physical_lines": [
             get_default_fulfillment_line_payload(physical_line, attribute_data)
@@ -572,7 +572,7 @@ def test_send_fulfillment_confirmation_by_user(
 ):
     # given
     fulfillment = fulfilled_order.fulfillments.first()
-    fulfillment.tracking_number = "https://www.example.com"
+    fulfillment.tracking_url = "https://www.example.com"
     fulfillment.save()
     manager = get_plugins_manager(allow_replica=False)
 
@@ -605,7 +605,7 @@ def test_send_fulfillment_confirmation_by_app(
 ):
     # given
     fulfillment = fulfilled_order.fulfillments.first()
-    fulfillment.tracking_number = "https://www.example.com"
+    fulfillment.tracking_url = "https://www.example.com"
     fulfillment.save()
     manager = get_plugins_manager(allow_replica=False)
 
@@ -637,7 +637,7 @@ def test_send_fulfillment_confirmation_by_app(
 def test_send_fulfillment_update(mocked_notify, fulfilled_order, site_settings):
     # given
     fulfillment = fulfilled_order.fulfillments.first()
-    fulfillment.tracking_number = "https://www.example.com"
+    fulfillment.tracking_url = "https://www.example.com"
     fulfillment.save()
     manager = get_plugins_manager(allow_replica=False)
 

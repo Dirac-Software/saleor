@@ -868,17 +868,17 @@ def fulfillment_tracking_updated(
     fulfillment: Fulfillment,
     user: User,
     app: Optional["App"],
-    tracking_number: str,
+    tracking_url: str,
     manager: "PluginsManager",
 ):
     events.fulfillment_tracking_updated_event(
         order=fulfillment.order,
         user=user,
         app=app,
-        tracking_number=tracking_number,
+        tracking_url=tracking_url,
         fulfillment=fulfillment,
     )
-    call_event(manager.tracking_number_updated, fulfillment)
+    call_event(manager.tracking_url_updated, fulfillment)
     call_order_event(
         manager,
         WebhookEventAsyncType.ORDER_UPDATED,
@@ -995,10 +995,22 @@ def approve_fulfillment(
         if insufficient_stocks:
             raise InsufficientStock(insufficient_stocks)
 
+        # Build fulfillment_line_map for FulfillmentSource tracking
+        fulfillment_line_map = {}
+        for fulfillment_line in fulfillment_lines:
+            warehouse_pk = (
+                fulfillment_line.stock.warehouse_id if fulfillment_line.stock else None
+            )
+            if warehouse_pk:
+                fulfillment_line_map[(fulfillment_line.order_line_id, warehouse_pk)] = (
+                    fulfillment_line
+                )
+
         decrease_stock(
             lines_to_fulfill,
             manager,
             allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
+            fulfillment_line_map=fulfillment_line_map,
         )
         order.refresh_from_db()
         order_fulfilled(
@@ -1371,7 +1383,7 @@ def create_fulfillments(
     auto: bool = False,
     auto_approved: bool = True,
     allow_stock_to_be_exceeded: bool = False,
-    tracking_number: str = "",
+    tracking_url: str = "",
 ) -> list[Fulfillment]:
     """Fulfill order.
 
@@ -1402,7 +1414,7 @@ def create_fulfillments(
             otherwise waiting_for_approval.
         allow_stock_to_be_exceeded (bool): If `True` then stock quantity could exceed.
             Default value is set to `False`.
-        tracking_number (str): Optional fulfillment tracking number.
+        tracking_url (str): Optional fulfillment tracking URL or number.
 
     Return:
         List[Fulfillment]: Fulfillmet with lines created for this order
@@ -1440,7 +1452,7 @@ def create_fulfillments(
 
         for warehouse_pk in fulfillment_lines_for_warehouses:
             fulfillment = Fulfillment.objects.create(
-                order=order, status=status, tracking_number=tracking_number
+                order=order, status=status, tracking_url=tracking_url
             )
             fulfillments.append(fulfillment)
             fulfillment_lines.extend(
@@ -1455,8 +1467,8 @@ def create_fulfillments(
                     allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
                 )
             )
-            if tracking_number:
-                call_event(manager.tracking_number_updated, fulfillment)
+            if tracking_url:
+                call_event(manager.tracking_url_updated, fulfillment)
 
         # Only create fulfillment_lines that haven't been saved yet
         # (some may have been saved early for FulfillmentSource tracking)
@@ -2295,20 +2307,89 @@ def update_pick_item(pick_item, quantity_picked, user=None, notes=""):
     if pick_item.is_fully_picked and pick_item.picked_at is None:
         pick_item.picked_at = now()
 
-    pick_item.save(
-        update_fields=["quantity_picked", "picked_by", "notes", "picked_at"]
-    )
+    pick_item.save(update_fields=["quantity_picked", "picked_by", "notes", "picked_at"])
 
     return pick_item
 
 
+def assign_shipment_to_fulfillment(fulfillment, shipment, user=None, auto_approve=True):
+    """Assign a shipment to a fulfillment and optionally try auto-approval.
+
+    Args:
+        fulfillment: Fulfillment to update
+        shipment: Shipment to assign
+        user: User making the assignment (optional)
+        auto_approve: Whether to attempt auto-approval (default: True)
+
+    Returns:
+        Fulfillment with shipment assigned
+
+    """
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    if auto_approve:
+        try_auto_approve_fulfillment(fulfillment, user)
+
+    return fulfillment
+
+
+def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
+    """Automatically approve fulfillment if pick is completed and shipment exists.
+
+    Args:
+        fulfillment: Fulfillment to check
+        user: User triggering the auto-approval (optional)
+        enabled: Whether auto-approval is enabled (default: True)
+
+    Returns:
+        True if auto-approved, False otherwise
+
+    """
+    if not enabled:
+        return False
+    from . import FulfillmentStatus, PickStatus
+    from .models import Pick
+
+    if fulfillment.status != FulfillmentStatus.WAITING_FOR_APPROVAL:
+        return False
+
+    try:
+        pick = fulfillment.pick
+        if pick.status != PickStatus.COMPLETED:
+            return False
+    except Pick.DoesNotExist:
+        return False
+
+    if not fulfillment.shipment:
+        return False
+
+    from ..plugins.manager import get_plugins_manager
+    from ..site.models import Site
+
+    manager = get_plugins_manager(allow_replica=False)
+    settings = Site.objects.get_current().settings
+
+    approve_fulfillment(
+        fulfillment,
+        user,
+        app=None,
+        manager=manager,
+        settings=settings,
+        notify_customer=True,
+        allow_stock_to_be_exceeded=False,
+    )
+    return True
+
+
 @transaction.atomic
-def complete_pick(pick, user=None):
+def complete_pick(pick, user=None, auto_approve=False):
     """Complete a pick document.
 
     Args:
         pick: Pick to complete
         user: User completing the pick
+        auto_approve: Whether to attempt auto-approval if conditions are met (default: False)
 
     Returns:
         Pick instance
@@ -2342,5 +2423,8 @@ def complete_pick(pick, user=None):
     pick.completed_at = now()
     pick.completed_by = user
     pick.save(update_fields=["status", "completed_at", "completed_by"])
+
+    if auto_approve:
+        try_auto_approve_fulfillment(pick.fulfillment, user)
 
     return pick

@@ -9,7 +9,7 @@ query Shipment($id: ID!) {
     shipment(id: $id) {
         id
         carrier
-        trackingNumber
+        trackingUrl
         source {
             id
         }
@@ -35,7 +35,7 @@ query Shipments {
             node {
                 id
                 carrier
-                trackingNumber
+                trackingUrl
                 arrivedAt
             }
         }

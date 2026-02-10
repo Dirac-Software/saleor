@@ -46,3 +46,13 @@ class IncoTerm:
     ]
 
     BUYER_PAYS_SHIPPING = [EXW]
+
+
+class ShipmentType:
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+    CHOICES = [
+        (INBOUND, "Inbound from supplier"),
+        (OUTBOUND, "Outbound to customer"),
+    ]

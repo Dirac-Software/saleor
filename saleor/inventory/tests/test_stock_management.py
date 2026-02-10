@@ -1,10 +1,11 @@
 """Tests for confirm_purchase_order_item - the entry point for stock into owned warehouses."""
 
-import pytest
 from decimal import Decimal
-from prices import Money
+
+import pytest
 from django.utils import timezone
 
+from ...shipping import IncoTerm, ShipmentType
 from ...warehouse.models import Allocation, Stock
 from .. import PurchaseOrderItemStatus
 from ..exceptions import InvalidPurchaseOrderItemStatus
@@ -25,16 +26,19 @@ def test_confirm_poi_moves_stock_from_nonowned_to_owned(
     )
 
     # Create DRAFT POI
+    from ...shipping import ShipmentType
     from ...shipping.models import Shipment
 
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -91,16 +95,19 @@ def test_confirm_poi_with_existing_allocations(
     )
 
     # Create DRAFT POI
+    from ...shipping import ShipmentType
     from ...shipping.models import Shipment
 
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -155,11 +162,13 @@ def test_confirm_poi_with_insufficient_stock(
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -191,11 +200,13 @@ def test_confirm_poi_fails_if_already_confirmed(
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -226,6 +237,10 @@ def test_confirm_poi_verifies_source_stock_state(
     order.status = OrderStatus.UNCONFIRMED
     order.save(update_fields=["status"])
 
+    # given - increase order_line quantity to match allocation needs
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
+
     # given - stock with both quantity and allocated at supplier
     source = Stock.objects.create(
         product_variant=variant,
@@ -241,11 +256,13 @@ def test_confirm_poi_verifies_source_stock_state(
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -318,11 +335,13 @@ def test_confirm_poi_with_split_allocation(
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     # POI only for 6 units - can't move entire allocation
     poi = PurchaseOrderItem.objects.create(
@@ -461,11 +480,13 @@ def test_confirm_poi_with_multiple_allocations_fifo(
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     # POI for 14 units - enough for all allocations
     poi = PurchaseOrderItem.objects.create(
@@ -551,11 +572,13 @@ def test_confirm_poi_auto_confirms_order(
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-123",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -609,11 +632,13 @@ def test_confirm_poi_enforces_invariant(
     shipment1 = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-1",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-1",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi1 = PurchaseOrderItem.objects.create(
         order=purchase_order,
@@ -630,11 +655,13 @@ def test_confirm_poi_enforces_invariant(
     shipment2 = Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-2",
-            shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-2",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
     poi2 = PurchaseOrderItem.objects.create(
         order=purchase_order,

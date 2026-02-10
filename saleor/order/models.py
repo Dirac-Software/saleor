@@ -110,6 +110,7 @@ class OrderQueryset(models.QuerySet["Order"]):
         inventory ready to ship.
         """
         from django.db.models import OuterRef, Q, Subquery, Sum
+
         from ..warehouse.models import Allocation
 
         # Subquery: Check if order has any allocation violations
@@ -871,8 +872,12 @@ class Fulfillment(ModelWithMetadata):
         null=True,
         related_name="fulfillments",
     )
-    # delete as duplicated from shipment? Or make a property?
-    tracking_number = models.CharField(max_length=255, default="", blank=True)
+    tracking_url = models.CharField(
+        max_length=255,
+        default="",
+        blank=True,
+        help_text="Tracking URL or number from carrier",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     shipping_refund_amount = models.DecimalField(
@@ -901,6 +906,24 @@ class Fulfillment(ModelWithMetadata):
     def __iter__(self):
         return iter(self.lines.all())
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        from ..shipping import ShipmentType
+
+        super().clean()
+
+        if self.shipment_id:
+            if self.shipment.shipment_type != ShipmentType.OUTBOUND:
+                raise ValidationError(
+                    {
+                        "shipment": (
+                            f"Cannot link fulfillment to {self.shipment.shipment_type} shipment. "
+                            "Fulfillments can only be linked to outbound shipments."
+                        )
+                    }
+                )
+
     def save(self, *args, **kwargs):
         """Assign an auto incremented value as a fulfillment order."""
         if not self.pk:
@@ -908,6 +931,10 @@ class Fulfillment(ModelWithMetadata):
             existing_max = groups.aggregate(Max("fulfillment_order"))
             existing_max = existing_max.get("fulfillment_order__max")
             self.fulfillment_order = existing_max + 1 if existing_max is not None else 1
+
+        if self.shipment_id:
+            self.clean()
+
         return super().save(*args, **kwargs)
 
     @property
@@ -922,12 +949,55 @@ class Fulfillment(ModelWithMetadata):
 
     @property
     def is_tracking_number_url(self):
-        return bool(match(r"^[-\w]+://", self.tracking_number))
+        return bool(match(r"^[-\w]+://", self.tracking_url))
+
+    @property
+    def has_inventory_received(self):
+        """Check if all required inventory has been received in the warehouse.
+
+        Returns True if all allocations for this fulfillment's order lines
+        have AllocationSources with quantities matching the allocation quantities,
+        AND all linked purchase order shipments have arrived (arrived_at is set).
+
+        Returns False if any owned warehouse allocations lack sources, have
+        mismatched quantities, or if any shipments haven't arrived yet.
+        """
+        from django.db.models import Sum
+
+        has_owned_allocations = False
+
+        for line in self.lines.all():
+            order_line = line.order_line
+            allocations = order_line.allocations.filter(stock__warehouse__is_owned=True)
+
+            for allocation in allocations:
+                has_owned_allocations = True
+                total_sourced = (
+                    allocation.allocation_sources.aggregate(total=Sum("quantity"))[
+                        "total"
+                    ]
+                    or 0
+                )
+
+                if total_sourced != allocation.quantity_allocated:
+                    return False
+
+                for allocation_source in allocation.allocation_sources.all():
+                    poi = allocation_source.purchase_order_item
+
+                    if not poi.shipment:
+                        return False
+
+                    if not poi.shipment.arrived_at:
+                        return False
+
+        return has_owned_allocations
 
 
 class FulfillmentLine(models.Model):
     """Represents line items in a fulfillment. For our use case quantity needs to equal
-    order_line quantity."""
+    order_line quantity.
+    """
 
     order_line = models.ForeignKey(
         OrderLine,
@@ -1013,9 +1083,7 @@ class Pick(models.Model):
         help_text="Warehouse staff who completed picking",
     )
 
-    notes = models.TextField(
-        blank=True, help_text="Additional notes about this pick"
-    )
+    notes = models.TextField(blank=True, help_text="Additional notes about this pick")
 
     class Meta:
         ordering = ["-created_at"]

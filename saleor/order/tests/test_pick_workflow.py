@@ -79,7 +79,9 @@ def test_update_pick_item_marks_fully_picked(fulfillment, staff_user):
     pick_item = pick.items.first()
     quantity_to_pick = pick_item.quantity_to_pick
 
-    pick_item = update_pick_item(pick_item, quantity_picked=quantity_to_pick, user=staff_user)
+    pick_item = update_pick_item(
+        pick_item, quantity_picked=quantity_to_pick, user=staff_user
+    )
 
     assert pick_item.quantity_picked == quantity_to_pick
     assert pick_item.is_fully_picked
@@ -93,7 +95,9 @@ def test_update_pick_item_validates_quantity_exceeds(fulfillment, staff_user):
     quantity_to_pick = pick_item.quantity_to_pick
 
     with pytest.raises(ValueError, match="cannot exceed"):
-        update_pick_item(pick_item, quantity_picked=quantity_to_pick + 5, user=staff_user)
+        update_pick_item(
+            pick_item, quantity_picked=quantity_to_pick + 5, user=staff_user
+        )
 
 
 def test_update_pick_item_validates_pick_in_progress(fulfillment, staff_user):
@@ -109,7 +113,9 @@ def test_complete_pick_succeeds_when_all_items_picked(fulfillment, staff_user):
     start_pick(pick, user=staff_user)
 
     for pick_item in pick.items.all():
-        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user)
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
 
     pick = complete_pick(pick, user=staff_user)
 

@@ -162,7 +162,10 @@ class DraftOrderComplete(BaseMutation):
                     pass
                 else:
                     # DDP/DAP/FOB/etc: seller pays shipping, must have cost
-                    if not order.shipping_price_net_amount or order.shipping_price_net_amount <= 0:
+                    if (
+                        not order.shipping_price_net_amount
+                        or order.shipping_price_net_amount <= 0
+                    ):
                         raise ValidationError(
                             f"Cannot auto-confirm order with inco_term '{order.inco_term}' without shipping cost. "
                             f"Seller is responsible for shipping under {order.inco_term} terms. "

@@ -38,6 +38,7 @@ from .bulk_mutations.order_bulk_create import OrderBulkCreate
 from .filters import (
     DraftOrderFilter,
     DraftOrderWhereInput,
+    FulfillmentFilter,
     OrderFilter,
     OrderWhereInput,
 )
@@ -85,6 +86,7 @@ from .resolvers import (
 )
 from .sorters import OrderSortField, OrderSortingInput
 from .types import (
+    FulfillmentCountableConnection,
     Order,
     OrderCountableConnection,
     OrderEventCountableConnection,
@@ -114,6 +116,12 @@ class OrderDraftFilterInput(FilterInputObjectType):
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
         filterset_class = DraftOrderFilter
+
+
+class FulfillmentQueryFilterInput(FilterInputObjectType):
+    class Meta:
+        doc_category = DOC_CATEGORY_ORDERS
+        filterset_class = FulfillmentFilter
 
 
 class OrderQueries(graphene.ObjectType):
@@ -224,6 +232,15 @@ class OrderQueries(graphene.ObjectType):
         permissions=[OrderPermissions.MANAGE_ORDERS],
         doc_category=DOC_CATEGORY_ORDERS,
     )
+    fulfillments = FilterConnectionField(
+        FulfillmentCountableConnection,
+        filter=FulfillmentQueryFilterInput(
+            description="Filtering options for fulfillments."
+        ),
+        description="List of fulfillments for warehouse and shipping operations.",
+        permissions=[OrderPermissions.MANAGE_ORDERS],
+        doc_category=DOC_CATEGORY_ORDERS,
+    )
 
     @staticmethod
     def resolve_homepage_events(_root, info: ResolveInfo, **kwargs):
@@ -325,6 +342,21 @@ class OrderQueries(graphene.ObjectType):
         )
         return create_connection_slice_for_sync_webhook_control_context(
             qs, info, kwargs, PickCountableConnection, allow_sync_webhooks=False
+        )
+
+    @staticmethod
+    def resolve_fulfillments(_root, info: ResolveInfo, **kwargs):
+        database_connection_name = get_database_connection_name(info.context)
+        qs = (
+            models.Fulfillment.objects.using(database_connection_name)
+            .select_related("order")
+            .prefetch_related("lines__stock__warehouse")
+        )
+        qs = filter_connection_queryset(
+            qs, kwargs, allow_replica=info.context.allow_replica
+        )
+        return create_connection_slice_for_sync_webhook_control_context(
+            qs, info, kwargs, FulfillmentCountableConnection, allow_sync_webhooks=False
         )
 
 

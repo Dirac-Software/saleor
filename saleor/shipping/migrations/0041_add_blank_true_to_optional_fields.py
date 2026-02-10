@@ -4,30 +4,29 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('shipping', '0040_add_inco_term_and_processed_at'),
+        ("shipping", "0040_add_inco_term_and_processed_at"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='shipment',
-            name='arrived_at',
+            model_name="shipment",
+            name="arrived_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AlterField(
-            model_name='shipment',
-            name='carrier',
+            model_name="shipment",
+            name="carrier",
             field=models.CharField(blank=True, null=True),
         ),
         migrations.AlterField(
-            model_name='shipment',
-            name='departed_at',
+            model_name="shipment",
+            name="departed_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AlterField(
-            model_name='shipment',
-            name='tracking_number',
+            model_name="shipment",
+            name="tracking_number",
             field=models.CharField(blank=True, null=True),
         ),
     ]

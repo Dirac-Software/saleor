@@ -996,7 +996,7 @@ def fulfilled_order(order_with_lines):
         created_at=datetime.datetime.now(tz=datetime.UTC),
         status=JobStatus.SUCCESS,
     )
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     line_1 = order.lines.first()
     stock_1 = line_1.allocations.get().stock
     warehouse_1_pk = stock_1.warehouse.pk
@@ -1034,7 +1034,7 @@ def fulfilled_order_without_inventory_tracking(
     order_with_line_without_inventory_tracking,
 ):
     order = order_with_line_without_inventory_tracking
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     line = order.lines.first()
     stock = line.variant.stocks.get()
     warehouse_pk = stock.warehouse.pk

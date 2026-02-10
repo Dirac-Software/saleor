@@ -31,6 +31,7 @@ def filter_orders_with_inventory_ready(orders_qs: QuerySet) -> QuerySet:
         ready_orders = filter_orders_with_inventory_ready(
             Order.objects.filter(status=OrderStatus.UNFULFILLED)
         )
+
     """
     # Subquery: Orders with allocation violations
     orders_with_violations = (
@@ -42,19 +43,19 @@ def filter_orders_with_inventory_ready(orders_qs: QuerySet) -> QuerySet:
             | ~Q(total_sourced=F("quantity_allocated"))  # Quantity mismatch
             # Check if any AllocationSource has POI with no receipts or quantity_received = 0
             | Exists(
-                AllocationSource.objects.filter(
-                    allocation_id=OuterRef('id')
-                ).annotate(
-                    poi_received=Sum('purchase_order_item__receipt_lines__quantity_received')
-                ).filter(
-                    Q(poi_received__isnull=True) | Q(poi_received__lte=0)
+                AllocationSource.objects.filter(allocation_id=OuterRef("id"))
+                .annotate(
+                    poi_received=Sum(
+                        "purchase_order_item__receipt_lines__quantity_received"
+                    )
                 )
+                .filter(Q(poi_received__isnull=True) | Q(poi_received__lte=0))
             )
             # Check if any AllocationSource has POI with unprocessed adjustments
             | Exists(
                 AllocationSource.objects.filter(
-                    allocation_id=OuterRef('id'),
-                    purchase_order_item__adjustments__processed_at__isnull=True
+                    allocation_id=OuterRef("id"),
+                    purchase_order_item__adjustments__processed_at__isnull=True,
                 )
             )
         )
@@ -69,14 +70,12 @@ def filter_orders_with_inventory_ready(orders_qs: QuerySet) -> QuerySet:
         .distinct()
     )
 
-    return (
-        orders_qs.filter(
-            # Must have allocations
-            id__in=Subquery(orders_with_allocations)
-        ).exclude(
-            # Must not have violations
-            id__in=Subquery(orders_with_violations)
-        )
+    return orders_qs.filter(
+        # Must have allocations
+        id__in=Subquery(orders_with_allocations)
+    ).exclude(
+        # Must not have violations
+        id__in=Subquery(orders_with_violations)
     )
 
 
@@ -103,6 +102,7 @@ def get_orders_missing_inventory(orders_qs: QuerySet) -> QuerySet:
         waiting_orders = get_orders_missing_inventory(
             Order.objects.filter(status=OrderStatus.UNCONFIRMED)
         )
+
     """
     # Orders with allocation violations
     orders_with_violations = (
@@ -114,19 +114,19 @@ def get_orders_missing_inventory(orders_qs: QuerySet) -> QuerySet:
             | ~Q(total_sourced=F("quantity_allocated"))
             # Check if any AllocationSource has POI with no receipts or quantity_received = 0
             | Exists(
-                AllocationSource.objects.filter(
-                    allocation_id=OuterRef('id')
-                ).annotate(
-                    poi_received=Sum('purchase_order_item__receipt_lines__quantity_received')
-                ).filter(
-                    Q(poi_received__isnull=True) | Q(poi_received__lte=0)
+                AllocationSource.objects.filter(allocation_id=OuterRef("id"))
+                .annotate(
+                    poi_received=Sum(
+                        "purchase_order_item__receipt_lines__quantity_received"
+                    )
                 )
+                .filter(Q(poi_received__isnull=True) | Q(poi_received__lte=0))
             )
             # Check if any AllocationSource has POI with unprocessed adjustments
             | Exists(
                 AllocationSource.objects.filter(
-                    allocation_id=OuterRef('id'),
-                    purchase_order_item__adjustments__processed_at__isnull=True
+                    allocation_id=OuterRef("id"),
+                    purchase_order_item__adjustments__processed_at__isnull=True,
                 )
             )
         )

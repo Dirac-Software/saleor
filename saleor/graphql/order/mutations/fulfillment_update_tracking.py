@@ -63,8 +63,8 @@ class FulfillmentUpdateTracking(BaseMutation):
         order = fulfillment.order
         cls.check_channel_permissions(info, [order.channel_id])
 
-        tracking_number = input.get("tracking_number") or ""
-        fulfillment.tracking_number = tracking_number
+        tracking_number = input.get("tracking_url") or ""
+        fulfillment.tracking_url = tracking_number
         fulfillment.save()
 
         app = get_app_promise(info.context).get()

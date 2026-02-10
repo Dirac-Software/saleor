@@ -48,7 +48,12 @@ from .dataloaders import (
     ShippingMethodsByShippingZoneIdAndChannelSlugLoader,
     ShippingMethodsByShippingZoneIdLoader,
 )
-from .enums import IncoTermEnum, PostalCodeRuleInclusionTypeEnum, ShippingMethodTypeEnum
+from .enums import (
+    IncoTermEnum,
+    PostalCodeRuleInclusionTypeEnum,
+    ShipmentTypeEnum,
+    ShippingMethodTypeEnum,
+)
 
 
 class ShippingMethodChannelListing(
@@ -463,8 +468,16 @@ class Shipment(ModelObjectType[models.Shipment]):
         description="When shipment departed (null for inbound shipments)."
     )
     carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
-    tracking_number = graphene.String(description="Tracking number from carrier.")
-    inco_term = IncoTermEnum(description="Incoterm defining shipping cost responsibility.")
+    tracking_url = graphene.String(
+        description="Tracking URL or number. Can be used to fetch shipment status from carrier APIs."
+    )
+    inco_term = IncoTermEnum(
+        description="Incoterm defining shipping cost responsibility."
+    )
+    shipment_type = ShipmentTypeEnum(
+        required=True,
+        description="Type of shipment: inbound from supplier or outbound to customer.",
+    )
     shipment_processed_at = DateTime(
         description="When shipment was processed/finalized."
     )

@@ -79,11 +79,11 @@ def test_order_fulfill_with_out_of_stock_webhook(
 
 
 @pytest.mark.parametrize("fulfillment_auto_approve", [True, False])
-@patch("saleor.plugins.manager.PluginsManager.tracking_number_updated")
+@patch("saleor.plugins.manager.PluginsManager.tracking_url_updated")
 @patch("saleor.graphql.order.mutations.order_fulfill.create_fulfillments")
 def test_order_fulfill(
     mock_create_fulfillments,
-    mocked_fulfillment_tracking_number_updated_event,
+    mocked_fulfillment_tracking_url_updated_event,
     fulfillment_auto_approve,
     staff_api_client,
     staff_user,
@@ -139,9 +139,9 @@ def test_order_fulfill(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=fulfillment_auto_approve,
-        tracking_number="",
+        tracking_url="",
     )
-    mocked_fulfillment_tracking_number_updated_event.assert_not_called()
+    mocked_fulfillment_tracking_url_updated_event.assert_not_called()
 
 
 def test_order_fulfill_no_channel_access(
@@ -189,13 +189,13 @@ def test_order_fulfill_no_channel_access(
     assert_no_permission(response)
 
 
-@pytest.mark.parametrize("input_tracking_number", [None, "", "test_tracking_number"])
+@pytest.mark.parametrize("input_tracking_url", [None, "", "test_tracking_url"])
 @pytest.mark.parametrize("fulfillment_auto_approve", [True, False])
 @patch("saleor.graphql.order.mutations.order_fulfill.create_fulfillments")
-def test_order_fulfill_with_tracking_number(
+def test_order_fulfill_with_tracking_url(
     mock_create_fulfillments,
     fulfillment_auto_approve,
-    input_tracking_number,
+    input_tracking_url,
     staff_api_client,
     staff_user,
     order_with_lines,
@@ -227,7 +227,7 @@ def test_order_fulfill_with_tracking_number(
                     "stocks": [{"quantity": 2, "warehouse": warehouse_id}],
                 },
             ],
-            "trackingNumber": input_tracking_number,
+            "trackingUrl": input_tracking_url,
         },
     }
     response = staff_api_client.post_graphql(query, variables)
@@ -241,7 +241,7 @@ def test_order_fulfill_with_tracking_number(
             {"order_line": order_line2, "quantity": 2},
         ]
     }
-    expected_tracking_number = input_tracking_number or ""
+    expected_tracking_url = input_tracking_url or ""
     mock_create_fulfillments.assert_called_once_with(
         staff_user,
         None,
@@ -252,7 +252,7 @@ def test_order_fulfill_with_tracking_number(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=fulfillment_auto_approve,
-        tracking_number=expected_tracking_number,
+        tracking_url=expected_tracking_url,
     )
 
 
@@ -581,7 +581,7 @@ def test_order_fulfill_as_app(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=True,
-        tracking_number="",
+        tracking_url="",
     )
 
 
@@ -649,7 +649,7 @@ def test_order_fulfill_many_warehouses(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=True,
-        tracking_number="",
+        tracking_url="",
     )
 
 
@@ -942,7 +942,7 @@ def test_order_fulfill_without_notification(
         notify_customer=False,
         allow_stock_to_be_exceeded=False,
         auto_approved=True,
-        tracking_number="",
+        tracking_url="",
     )
 
 
@@ -1009,7 +1009,7 @@ def test_order_fulfill_lines_with_empty_quantity(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=True,
-        tracking_number="",
+        tracking_url="",
     )
 
 
@@ -1074,7 +1074,7 @@ def test_order_fulfill_without_sku(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=fulfillment_auto_approve,
-        tracking_number="",
+        tracking_url="",
     )
 
 
@@ -1503,10 +1503,10 @@ def test_create_digital_fulfillment(
 
 
 @patch("saleor.plugins.webhook.plugin.trigger_webhooks_async")
-def test_order_fulfill_tracking_number_updated_event_triggered(
+def test_order_fulfill_tracking_url_updated_event_triggered(
     mocked_webhooks,
     any_webhook,
-    subscription_fulfillment_tracking_number_updated,
+    subscription_fulfillment_tracking_url_updated,
     subscription_fulfillment_created_webhook,
     staff_api_client,
     staff_user,
@@ -1542,7 +1542,7 @@ def test_order_fulfill_tracking_number_updated_event_triggered(
                     "stocks": [{"quantity": 2, "warehouse": warehouse_id}],
                 },
             ],
-            "trackingNumber": "test_tracking_number",
+            "trackingUrl": "test_tracking_url",
         },
     }
     # when
@@ -1708,10 +1708,10 @@ def test_order_fulfill_fulfilled_order_race_condition(
     assert not error["warehouse"]
 
 
-@patch("saleor.plugins.manager.PluginsManager.tracking_number_updated")
+@patch("saleor.plugins.manager.PluginsManager.tracking_url_updated")
 @pytest.mark.django_db(transaction=True)
 def test_order_fulfill_order_in_proper_state_when_error_occur_when_sending_webhook(
-    mocked_fulfillment_tracking_number_updated_event,
+    mocked_fulfillment_tracking_url_updated_event,
     staff_api_client,
     order_with_lines,
     permission_group_manage_orders,
@@ -1720,7 +1720,7 @@ def test_order_fulfill_order_in_proper_state_when_error_occur_when_sending_webho
 ):
     """Ensure that order has proper status and event in case error occur."""
     # given
-    mocked_fulfillment_tracking_number_updated_event.side_effect = Exception()
+    mocked_fulfillment_tracking_url_updated_event.side_effect = Exception()
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     site_settings.fulfillment_auto_approve = True
@@ -1735,7 +1735,7 @@ def test_order_fulfill_order_in_proper_state_when_error_occur_when_sending_webho
     variables = {
         "order": order_id,
         "input": {
-            "trackingNumber": "123",
+            "trackingUrl": "123",
             "notifyCustomer": True,
             "lines": [
                 {

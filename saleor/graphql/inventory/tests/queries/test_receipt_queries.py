@@ -11,7 +11,7 @@ query Receipt($id: ID!) {
         status
         shipment {
             id
-            trackingNumber
+            trackingUrl
         }
         lines {
             id
@@ -34,7 +34,7 @@ query Receipts {
                 id
                 status
                 shipment {
-                    trackingNumber
+                    trackingUrl
                 }
                 createdAt
             }

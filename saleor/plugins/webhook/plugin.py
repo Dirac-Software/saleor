@@ -1639,7 +1639,7 @@ class WebhookPlugin(BasePlugin):
         )
         return previous_value
 
-    def tracking_number_updated(
+    def tracking_url_updated(
         self, fulfillment: "Fulfillment", previous_value: None
     ) -> None:
         if not self.active:
@@ -1651,7 +1651,6 @@ class WebhookPlugin(BasePlugin):
                 fulfillment_data,
                 event_type,
                 webhooks,
-                fulfillment,
                 self.requestor,
             )
         return previous_value

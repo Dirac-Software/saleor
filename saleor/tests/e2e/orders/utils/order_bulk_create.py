@@ -124,7 +124,7 @@ ORDER_BULK_CREATE_MUTATION = (
                             id
                         }
                     }
-                    trackingNumber
+                    trackingUrl
                     fulfillmentOrder
                     status
                 }

@@ -847,8 +847,8 @@ class Fulfillment(
         description="Sequence in which the fulfillments were created for an order.",
     )
     status = FulfillmentStatusEnum(required=True, description="Status of fulfillment.")
-    tracking_number = graphene.String(
-        required=True, description="Fulfillment tracking number."
+    tracking_url = graphene.String(
+        required=False, description="Fulfillment tracking URL."
     )
     created = DateTime(
         required=True, description="Date and time when fulfillment was created."
@@ -872,10 +872,36 @@ class Fulfillment(
         description="Total refunded amount assigned to this fulfillment.",
         required=False,
     )
+    order = graphene.Field(
+        lambda: Order,
+        description="Order that this fulfillment belongs to.",
+        required=True,
+    )
     pick = graphene.Field(
         lambda: Pick,
         description="Pick associated with this fulfillment for warehouse picking workflow.",
         required=False,
+    )
+    shipment = graphene.Field(
+        "saleor.graphql.shipping.types.Shipment",
+        description="Shipment associated with this fulfillment.",
+        required=False,
+    )
+    departed_at = DateTime(
+        description="When the shipment departed (for outbound fulfillments).",
+        required=False,
+    )
+    arrived_at = DateTime(
+        description="When the shipment arrived (for inbound fulfillments).",
+        required=False,
+    )
+    has_inventory_received = graphene.Boolean(
+        description=(
+            "Indicates if all required inventory from purchase orders has been "
+            "received in the warehouse. True when all allocations have matching "
+            "allocation sources, meaning the purchased goods have physically arrived."
+        ),
+        required=True,
     )
 
     class Meta:
@@ -976,11 +1002,45 @@ class Fulfillment(
         )
 
     @staticmethod
+    def resolve_order(root: SyncWebhookControlContext[models.Fulfillment], info):
+        return (
+            OrderByIdLoader(info.context)
+            .load(root.node.order_id)
+            .then(
+                lambda order: SyncWebhookControlContext(
+                    node=order, allow_sync_webhooks=root.allow_sync_webhooks
+                )
+            )
+        )
+
+    @staticmethod
     def resolve_pick(root: SyncWebhookControlContext[models.Fulfillment], _info):
         try:
             return root.node.pick
         except models.Pick.DoesNotExist:
             return None
+
+    @staticmethod
+    def resolve_shipment(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        return root.node.shipment
+
+    @staticmethod
+    def resolve_departed_at(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        if root.node.shipment:
+            return root.node.shipment.departed_at
+        return None
+
+    @staticmethod
+    def resolve_arrived_at(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        if root.node.shipment:
+            return root.node.shipment.arrived_at
+        return None
+
+    @staticmethod
+    def resolve_has_inventory_received(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        return root.node.has_inventory_received
 
 
 class OrderLine(
@@ -3184,6 +3244,12 @@ class PickItem(ModelObjectType[models.PickItem]):
         description="Notes about picking this specific item.",
     )
 
+    @staticmethod
+    def resolve_order_line(root: models.PickItem, _info):
+        from ..core.context import SyncWebhookControlContext
+
+        return SyncWebhookControlContext(node=root.order_line)
+
     class Meta:
         description = "Represents a line item in a pick document."
         interfaces = [graphene.relay.Node]
@@ -3232,11 +3298,27 @@ class Pick(ModelObjectType[models.Pick]):
         description="Notes about this pick.",
     )
 
+    @staticmethod
+    def resolve_fulfillment(root: models.Pick, _info):
+        from ..core.context import SyncWebhookControlContext
+
+        return SyncWebhookControlContext(node=root.fulfillment)
+
+    @staticmethod
+    def resolve_items(root: models.Pick, _info):
+        return root.items.all()
+
     class Meta:
         description = "Represents a pick document for order fulfillment."
         interfaces = [graphene.relay.Node]
         model = models.Pick
         doc_category = DOC_CATEGORY_ORDERS
+
+
+class FulfillmentCountableConnection(CountableConnection):
+    class Meta:
+        doc_category = DOC_CATEGORY_ORDERS
+        node = Fulfillment
 
 
 class PickCountableConnection(CountableConnection):

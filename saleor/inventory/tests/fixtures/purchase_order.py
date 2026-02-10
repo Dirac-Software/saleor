@@ -1,7 +1,7 @@
-import pytest
 from decimal import Decimal
+
+import pytest
 from django.utils import timezone
-from prices import Money
 
 from ... import PurchaseOrderItemStatus
 from ...models import PurchaseOrder, PurchaseOrderItem
@@ -10,16 +10,19 @@ from ...models import PurchaseOrder, PurchaseOrderItem
 @pytest.fixture
 def shipment(nonowned_warehouse, owned_warehouse):
     """Create a shipment for testing receipts."""
+    from ....shipping import IncoTerm, ShipmentType
     from ....shipping.models import Shipment
 
     return Shipment.objects.create(
         source=nonowned_warehouse.address,
         destination=owned_warehouse.address,
-        tracking_number="TEST-SHIPMENT",
-        shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-SHIPMENT",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
 
 
@@ -68,6 +71,7 @@ def multiple_purchase_order_items(purchase_order, variant):
     """Three POIs confirmed at different times for FIFO testing."""
     from datetime import timedelta
 
+    from ....shipping import IncoTerm, ShipmentType
     from ....shipping.models import Shipment
     from ....warehouse.models import Stock
     from ...stock_management import confirm_purchase_order_item
@@ -82,11 +86,13 @@ def multiple_purchase_order_items(purchase_order, variant):
     shipment = Shipment.objects.create(
         source=purchase_order.source_warehouse.address,
         destination=purchase_order.destination_warehouse.address,
-        tracking_number="TEST-FIFO",
-        shipping_cost=Money(Decimal("100.00"), "USD"),
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-FIFO",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
         carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
-        departed_at=timezone.now(),
     )
 
     now = timezone.now()

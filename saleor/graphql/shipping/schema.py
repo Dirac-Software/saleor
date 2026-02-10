@@ -12,7 +12,10 @@ from ..translations.mutations import ShippingPriceTranslate
 from .bulk_mutations import ShippingPriceBulkDelete, ShippingZoneBulkDelete
 from .filters import ShippingZoneFilterInput
 from .mutations import (
+    FulfillmentLinkToShipment,
+    OutboundShipmentCreate,
     ShipmentCreate,
+    ShipmentMarkDeparted,
     ShippingPriceCreate,
     ShippingPriceDelete,
     ShippingPriceExcludeProducts,
@@ -49,6 +52,23 @@ class ShippingQueries(graphene.ObjectType):
     shipments = FilterConnectionField(
         ShipmentCountableConnection,
         description="List of inbound/outbound shipments.",
+        permissions=[ShippingPermissions.MANAGE_SHIPPING],
+        doc_category=DOC_CATEGORY_SHIPPING,
+    )
+    available_shipments_for_fulfillment = PermissionsField(
+        graphene.List(graphene.NonNull(Shipment)),
+        fulfillment_id=graphene.Argument(
+            graphene.ID,
+            description="Filter shipments compatible with this fulfillment.",
+        ),
+        warehouse_id=graphene.Argument(
+            graphene.ID,
+            description="Filter shipments from this warehouse.",
+        ),
+        description=(
+            "List of outbound shipments that haven't departed yet and can accept "
+            "more fulfillments. Useful for linking fulfillments to existing shipments."
+        ),
         permissions=[ShippingPermissions.MANAGE_SHIPPING],
         doc_category=DOC_CATEGORY_SHIPPING,
     )
@@ -112,9 +132,70 @@ class ShippingQueries(graphene.ObjectType):
             qs, info, kwargs, ShippingZoneCountableConnection
         )
 
+    @staticmethod
+    def resolve_available_shipments_for_fulfillment(
+        _root, info: ResolveInfo, *, fulfillment_id=None, warehouse_id=None
+    ):
+        """Return shipments that can accept fulfillments (haven't departed yet)."""
+        from ...order.models import Fulfillment
+        from ...shipping import ShipmentType
+
+        qs = (
+            models.Shipment.objects.using(get_database_connection_name(info.context))
+            .filter(
+                shipment_type=ShipmentType.OUTBOUND,
+                departed_at__isnull=True,
+            )
+            .select_related("source", "destination")
+        )
+
+        # Filter by fulfillment compatibility
+        if fulfillment_id:
+            _, fulfillment_pk = from_global_id_or_error(fulfillment_id, "Fulfillment")
+            try:
+                fulfillment = Fulfillment.objects.select_related(
+                    "order__shipping_address"
+                ).get(pk=fulfillment_pk)
+
+                # Filter to shipments with matching destination
+                if fulfillment.order.shipping_address:
+                    dest = fulfillment.order.shipping_address
+                    qs = qs.filter(
+                        destination__street_address_1=dest.street_address_1,
+                        destination__city=dest.city,
+                        destination__postal_code=dest.postal_code,
+                        destination__country=dest.country,
+                    )
+            except Fulfillment.DoesNotExist:
+                return []
+
+        # Filter by warehouse
+        if warehouse_id:
+            from ...warehouse.models import Warehouse
+
+            _, warehouse_pk = from_global_id_or_error(warehouse_id, "Warehouse")
+            try:
+                warehouse = Warehouse.objects.select_related("address").get(
+                    pk=warehouse_pk
+                )
+                if warehouse.address:
+                    addr = warehouse.address
+                    qs = qs.filter(
+                        source__street_address_1=addr.street_address_1,
+                        source__city=addr.city,
+                        source__postal_code=addr.postal_code,
+                    )
+            except Warehouse.DoesNotExist:
+                return []
+
+        return list(qs[:50])  # Limit to 50 results
+
 
 class ShippingMutations(graphene.ObjectType):
     shipment_create = ShipmentCreate.Field()
+    outbound_shipment_create = OutboundShipmentCreate.Field()
+    shipment_mark_departed = ShipmentMarkDeparted.Field()
+    fulfillment_link_to_shipment = FulfillmentLinkToShipment.Field()
 
     shipping_method_channel_listing_update = ShippingMethodChannelListingUpdate.Field()
     shipping_price_create = ShippingPriceCreate.Field()

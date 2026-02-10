@@ -13,7 +13,7 @@ from ...order.actions import create_fulfillments
 from ...order.fetch import OrderLineInfo
 from ...plugins.manager import get_plugins_manager
 from ..management import allocate_stocks
-from ..models import AllocationSource, FulfillmentSource, Stock
+from ..models import AllocationSource, Stock
 
 COUNTRY_CODE = "US"
 
@@ -136,7 +136,11 @@ def test_partial_fulfill_creates_partial_fulfillment_source(
 
 
 def test_fulfill_from_multiple_poi_batches(
-    order_line, owned_warehouse, multiple_purchase_order_items, channel_USD, site_settings
+    order_line,
+    owned_warehouse,
+    multiple_purchase_order_items,
+    channel_USD,
+    site_settings,
 ):
     """Fulfillment creates FulfillmentSource for each POI batch consumed."""
     poi_oldest, poi_middle, poi_newest = multiple_purchase_order_items
@@ -275,7 +279,11 @@ def test_available_quantity_decreases_after_fulfillment(
 
 
 def test_partial_fulfill_spanning_multiple_poi_batches(
-    order_line, owned_warehouse, multiple_purchase_order_items, channel_USD, site_settings
+    order_line,
+    owned_warehouse,
+    multiple_purchase_order_items,
+    channel_USD,
+    site_settings,
 ):
     """Partial fulfillment spanning multiple POI batches correctly converts sources.
 

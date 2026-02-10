@@ -113,7 +113,7 @@ def test_complete_draft_order_with_0_total_manual_discount_for_digital_products_
         e2e_staff_api_client,
         order_id,
     )
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     assert order["order"]["total"]["gross"]["amount"] == 0
     order_line = order["order"]["lines"][0]
     assert order_line["totalPrice"]["gross"]["amount"] == 0

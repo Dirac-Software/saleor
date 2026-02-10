@@ -106,7 +106,7 @@ def test_order_in_channel_with_transaction_flow_as_mark_as_paid_strategy_CORE_02
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     assert (
         order["order"]["channel"]["orderSettings"]["markAsPaidStrategy"]
         == "TRANSACTION_FLOW"
@@ -122,7 +122,7 @@ def test_order_in_channel_with_transaction_flow_as_mark_as_paid_strategy_CORE_02
     )
     assert order_paid_data["order"]["isPaid"] is True
     assert order_paid_data["order"]["paymentStatus"] == "FULLY_CHARGED"
-    assert order_paid_data["order"]["status"] == "UNFULFILLED"
+    assert order_paid_data["order"]["status"] == "UNCONFIRMED"
     order_data = order_query(
         e2e_staff_api_client,
         order_id,

@@ -16,26 +16,31 @@ Acquiring goods from some supplier has this sequential process:
 
 This means that Products are in the Warehouse table _before_ they actually arrive. Once they are inbound they are considered part of that warehouse, but unreceived..
 
+## Shipment
+An order or a purchase order both require shipments. We need a shipment to receive a purchase order. We need a shipment to fulfill an order. A shipment is a tracking number and a cost.
+
 ## Order
-When an Order is created we check that we have enough stock in any warehouse to fulfill it. If we do not we error and don't let the order be created (given we only show available quantities on the web, this shouldn't happen). We can confirm the `Order` if we have enough stock in owned warehouses. If all of that stock has been received, we can pick + pack and fulfill the `Order`.
+When an Order is created it is in an `UNCONFIRMED` state (we can make a `DRAFT` before hand), which means stock has been allocated to that order. If all stock is in an owned warehouse we can immediately confirm it, the state is then `UNFULFILLED`. Once we move to state `UNFULFILLED` we generate a `Fulfillment` with status `WAITING_FOR_APPROVAL`. This means it ready for pick and pack. Once it has been pick and packed, we can arrange a shipment and move to `FULFILLED`, which means the Shipment exists for some `Order`.
 
 
 ## Allocation
-We allocate products prioritising owned warehouses. Both allocation strategies (`PRIORITIZE_HIGH_STOCK` and `PRIORITIZE_SORTING_ORDER`) enforce owned-warehouse-first ordering to ensure:
-1. Customer allocations use confirmed inventory in owned warehouses
-2. Batch tracking via `AllocationSources` links allocations to specific `PurchaseOrderItems`
-3. `POI.quantity_allocated` accurately tracks how much of each batch is allocated
+An `Allocation` is reserving stock to be used for some order. The second we move some order into the `UNCONFIRMED` state we allocate stock. If we allocate to an owned `Warehouse` then we need to track which allocation links to which `PurchaseOrderItem`, we do this with an `AllocationSource`. `POI.quantity_allocated` tracks how many units we have assigned to an order from some purchase order item. For a nonowned warehouse an `Allocation` doesn't need `AllocationSource`, but we cannot confirm an order if all the `Allocation`s don't have `AllocationSource`s (which is the same as saying all stock is in an owned warehouse).
 
-After exhausting owned warehouse stock, we then allocate from non-owned warehouses. We can allocate products in an owned warehouse before the Shipment containing the Purchase Order Item has been received. This is good for cash flow, we can send out invoices and take payment sooner, but it is **bad** if we end up receiving less than we expected. In this case, we will often have to issue a refund if the payment status.
+## Fulfillment
+When we have confirmed an `Order`, that means all products are either in a shipment for an owned warehouse or they are in an owned warehouse. At this point we create a `Fullfillment` for each owned warehouse in the `Order`, with the `WAITING_FOR_APPROVAL` state. In order to actually fulfill, we need:
+1. A `Shipment` to exist.
+2. A `Pick` to have been completed
+We have a queue of `Order`s needing shipments and a queue for `Order`s needing `Pick`s. We check at each completion whether we can move status to `FULFLLED`.
 
+Once the shipment is picked up, we mark the `departed_at`.
 
-
-# Warehouse Tasks
-- When a shipment arrives the goods need to be checked in
-- When an order is in the warehouse it needs to be picked and packed.
 
 ## Receipt
-Some Shipment that has some `PurchaseOrderItem` arrives ( we can use the tracking number to find when it happens). Something calls graphql mutation `startReceiptCheckin`. We then have a graphQL mutation `checkin(product_variant, quantity)` ( note we error if the POI is not part of that shipment, also this allows us to add barcode scanning later). Then we have `finishReceiptCheckin` which will generate POIA for missing ones, set shipment received_at and change the POI status.
+Some Shipment that has some `PurchaseOrderItem` arrives ( we can use the tracking number to find when it happens). We start a `Receipt` which checks in the stock. If we are short we create a `PurchaseOrderItemAdjustment` which accounts for a difference in `quantity_ordered` and the quantity we have available.
+
+## Pick
+When we have all of our products for an order in some owned warehouse (for now ignore partial fulfillments as the exception) we need to pick and pack. A `Pick` is generated in the ready state when we create a `Fulfillment`. The warehouse team then can start a `Pick` and mark as completed. In the future we might want the relationship between pick + pack and a `Fulfillment` to be different - because `Fullfillment` has an fk to a `Pick` we can change the way we handle pick + pack in future if necessaty.
+
 
 
 ### Leakage

@@ -67,8 +67,8 @@ class OrderFulfillInput(BaseInputObjectType):
         description="If true, then allow proceed fulfillment when stock is exceeded.",
         default_value=False,
     )
-    tracking_number = graphene.String(
-        description="Fulfillment tracking number.",
+    tracking_url = graphene.String(
+        description="Fulfillment tracking URL.",
         required=False,
     )
 
@@ -77,7 +77,7 @@ class OrderFulfillInput(BaseInputObjectType):
 
 
 class FulfillmentUpdateTrackingInput(BaseInputObjectType):
-    tracking_number = graphene.String(description="Fulfillment tracking number.")
+    tracking_url = graphene.String(description="Fulfillment tracking URL.")
     notify_customer = graphene.Boolean(
         default_value=False,
         description="If true, send an email notification to the customer.",
@@ -278,7 +278,7 @@ class OrderFulfill(BaseMutation):
             "allow_stock_to_be_exceeded", False
         )
         approved = site.settings.fulfillment_auto_approve
-        tracking_number = cleaned_input.get("tracking_number") or ""
+        tracking_number = cleaned_input.get("tracking_url") or ""
         try:
             fulfillments = create_fulfillments(
                 user,
@@ -290,7 +290,7 @@ class OrderFulfill(BaseMutation):
                 notify_customer=notify_customer,
                 allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
                 auto_approved=approved,
-                tracking_number=tracking_number,
+                tracking_url=tracking_number,
             )
         except InsufficientStock as e:
             errors = prepare_insufficient_stock_order_validation_errors(e)

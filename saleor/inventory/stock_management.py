@@ -189,6 +189,53 @@ def confirm_purchase_order_item(
             order.status = OrderStatus.UNFULFILLED
             order.save(update_fields=["status", "updated_at"])
 
+            # Create fulfillments per warehouse with WAITING_FOR_APPROVAL status
+            from collections import defaultdict
+
+            from django.contrib.sites.models import Site
+
+            from ..order.actions import create_fulfillments
+            from ..plugins.manager import get_plugins_manager
+
+            # Get allocations and group by warehouse
+            allocations = Allocation.objects.filter(
+                order_line__order=order
+            ).select_related("stock__warehouse", "order_line")
+
+            warehouse_groups = defaultdict(list)
+            for allocation in allocations:
+                warehouse_pk = allocation.stock.warehouse_id
+                warehouse_groups[warehouse_pk].append(allocation)
+
+            # Build fulfillment_lines_for_warehouses dict
+            fulfillment_lines_for_warehouses = {}
+            for warehouse_pk, allocations_list in warehouse_groups.items():
+                lines = []
+                for allocation in allocations_list:
+                    lines.append(
+                        {
+                            "order_line": allocation.order_line,
+                            "quantity": allocation.quantity_allocated,
+                        }
+                    )
+                fulfillment_lines_for_warehouses[warehouse_pk] = lines
+
+            # Create fulfillments
+            manager = get_plugins_manager(allow_replica=False)
+            site_settings = Site.objects.get_current().settings
+
+            create_fulfillments(
+                user=user,
+                app=app,
+                order=order,
+                fulfillment_lines_for_warehouses=fulfillment_lines_for_warehouses,
+                manager=manager,
+                site_settings=site_settings,
+                notify_customer=False,
+                auto_approved=False,
+                tracking_url="",
+            )
+
     # Log event for audit trail
     purchase_order_item_confirmed_event(
         purchase_order_item=purchase_order_item,
@@ -388,7 +435,14 @@ def start_receipt(shipment, user=None):
         ValueError: If shipment already has a receipt or is already received
 
     """
+    from ..shipping import ShipmentType
     from .models import Receipt
+
+    if shipment.shipment_type != ShipmentType.INBOUND:
+        raise ValueError(
+            f"Cannot start receipt for {shipment.shipment_type} shipment. "
+            "Only inbound shipments can be received."
+        )
 
     if shipment.arrived_at is not None:
         raise ValueError(f"Shipment {shipment.id} already marked as received")

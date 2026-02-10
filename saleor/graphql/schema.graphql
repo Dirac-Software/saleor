@@ -300,6 +300,19 @@ type Query {
   ): ShipmentCountableConnection @doc(category: "Shipping")
 
   """
+  List of outbound shipments that haven't departed yet and can accept more fulfillments. Useful for linking fulfillments to existing shipments.
+  
+  Requires one of the following permissions: MANAGE_SHIPPING.
+  """
+  availableShipmentsForFulfillment(
+    """Filter shipments compatible with this fulfillment."""
+    fulfillmentId: ID
+
+    """Filter shipments from this warehouse."""
+    warehouseId: ID
+  ): [Shipment!] @doc(category: "Shipping")
+
+  """
   Look up a shipping zone by ID.
   
   Requires one of the following permissions: MANAGE_SHIPPING.
@@ -984,6 +997,32 @@ type Query {
     """
     last: Int
   ): PickCountableConnection @doc(category: "Orders")
+
+  """
+  List of fulfillments for warehouse and shipping operations.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  fulfillments(
+    """Filtering options for fulfillments."""
+    filter: FulfillmentQueryFilterInput
+
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): FulfillmentCountableConnection @doc(category: "Orders")
 
   """Look up a navigation menu by ID or name."""
   menu(
@@ -11671,8 +11710,8 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Status of fulfillment."""
   status: FulfillmentStatus!
 
-  """Fulfillment tracking number."""
-  trackingNumber: String!
+  """Fulfillment tracking URL."""
+  trackingUrl: String
 
   """Date and time when fulfillment was created."""
   created: DateTime!
@@ -11692,8 +11731,25 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Total refunded amount assigned to this fulfillment."""
   totalRefundedAmount: Money
 
+  """Order that this fulfillment belongs to."""
+  order: Order!
+
   """Pick associated with this fulfillment for warehouse picking workflow."""
   pick: Pick
+
+  """Shipment associated with this fulfillment."""
+  shipment: Shipment
+
+  """When the shipment departed (for outbound fulfillments)."""
+  departedAt: DateTime
+
+  """When the shipment arrived (for inbound fulfillments)."""
+  arrivedAt: DateTime
+
+  """
+  Indicates if all required inventory from purchase orders has been received in the warehouse. True when all allocations have matching allocation sources, meaning the purchased goods have physically arrived.
+  """
+  hasInventoryReceived: Boolean!
 }
 
 enum FulfillmentStatus @doc(category: "Orders") {
@@ -12030,18 +12086,53 @@ type PickItem implements Node @doc(category: "Orders") {
   notes: String
 }
 
-enum OrderAction @doc(category: "Payments") {
-  """Represents the capture action."""
-  CAPTURE
+"""Represents a shipment of goods from supplier to warehouse."""
+type Shipment implements Node @doc(category: "Shipping") {
+  """The ID of the shipment."""
+  id: ID!
 
-  """Represents a mark-as-paid action."""
-  MARK_AS_PAID
+  """Source address (where shipment originates)."""
+  source: Address!
 
-  """Represents a refund action."""
-  REFUND
+  """Destination address (where shipment is going)."""
+  destination: Address!
 
-  """Represents a void action."""
-  VOID
+  """
+  Shipping cost including VAT (estimated until invoice added, null if not set).
+  """
+  shippingCost: Money
+
+  """Shipping invoice (null if not yet received)."""
+  shippingInvoice: Invoice
+
+  """When shipment arrived (null if still in transit)."""
+  arrivedAt: DateTime
+
+  """When shipment departed (null for inbound shipments)."""
+  departedAt: DateTime
+
+  """Carrier name (e.g., DHL, FedEx)."""
+  carrier: String
+
+  """
+  Tracking URL or number. Can be used to fetch shipment status from carrier APIs.
+  """
+  trackingUrl: String
+
+  """Incoterm defining shipping cost responsibility."""
+  incoTerm: IncoTermEnum
+
+  """Type of shipment: inbound from supplier or outbound to customer."""
+  shipmentType: ShipmentTypeEnum!
+
+  """When shipment was processed/finalized."""
+  shipmentProcessedAt: DateTime
+
+  """Purchase order items in this shipment."""
+  purchaseOrderItems: [PurchaseOrderItem!]!
+
+  """Receipt for this shipment (null if not yet received)."""
+  receipt: Receipt
 }
 
 """Represents an Invoice."""
@@ -12123,6 +12214,145 @@ enum JobStatusEnum {
   SUCCESS
   FAILED
   DELETED
+}
+
+enum IncoTermEnum @doc(category: "Shipping") {
+  EXW
+  FCA
+  CPT
+  CIP
+  DAP
+  DPU
+  DDP
+  FAS
+  FOB
+  CFR
+  CIF
+}
+
+enum ShipmentTypeEnum @doc(category: "Shipping") {
+  INBOUND
+  OUTBOUND
+}
+
+"""Represents a line item in a purchase order."""
+type PurchaseOrderItem implements Node {
+  """The ID of the purchase order item."""
+  id: ID!
+
+  """Parent purchase order."""
+  purchaseOrder: PurchaseOrder!
+
+  """Product variant ordered."""
+  productVariant: ProductVariant!
+
+  """Quantity ordered."""
+  quantityOrdered: Int!
+
+  """Total quantity received across all receipt lines."""
+  quantityReceived: Int!
+
+  """Unit cost (buy price)."""
+  unitPrice: Money!
+
+  """Country of origin (ISO 2-letter code)."""
+  countryOfOrigin: String!
+
+  """Status of this purchase order item."""
+  status: PurchaseOrderItemStatusEnum!
+}
+
+"""Represents a purchase order from a supplier."""
+type PurchaseOrder implements Node {
+  """The ID of the purchase order."""
+  id: ID!
+
+  """Supplier warehouse (non-owned)."""
+  supplierWarehouse: Warehouse!
+
+  """Destination warehouse (owned)."""
+  destinationWarehouse: Warehouse!
+
+  """Items in this purchase order."""
+  items: [PurchaseOrderItem]!
+}
+
+enum PurchaseOrderItemStatusEnum @doc(category: "Products") {
+  DRAFT
+  CONFIRMED
+  RECEIVED
+  CANCELLED
+}
+
+"""Represents a goods receipt for an inbound shipment."""
+type Receipt implements Node @doc(category: "Products") {
+  """The ID of the object."""
+  id: ID!
+
+  """The shipment being received."""
+  shipment: Shipment!
+
+  """Current status of the receipt."""
+  status: ReceiptStatusEnum!
+
+  """Items received in this receipt."""
+  lines: [ReceiptLine!]!
+
+  """When the receipt was started."""
+  createdAt: DateTime!
+
+  """When the receipt was completed."""
+  completedAt: DateTime
+
+  """User who started the receipt."""
+  createdBy: User
+
+  """User who completed the receipt."""
+  completedBy: User
+
+  """Notes about this receipt."""
+  notes: String
+}
+
+enum ReceiptStatusEnum {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+"""Represents a line item in a goods receipt."""
+type ReceiptLine implements Node @doc(category: "Products") {
+  """The ID of the object."""
+  id: ID!
+
+  """The purchase order item being received."""
+  purchaseOrderItem: PurchaseOrderItem!
+
+  """Quantity received in this line."""
+  quantityReceived: Int!
+
+  """When this item was scanned/received."""
+  receivedAt: DateTime!
+
+  """Warehouse staff who scanned this item."""
+  receivedBy: User
+
+  """Notes about this specific receipt line."""
+  notes: String
+}
+
+enum OrderAction @doc(category: "Payments") {
+  """Represents the capture action."""
+  CAPTURE
+
+  """Represents a mark-as-paid action."""
+  MARK_AS_PAID
+
+  """Represents a refund action."""
+  REFUND
+
+  """Represents a void action."""
+  VOID
 }
 
 enum OrderOriginEnum @doc(category: "Orders") {
@@ -13188,170 +13418,6 @@ type RefundSettings @doc(category: "Orders") {
   reasonReferenceType: PageType
 }
 
-"""Represents a shipment of goods from supplier to warehouse."""
-type Shipment implements Node @doc(category: "Shipping") {
-  """The ID of the shipment."""
-  id: ID!
-
-  """Source address (where shipment originates)."""
-  source: Address!
-
-  """Destination address (where shipment is going)."""
-  destination: Address!
-
-  """
-  Shipping cost including VAT (estimated until invoice added, null if not set).
-  """
-  shippingCost: Money
-
-  """Shipping invoice (null if not yet received)."""
-  shippingInvoice: Invoice
-
-  """When shipment arrived (null if still in transit)."""
-  arrivedAt: DateTime
-
-  """When shipment departed (null for inbound shipments)."""
-  departedAt: DateTime
-
-  """Carrier name (e.g., DHL, FedEx)."""
-  carrier: String
-
-  """Tracking number from carrier."""
-  trackingNumber: String
-
-  """Incoterm defining shipping cost responsibility."""
-  incoTerm: IncoTermEnum
-
-  """When shipment was processed/finalized."""
-  shipmentProcessedAt: DateTime
-
-  """Purchase order items in this shipment."""
-  purchaseOrderItems: [PurchaseOrderItem!]!
-
-  """Receipt for this shipment (null if not yet received)."""
-  receipt: Receipt
-}
-
-enum IncoTermEnum @doc(category: "Shipping") {
-  EXW
-  FCA
-  CPT
-  CIP
-  DAP
-  DPU
-  DDP
-  FAS
-  FOB
-  CFR
-  CIF
-}
-
-"""Represents a line item in a purchase order."""
-type PurchaseOrderItem implements Node {
-  """The ID of the purchase order item."""
-  id: ID!
-
-  """Parent purchase order."""
-  purchaseOrder: PurchaseOrder!
-
-  """Product variant ordered."""
-  productVariant: ProductVariant!
-
-  """Quantity ordered."""
-  quantityOrdered: Int!
-
-  """Total quantity received across all receipt lines."""
-  quantityReceived: Int!
-
-  """Unit cost (buy price)."""
-  unitPrice: Money!
-
-  """Country of origin (ISO 2-letter code)."""
-  countryOfOrigin: String!
-
-  """Status of this purchase order item."""
-  status: PurchaseOrderItemStatusEnum!
-}
-
-"""Represents a purchase order from a supplier."""
-type PurchaseOrder implements Node {
-  """The ID of the purchase order."""
-  id: ID!
-
-  """Supplier warehouse (non-owned)."""
-  supplierWarehouse: Warehouse!
-
-  """Destination warehouse (owned)."""
-  destinationWarehouse: Warehouse!
-
-  """Items in this purchase order."""
-  items: [PurchaseOrderItem]!
-}
-
-enum PurchaseOrderItemStatusEnum @doc(category: "Products") {
-  DRAFT
-  CONFIRMED
-  RECEIVED
-  CANCELLED
-}
-
-"""Represents a goods receipt for an inbound shipment."""
-type Receipt implements Node @doc(category: "Products") {
-  """The ID of the object."""
-  id: ID!
-
-  """The shipment being received."""
-  shipment: Shipment!
-
-  """Current status of the receipt."""
-  status: ReceiptStatusEnum!
-
-  """Items received in this receipt."""
-  lines: [ReceiptLine!]!
-
-  """When the receipt was started."""
-  createdAt: DateTime!
-
-  """When the receipt was completed."""
-  completedAt: DateTime
-
-  """User who started the receipt."""
-  createdBy: User
-
-  """User who completed the receipt."""
-  completedBy: User
-
-  """Notes about this receipt."""
-  notes: String
-}
-
-enum ReceiptStatusEnum {
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-}
-
-"""Represents a line item in a goods receipt."""
-type ReceiptLine implements Node @doc(category: "Products") {
-  """The ID of the object."""
-  id: ID!
-
-  """The purchase order item being received."""
-  purchaseOrderItem: PurchaseOrderItem!
-
-  """Quantity received in this line."""
-  quantityReceived: Int!
-
-  """When this item was scanned/received."""
-  receivedAt: DateTime!
-
-  """Warehouse staff who scanned this item."""
-  receivedBy: User
-
-  """Notes about this specific receipt line."""
-  notes: String
-}
-
 type ShipmentCountableConnection @doc(category: "Shipping") {
   """Pagination data for this connection."""
   pageInfo: PageInfo!
@@ -14198,6 +14264,29 @@ type PickCountableEdge @doc(category: "Orders") {
 
   """A cursor for use in pagination."""
   cursor: String!
+}
+
+type FulfillmentCountableConnection @doc(category: "Orders") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [FulfillmentCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type FulfillmentCountableEdge @doc(category: "Orders") {
+  """The item at the end of the edge."""
+  node: Fulfillment!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
+input FulfillmentQueryFilterInput @doc(category: "Orders") {
+  status: [FulfillmentStatus!]
+  warehouse: [ID!]
+  metadata: [MetadataFilter!]
 }
 
 type MenuCountableConnection @doc(category: "Menu") {
@@ -16065,6 +16154,42 @@ type Mutation {
     """Fields required to create a shipment."""
     input: ShipmentCreateInput!
   ): ShipmentCreate @doc(category: "Shipping")
+
+  """
+  Creates a new outbound shipment for order fulfillments. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  outboundShipmentCreate(
+    """Fields required to create an outbound shipment."""
+    input: OutboundShipmentCreateInput!
+  ): OutboundShipmentCreate @doc(category: "Shipping")
+
+  """
+  Marks an outbound shipment as departed. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  shipmentMarkDeparted(
+    """ID of the shipment to mark as departed."""
+    id: ID!
+
+    """Fields to update when marking as departed."""
+    input: ShipmentMarkDepartedInput
+  ): ShipmentMarkDeparted @doc(category: "Shipping")
+
+  """
+  Links a fulfillment to an existing shipment. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  fulfillmentLinkToShipment(
+    """ID of the fulfillment to link."""
+    fulfillmentId: ID!
+
+    """ID of the shipment to link to."""
+    shipmentId: ID!
+  ): FulfillmentLinkToShipment @doc(category: "Orders")
 
   """
   Manage shipping method's availability in channels. 
@@ -21840,8 +21965,8 @@ input ShipmentCreateInput @doc(category: "Shipping") {
   """Carrier name (e.g., DHL, FedEx)."""
   carrier: String
 
-  """Tracking number from carrier."""
-  trackingNumber: String
+  """Tracking URL or number from carrier."""
+  trackingUrl: String
 
   """Estimated shipping cost including VAT."""
   shippingCost: PositiveDecimal
@@ -21854,6 +21979,66 @@ input ShipmentCreateInput @doc(category: "Shipping") {
 
   """When shipment was processed/finalized."""
   shipmentProcessedAt: DateTime
+}
+
+"""
+Creates a new outbound shipment for order fulfillments. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OutboundShipmentCreate @doc(category: "Shipping") {
+  """Created outbound shipment."""
+  shipment: Shipment
+  shippingErrors: [ShippingError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ShippingError!]!
+}
+
+input OutboundShipmentCreateInput @doc(category: "Shipping") {
+  """Fulfillments to include in this shipment."""
+  fulfillmentIds: [ID!]!
+
+  """Carrier name (e.g., DHL, FedEx)."""
+  carrier: String!
+
+  """Tracking URL or number from carrier."""
+  trackingUrl: String!
+
+  """Shipping cost including VAT."""
+  shippingCost: PositiveDecimal
+
+  """Currency code (default: USD)."""
+  currency: String = "USD"
+}
+
+"""
+Marks an outbound shipment as departed. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type ShipmentMarkDeparted @doc(category: "Shipping") {
+  """Updated shipment."""
+  shipment: Shipment
+  shippingErrors: [ShippingError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ShippingError!]!
+}
+
+input ShipmentMarkDepartedInput @doc(category: "Shipping") {
+  """
+  Timestamp when shipment departed. Defaults to current time if not provided.
+  """
+  departedAt: DateTime
+}
+
+"""
+Links a fulfillment to an existing shipment. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type FulfillmentLinkToShipment @doc(category: "Orders") {
+  """Updated fulfillment linked to shipment."""
+  fulfillment: Fulfillment
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
 }
 
 """
@@ -25887,8 +26072,8 @@ input OrderFulfillInput @doc(category: "Orders") {
   """If true, then allow proceed fulfillment when stock is exceeded."""
   allowStockToBeExceeded: Boolean = false
 
-  """Fulfillment tracking number."""
-  trackingNumber: String
+  """Fulfillment tracking URL."""
+  trackingUrl: String
 }
 
 input OrderFulfillLineInput @doc(category: "Orders") {
@@ -25966,8 +26151,8 @@ type FulfillmentUpdateTracking @doc(category: "Orders") @webhookEventsInfo(async
 }
 
 input FulfillmentUpdateTrackingInput @doc(category: "Orders") {
-  """Fulfillment tracking number."""
-  trackingNumber: String
+  """Fulfillment tracking URL."""
+  trackingUrl: String
 
   """If true, send an email notification to the customer."""
   notifyCustomer: Boolean = false

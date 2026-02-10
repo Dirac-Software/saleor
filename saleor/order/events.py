@@ -692,7 +692,7 @@ def fulfillment_tracking_updated_event(
     order: Order,
     user: User | None,
     app: App | None,
-    tracking_number: str,
+    tracking_url: str,
     fulfillment: Fulfillment,
 ) -> OrderEvent:
     return OrderEvent.objects.create(
@@ -701,7 +701,7 @@ def fulfillment_tracking_updated_event(
         user=user,
         app=app,
         parameters={
-            "tracking_number": tracking_number,
+            "tracking_url": tracking_url,
             "fulfillment": fulfillment.composed_id,
         },
     )

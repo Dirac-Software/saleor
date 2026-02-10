@@ -3,11 +3,10 @@
 from decimal import Decimal
 
 from django.db import transaction
-from prices import Money
 
 from ..inventory import PurchaseOrderItemStatus
 from ..inventory.events import shipment_assigned_event
-from . import IncoTerm
+from . import IncoTerm, ShipmentType
 from .models import Shipment
 
 """
@@ -30,7 +29,7 @@ def create_shipment(
     destination_address,
     purchase_order_items,
     carrier=None,
-    tracking_number=None,
+    tracking_url=None,
     shipping_cost=None,
     currency="GBP",
     inco_term=None,
@@ -45,7 +44,7 @@ def create_shipment(
         destination_address: Address where shipment is going (owned warehouse)
         purchase_order_items: List of PurchaseOrderItem instances to include
         carrier: Optional carrier name
-        tracking_number: Optional tracking number
+        tracking_url: Optional tracking URL or number
         shipping_cost: Estimated shipping cost including VAT (Decimal)
         currency: Currency for costs (default GBP)
         inco_term: Incoterm defining shipping cost responsibility
@@ -80,12 +79,12 @@ def create_shipment(
     if inco_term and shipping_cost is not None:
         shipping_cost_decimal = Decimal(str(shipping_cost))
         if inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
-            if shipping_cost_decimal != Decimal("0"):
+            if shipping_cost_decimal != Decimal(0):
                 raise ValueError(
                     f"Shipping cost must be 0 for incoterm {inco_term} (buyer pays shipping)"
                 )
         else:
-            if shipping_cost_decimal == Decimal("0"):
+            if shipping_cost_decimal == Decimal(0):
                 raise ValueError(
                     f"Shipping cost must be greater than 0 for incoterm {inco_term} (seller pays shipping)"
                 )
@@ -94,14 +93,16 @@ def create_shipment(
     shipment_data = {
         "source": source_address,
         "destination": destination_address,
+        "shipment_type": ShipmentType.INBOUND,
         "carrier": carrier,
-        "tracking_number": tracking_number,
+        "tracking_url": tracking_url,
         "inco_term": inco_term,
         "shipment_processed_at": shipment_processed_at,
+        "currency": currency,
     }
 
     if shipping_cost is not None:
-        shipment_data["shipping_cost"] = Money(shipping_cost, currency)
+        shipment_data["shipping_cost_amount"] = Decimal(str(shipping_cost))
 
     shipment = Shipment.objects.create(**shipment_data)  # type: ignore[misc]
 
