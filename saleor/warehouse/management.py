@@ -13,6 +13,7 @@ from ..channel import AllocationStrategy
 from ..checkout.models import CheckoutLine
 from ..core.exceptions import (
     AllocationError,
+    AllocationQuantityError,
     InsufficientStock,
     InsufficientStockData,
     PreorderAllocationError,
@@ -272,6 +273,13 @@ def allocate_stocks(
     if not order_lines_info:
         return
 
+    # Validate that we don't allocate more than what was ordered
+    for line_info in order_lines_info:
+        if line_info.quantity > line_info.line.quantity:
+            raise AllocationQuantityError(
+                line_info.line, line_info.quantity, line_info.line.quantity
+            )
+
     channel_slug = channel.slug
 
     variants = [line_info.variant for line_info in order_lines_info]
@@ -386,8 +394,9 @@ def allocate_stocks(
                     orders_to_check.add(allocation.order_line.order)
 
         # Auto-confirm orders that now have all allocations with sources
+        # Only auto-confirm if channel setting allows it
         for order in orders_to_check:
-            if can_confirm_order(order):
+            if channel.automatically_confirm_all_new_orders and can_confirm_order(order):
                 order.status = OrderStatus.UNFULFILLED
                 order.save(update_fields=["status", "updated_at"])
 

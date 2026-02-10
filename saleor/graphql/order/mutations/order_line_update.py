@@ -46,6 +46,18 @@ class OrderLineUpdate(
     def clean_input(cls, info: ResolveInfo, instance, data, **kwargs):
         instance.old_quantity = instance.quantity
         cleaned_input = super().clean_input(info, instance, data, **kwargs)
+
+        # Check price validation before general order validation to give more specific error
+        if "price" in data and not instance.order.is_draft():
+            raise ValidationError(
+                {
+                    "price": ValidationError(
+                        "Price can only be changed on draft orders.",
+                        code=OrderErrorCode.CANNOT_DISCOUNT.value,
+                    )
+                }
+            )
+
         cls.validate_order(instance.order)
 
         quantity = data["quantity"]
@@ -64,16 +76,6 @@ class OrderLineUpdate(
                     "id": ValidationError(
                         "Order line marked as gift can't be edited.",
                         code=OrderErrorCode.NON_EDITABLE_GIFT_LINE.value,
-                    )
-                }
-            )
-
-        if "price" in data and not instance.order.is_draft():
-            raise ValidationError(
-                {
-                    "price": ValidationError(
-                        "Price can only be changed on draft orders.",
-                        code=OrderErrorCode.CANNOT_DISCOUNT.value,
                     )
                 }
             )
@@ -119,11 +121,93 @@ class OrderLineUpdate(
                     code=OrderErrorCode.INSUFFICIENT_STOCK.value,
                 ) from e
 
-            if "price" in cleaned_input and cleaned_input["price"] is not None:
+            # Handle custom price updates
+            price_net = cleaned_input.get("price_net")
+            price_gross = cleaned_input.get("price_gross")
+            legacy_price = cleaned_input.get("price")
+
+            # Validate: priceGross cannot be set without priceNet
+            if price_gross is not None and price_net is None:
+                raise ValidationError(
+                    {
+                        "price_gross": ValidationError(
+                            "Cannot set priceGross without priceNet. "
+                            "Provide priceNet or both priceNet and priceGross.",
+                            code=OrderErrorCode.REQUIRED.value,
+                        )
+                    }
+                )
+
+            if price_net is not None or price_gross is not None:
                 from decimal import Decimal
 
-                custom_price = Decimal(str(cleaned_input["price"]))
+                from ....core.prices import quantize_price
+
                 currency = instance.currency
+
+                # Convert to Decimal and quantize
+                if price_net is not None:
+                    price_net = Decimal(str(price_net))
+                    price_net = quantize_price(price_net, currency)
+                if price_gross is not None:
+                    price_gross = Decimal(str(price_gross))
+                    price_gross = quantize_price(price_gross, currency)
+
+                # Case 1: Only priceNet provided
+                if price_gross is None:
+                    instance.unit_price_net_amount = price_net
+                    instance.base_unit_price = Money(price_net, currency)
+                    instance.undiscounted_base_unit_price = Money(price_net, currency)
+                    instance.undiscounted_unit_price_net_amount = price_net
+                    # Mark for refresh so tax system calculates gross
+                    invalidate_order_prices(order, save=False)
+                    instance.save(
+                        update_fields=[
+                            "unit_price_net_amount",
+                            "base_unit_price_amount",
+                            "undiscounted_base_unit_price_amount",
+                            "undiscounted_unit_price_net_amount",
+                        ]
+                    )
+
+                # Case 2: Both priceNet and priceGross provided
+                else:
+                    quantity = instance.quantity
+                    instance.unit_price_net_amount = price_net
+                    instance.unit_price_gross_amount = price_gross
+                    instance.total_price_net_amount = price_net * quantity
+                    instance.total_price_gross_amount = price_gross * quantity
+                    instance.base_unit_price = Money(price_net, currency)
+                    instance.undiscounted_base_unit_price = Money(price_net, currency)
+                    instance.undiscounted_unit_price_net_amount = price_net
+                    instance.undiscounted_unit_price_gross_amount = price_gross
+                    instance.undiscounted_total_price_net_amount = price_net * quantity
+                    instance.undiscounted_total_price_gross_amount = price_gross * quantity
+                    # Don't mark for refresh - manual override is final
+                    instance.save(
+                        update_fields=[
+                            "unit_price_net_amount",
+                            "unit_price_gross_amount",
+                            "total_price_net_amount",
+                            "total_price_gross_amount",
+                            "base_unit_price_amount",
+                            "undiscounted_base_unit_price_amount",
+                            "undiscounted_unit_price_net_amount",
+                            "undiscounted_unit_price_gross_amount",
+                            "undiscounted_total_price_net_amount",
+                            "undiscounted_total_price_gross_amount",
+                        ]
+                    )
+
+            elif legacy_price is not None:
+                # Legacy price field behavior (for backward compatibility)
+                from decimal import Decimal
+
+                from ....core.prices import quantize_price
+
+                custom_price = Decimal(str(legacy_price))
+                currency = instance.currency
+                custom_price = quantize_price(custom_price, currency)
                 instance.base_unit_price = Money(custom_price, currency)
                 instance.undiscounted_base_unit_price = Money(custom_price, currency)
                 instance.undiscounted_unit_price_net_amount = custom_price
@@ -140,8 +224,9 @@ class OrderLineUpdate(
                         "unit_price_gross_amount",
                     ]
                 )
-
-            invalidate_order_prices(order)
+            else:
+                # No custom prices provided, just mark for refresh
+                invalidate_order_prices(order, save=False)
             recalculate_order_weight(order)
             order.save(update_fields=["should_refresh_prices", "weight", "updated_at"])
 

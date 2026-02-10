@@ -174,6 +174,21 @@ def address(db):  # pylint: disable=W0613
         postal_code="53-601",
         country="PL",
         phone="+48713988102",
+        metadata={},
+    )
+
+
+@pytest.fixture
+def address_with_vat(db):
+    return Address.objects.create(
+        first_name="John",
+        last_name="Doe",
+        company_name="Mirumee Software",
+        street_address_1="Tęczowa 7",
+        city="WROCŁAW",
+        postal_code="53-601",
+        country="PL",
+        phone="+48713988102",
         metadata={"vat_number": "PL1234567890"},
     )
 
@@ -191,7 +206,7 @@ def address_with_areas(db):
         phone="+48713988102",
         country_area="test_country_area",
         city_area="test_city_area",
-        metadata={"vat_number": "PL1234567890"},
+        metadata={},
     )
 
 
@@ -205,7 +220,7 @@ def address_other_country():
         postal_code="13377",
         country="IS",
         phone="+40123123123",
-        metadata={"vat_number": "IS1234567890"},
+        metadata={},
     )
 
 
@@ -220,7 +235,7 @@ def address_usa():
         country_area="CA",
         country="US",
         phone="",
-        metadata={"vat_number": "US1234567890"},
+        metadata={},
     )
 
 
@@ -254,9 +269,9 @@ def graphql_address_data_with_vat(graphql_address_data):
 
 
 @pytest.fixture
-def graphql_address_data_skipped_validation(graphql_address_data):
-    graphql_address_data["skipValidation"] = True
-    return graphql_address_data
+def graphql_address_data_skipped_validation(graphql_address_data_with_vat):
+    graphql_address_data_with_vat["skipValidation"] = True
+    return graphql_address_data_with_vat
 
 
 @pytest.fixture

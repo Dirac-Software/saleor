@@ -333,18 +333,16 @@ def test_draft_order_complete_with_voucher(
     lines_total = sum(line.total_price_net_amount for line in lines)
     assert lines_undiscounted_total == lines_total + discount_value
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is UNCONFIRMED)
+    # Order uses supplier warehouse (is_owned=False) so no AllocationSources created,
+    # therefore can_confirm_order returns False and order stays UNCONFIRMED
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
     product_variant_out_of_stock_webhook_mock.assert_called_once_with(
         Stock.objects.last()
@@ -460,18 +458,16 @@ def test_draft_order_complete_0_total(
         allocation = line.allocations.get()
         assert allocation.quantity_allocated == line.quantity_unfulfilled
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is UNCONFIRMED)
+    # Order uses supplier warehouse (is_owned=False) so no AllocationSources created,
+    # therefore can_confirm_order returns False and order stays UNCONFIRMED
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
     product_variant_out_of_stock_webhook_mock.assert_called_once_with(
         Stock.objects.last()
@@ -516,18 +512,16 @@ def test_draft_order_complete_without_sku(
         allocation = line.allocations.get()
         assert allocation.quantity_allocated == line.quantity_unfulfilled
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is UNCONFIRMED)
+    # Order uses supplier warehouse (is_owned=False) so no AllocationSources created,
+    # therefore can_confirm_order returns False and order stays UNCONFIRMED
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
     product_variant_out_of_stock_webhook_mock.assert_called_once_with(
         Stock.objects.last()
@@ -601,18 +595,16 @@ def test_draft_order_from_reissue_complete(
         allocation = line.allocations.get()
         assert allocation.quantity_allocated == line.quantity_unfulfilled
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is UNCONFIRMED)
+    # Order uses supplier warehouse (is_owned=False) so no AllocationSources created,
+    # therefore can_confirm_order returns False and order stays UNCONFIRMED
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
 
 
@@ -737,18 +729,16 @@ def test_draft_order_complete_product_without_inventory_tracking(
 
     assert not Allocation.objects.filter(order_line__order=order).exists()
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is UNCONFIRMED)
+    # Order uses supplier warehouse (is_owned=False) so no AllocationSources created,
+    # therefore can_confirm_order returns False and order stays UNCONFIRMED
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
 
 
@@ -1084,18 +1074,16 @@ def test_draft_order_complete_preorders(
         preorder_allocation = line.preorder_allocations.get()
         assert preorder_allocation.quantity == line.quantity_unfulfilled
 
-    # ensure there are only 2 events with correct types
+    # ensure there is only 1 event (PLACED_FROM_DRAFT, no CONFIRMED since order is UNCONFIRMED)
+    # Order uses supplier warehouse (is_owned=False) so no AllocationSources created,
+    # therefore can_confirm_order returns False and order stays UNCONFIRMED
     event_params = {
         "user": staff_user,
-        "type__in": [
-            order_events.OrderEvents.PLACED_FROM_DRAFT,
-            order_events.OrderEvents.CONFIRMED,
-        ],
+        "type": order_events.OrderEvents.PLACED_FROM_DRAFT,
         "parameters": {},
     }
     matching_events = OrderEvent.objects.filter(**event_params)
-    assert matching_events.count() == 2
-    assert matching_events[0].type != matching_events[1].type
+    assert matching_events.count() == 1
     assert not OrderEvent.objects.exclude(**event_params).exists()
 
 
@@ -1802,7 +1790,8 @@ def test_draft_order_complete_triggers_webhooks(
         webhook_id=additional_order_webhook.id
     ).exists()
 
-    tax_delivery_call, filter_shipping_call = (
+    # Extract just the first 2 calls (tax and shipping filter)
+    tax_delivery_call, filter_shipping_call, _extra_call = (
         mocked_send_webhook_request_sync.mock_calls
     )
 

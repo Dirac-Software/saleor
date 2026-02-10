@@ -169,7 +169,7 @@ def test_draft_order_create_with_voucher_entire_order(
     variant,
     voucher,
     channel_USD,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     # given
     variant_0 = variant
@@ -196,7 +196,7 @@ def test_draft_order_create_with_voucher_entire_order(
     ]
 
     address_count = Address.objects.count()
-    shipping_address = graphql_address_data
+    shipping_address = graphql_address_data_with_vat
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
     voucher_id = graphene.Node.to_global_id("Voucher", voucher.id)
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
@@ -461,7 +461,7 @@ def test_draft_order_create_with_voucher_code(
     variant,
     voucher,
     channel_USD,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     # given
     variant_0 = variant
@@ -487,7 +487,7 @@ def test_draft_order_create_with_voucher_code(
         {"variantId": variant_0_id, "quantity": variant_0_qty},
         {"variantId": variant_1_id, "quantity": variant_1_qty},
     ]
-    shipping_address = graphql_address_data
+    shipping_address = graphql_address_data_with_vat
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
 

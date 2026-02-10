@@ -22,7 +22,6 @@ def shipment(nonowned_warehouse, owned_warehouse):
         currency="USD",
         carrier="TEST-CARRIER",
         inco_term=IncoTerm.DDP,
-        arrived_at=timezone.now(),
     )
 
 

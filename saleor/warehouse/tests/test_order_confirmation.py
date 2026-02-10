@@ -27,6 +27,9 @@ def test_can_confirm_order_with_fully_sourced_allocations(
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
         COUNTRY_CODE,
@@ -55,6 +58,9 @@ def test_cannot_confirm_order_with_nonowned_warehouse(
     )
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -287,6 +293,10 @@ def test_can_confirm_order_multiple_order_lines(
     )
     stock1.quantity = 100
     stock1.save(update_fields=["quantity"])
+
+    order_line1.quantity = 50
+    order_line1.save(update_fields=["quantity"])
+
     allocate_stocks(
         [OrderLineInfo(line=order_line1, variant=order_line1.variant, quantity=50)],
         COUNTRY_CODE,
@@ -355,6 +365,10 @@ def test_cannot_confirm_order_with_one_line_incomplete(
     )
     stock1.quantity = 100
     stock1.save(update_fields=["quantity"])
+
+    order_line1.quantity = 50
+    order_line1.save(update_fields=["quantity"])
+
     allocate_stocks(
         [OrderLineInfo(line=order_line1, variant=order_line1.variant, quantity=50)],
         COUNTRY_CODE,

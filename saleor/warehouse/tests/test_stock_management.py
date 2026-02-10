@@ -32,6 +32,9 @@ def test_allocate_stocks(order_line, stock, channel_USD):
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=50)
 
     allocate_stocks(
@@ -67,6 +70,12 @@ def test_allocate_stocks_multiple_lines_the_highest_stock_strategy(
 
     quantity_1 = 50
     quantity_2 = 5
+
+    order_line.quantity = quantity_1
+    order_line.save(update_fields=["quantity"])
+    order_line_2.quantity = quantity_2
+    order_line_2.save(update_fields=["quantity"])
+
     line_data_1 = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity_1
     )
@@ -96,6 +105,9 @@ def test_allocate_stock_many_stocks_the_highest_stock_strategy(
 ):
     variant = variant_with_many_stocks
     stocks = variant.stocks.all()
+
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=5)
     allocate_stocks(
@@ -128,6 +140,9 @@ def test_allocate_stocks_the_highest_stock_strategy_with_collection_point(
     cc_stock.save(update_fields=["quantity", "product_variant"])
 
     stocks = variant.stocks.all()
+
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=5)
     allocate_stocks(
@@ -164,6 +179,9 @@ def test_allocate_stock_many_stocks_prioritize_sorting_order_strategy(
     )
 
     quantity = 5
+
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
@@ -226,6 +244,9 @@ def test_allocate_stock_prioritize_sorting_order_strategy_with_collection_point(
     cc_stock.product_variant = variant
     cc_stock.save(update_fields=["quantity", "product_variant"])
 
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
     )
@@ -254,6 +275,9 @@ def test_allocate_stock_with_reservations_the_highest_stock_strategy(
 ):
     variant = variant_with_many_stocks
     stocks = variant.stocks.all()
+
+    order_line.quantity = 3
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=3)
     allocate_stocks(
@@ -299,6 +323,9 @@ def test_allocate_stock_with_reservations_prioritize_sorting_order_strategy(
     reservation.stock = stock_2
     reservation.save(update_fields=["stock", "quantity_reserved"])
 
+    order_line.quantity = 3
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=3)
 
     # when
@@ -329,6 +356,9 @@ def test_allocate_stock_insufficient_stock_due_to_reservations(
     variant = variant_with_many_stocks
     variant.stocks.all()
 
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=5)
 
     with pytest.raises(InsufficientStock):
@@ -357,6 +387,9 @@ def test_allocate_stock_many_stocks_partially_allocated(
         .order_by("-available_quantity")
         .values_list("id", flat=True)
     )
+
+    order_line.quantity = 3
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=3)
 
@@ -388,6 +421,9 @@ def test_allocate_stock_partially_allocated_insufficient_stocks(
     variant = allocated_line.variant
     stocks = variant.stocks.all()
 
+    order_line.quantity = 6
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=6)
     with pytest.raises(InsufficientStock):
         allocate_stocks(
@@ -408,6 +444,9 @@ def test_allocate_stocks_no_channel_shipping_zones(order_line, stock, channel_US
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=50)
     with pytest.raises(InsufficientStock):
         allocate_stocks(
@@ -423,6 +462,9 @@ def test_allocate_stock_insufficient_stocks(
 ):
     variant = variant_with_many_stocks
     stocks = variant.stocks.all()
+
+    order_line.quantity = 10
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=10)
     with pytest.raises(InsufficientStock):
@@ -456,6 +498,12 @@ def test_allocate_stock_insufficient_stocks_for_multiple_lines(
 
     quantity_1 = 100
     quantity_2 = 100
+
+    order_line.quantity = quantity_1
+    order_line.save(update_fields=["quantity"])
+    order_line_2.quantity = quantity_2
+    order_line_2.save(update_fields=["quantity"])
+
     line_data_1 = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity_1
     )
@@ -629,6 +677,10 @@ def test_increase_stock_with_new_allocation(order_line, stock):
 @pytest.mark.parametrize("quantity", [19, 20])
 def test_increase_allocations(quantity, allocation):
     order_line = allocation.order_line
+    # Set order_line quantity to accommodate initial allocation (80) + increase (19 or 20)
+    order_line.quantity = 100
+    order_line.save(update_fields=["quantity"])
+
     order_line_info = OrderLineInfo(
         line=order_line,
         quantity=quantity,
@@ -677,6 +729,10 @@ def test_increase_allocations_with_multiple_allocations_for_the_same_stock(
     ).delete()
 
     first_order_line = first_allocation.order_line
+    # Set quantities to accommodate initial allocation (80) + increase
+    first_order_line.quantity = 100
+    first_order_line.save(update_fields=["quantity"])
+
     first_order_line_info = OrderLineInfo(
         line=first_order_line,
         quantity=first_quantity,
@@ -685,6 +741,9 @@ def test_increase_allocations_with_multiple_allocations_for_the_same_stock(
     )
 
     second_order_line = second_allocation.order_line
+    second_order_line.quantity = 100
+    second_order_line.save(update_fields=["quantity"])
+
     second_order_line_info = OrderLineInfo(
         line=second_order_line,
         quantity=second_quantity,
@@ -733,6 +792,10 @@ def test_increase_allocations_with_multiple_allocations_for_the_same_stock(
 
 def test_increase_allocation_insufficient_stock(allocation):
     order_line = allocation.order_line
+    # Set order_line quantity to allow total allocation (80 + 21 = 101)
+    order_line.quantity = 101
+    order_line.save(update_fields=["quantity"])
+
     order_line_info = OrderLineInfo(
         line=order_line,
         quantity=21,
@@ -1229,6 +1292,9 @@ def test_allocate_preorders(
     channel_listing.preorder_quantity_threshold = 100
     channel_listing.save(update_fields=["preorder_quantity_threshold"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=variant, quantity=50)
 
     allocate_preorders([line_data], channel_USD.slug)
@@ -1326,6 +1392,9 @@ def test_allocate_preorders_with_channel_reservations(
     channel_listing.preorder_quantity_threshold = 5
     channel_listing.save(update_fields=["preorder_quantity_threshold"])
 
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=variant, quantity=5)
 
     with pytest.raises(InsufficientStock):
@@ -1351,6 +1420,9 @@ def test_allocate_preorders_with_global_reservations(
     variant = checkout_line_with_reserved_preorder_item.variant
     variant.preorder_global_threshold = 5
     variant.save()
+
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=variant, quantity=5)
 
@@ -1435,6 +1507,9 @@ def test_allocate_prioritizes_owned_over_non_owned_high_stock_strategy(
     )
 
     quantity = 3
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
     )
@@ -1525,6 +1600,9 @@ def test_allocate_falls_back_to_non_owned_when_owned_insufficient(
     # Add both warehouses to channel
 
     quantity = 10
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
     )
@@ -1636,6 +1714,9 @@ def test_allocate_sorting_order_prioritizes_owned_first(
     owned_cw.save()
 
     quantity = 3
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
     )

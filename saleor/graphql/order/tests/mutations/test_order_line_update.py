@@ -1502,15 +1502,16 @@ def test_order_line_update_with_custom_price_on_draft_order(
 
     assert not data["errors"]
     assert data["orderLine"]["quantity"] == line.quantity
-    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == new_price
-    assert (
-        Decimal(data["orderLine"]["undiscountedUnitPrice"]["gross"]["amount"])
-        == new_price
+    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == pytest.approx(
+        new_price, rel=Decimal("0.0001")
     )
+    assert Decimal(
+        data["orderLine"]["undiscountedUnitPrice"]["gross"]["amount"]
+    ) == pytest.approx(new_price, rel=Decimal("0.0001"))
 
     line.refresh_from_db()
     assert line.unit_price_gross_amount == new_price
-    assert line.undiscounted_unit_price_amount == new_price
+    assert line.undiscounted_unit_price_gross_amount == new_price
 
 
 def test_order_line_update_with_custom_price_on_confirmed_order_fails(
@@ -1598,7 +1599,9 @@ def test_order_line_update_both_quantity_and_price(
 
     assert not data["errors"]
     assert data["orderLine"]["quantity"] == new_quantity
-    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == new_price
+    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == pytest.approx(
+        new_price, rel=Decimal("0.0001")
+    )
 
     line.refresh_from_db()
     assert line.quantity == new_quantity

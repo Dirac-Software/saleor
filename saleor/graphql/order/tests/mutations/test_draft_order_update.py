@@ -232,7 +232,7 @@ def test_draft_order_update_with_voucher_entire_order(
     permission_group_manage_orders,
     draft_order,
     voucher,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     # given
     order = draft_order
@@ -255,8 +255,8 @@ def test_draft_order_update_with_voucher_entire_order(
             "voucher": voucher_id,
             "customerNote": customer_note,
             "externalReference": external_reference,
-            "shippingAddress": graphql_address_data,
-            "billingAddress": graphql_address_data,
+            "shippingAddress": graphql_address_data_with_vat,
+            "billingAddress": graphql_address_data_with_vat,
         },
     }
 
@@ -271,10 +271,10 @@ def test_draft_order_update_with_voucher_entire_order(
     stored_metadata = {"public": "public_value", "vat_number": "PL1234567890"}
 
     assert (
-        data["order"]["billingAddress"]["metadata"] == graphql_address_data["metadata"]
+        data["order"]["billingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
     )
     assert (
-        data["order"]["shippingAddress"]["metadata"] == graphql_address_data["metadata"]
+        data["order"]["shippingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
     )
     assert data["order"]["undiscountedTotal"]["net"]["amount"] == order_total
     assert (

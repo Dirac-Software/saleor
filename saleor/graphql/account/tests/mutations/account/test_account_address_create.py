@@ -42,14 +42,14 @@ mutation($addressInput: AddressInput!, $addressType: AddressTypeEnum, $customerI
 """
 
 
-def test_customer_create_address(user_api_client, graphql_address_data):
+def test_customer_create_address(user_api_client, graphql_address_data_with_vat):
     user = user_api_client.user
     user_addresses_count = user.addresses.count()
     user_addresses_ids = list(user.addresses.values_list("id", flat=True))
 
     query = ACCOUNT_ADDRESS_CREATE_MUTATION
     mutation_name = "accountAddressCreate"
-    variables = {"addressInput": graphql_address_data}
+    variables = {"addressInput": graphql_address_data_with_vat}
     response = user_api_client.post_graphql(query, variables)
     content = get_graphql_content(response)
     data = content["data"][mutation_name]
@@ -58,7 +58,7 @@ def test_customer_create_address(user_api_client, graphql_address_data):
         {"key": "public", "value": "public_value"},
         {"key": "vat_number", "value": "PL1234567890"},
     ]
-    assert data["address"]["city"] == graphql_address_data["city"].upper()
+    assert data["address"]["city"] == graphql_address_data_with_vat["city"].upper()
 
     user.refresh_from_db()
 
@@ -80,14 +80,14 @@ def test_customer_create_address_trigger_webhook(
     mocked_get_webhooks_for_event,
     any_webhook,
     user_api_client,
-    graphql_address_data,
+    graphql_address_data_with_vat,
     settings,
 ):
     # given
     mocked_get_webhooks_for_event.return_value = [any_webhook]
     settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
 
-    variables = {"addressInput": graphql_address_data}
+    variables = {"addressInput": graphql_address_data_with_vat}
 
     # when
     response = user_api_client.post_graphql(ACCOUNT_ADDRESS_CREATE_MUTATION, variables)
@@ -107,9 +107,9 @@ def test_customer_create_address_trigger_webhook(
     )
 
 
-def test_account_address_create_return_user(user_api_client, graphql_address_data):
+def test_account_address_create_return_user(user_api_client, graphql_address_data_with_vat):
     user = user_api_client.user
-    variables = {"addressInput": graphql_address_data}
+    variables = {"addressInput": graphql_address_data_with_vat}
     response = user_api_client.post_graphql(ACCOUNT_ADDRESS_CREATE_MUTATION, variables)
     content = get_graphql_content(response)
     data = content["data"]["accountAddressCreate"]["user"]
@@ -152,7 +152,7 @@ def test_customer_create_default_address(user_api_client, graphql_address_data):
 
 @override_settings(MAX_USER_ADDRESSES=2)
 def test_customer_create_address_the_oldest_address_is_deleted(
-    user_api_client, graphql_address_data, address
+    user_api_client, graphql_address_data_with_vat, address
 ):
     user = user_api_client.user
     same_address = Address.objects.create(**address.as_data())
@@ -163,12 +163,12 @@ def test_customer_create_address_the_oldest_address_is_deleted(
     query = ACCOUNT_ADDRESS_CREATE_MUTATION
     mutation_name = "accountAddressCreate"
 
-    variables = {"addressInput": graphql_address_data}
+    variables = {"addressInput": graphql_address_data_with_vat}
     response = user_api_client.post_graphql(query, variables)
     content = get_graphql_content(response)
     data = content["data"][mutation_name]
 
-    assert data["address"]["city"] == graphql_address_data["city"].upper()
+    assert data["address"]["city"] == graphql_address_data_with_vat["city"].upper()
 
     user.refresh_from_db()
     assert user.addresses.count() == user_addresses_count
@@ -177,9 +177,9 @@ def test_customer_create_address_the_oldest_address_is_deleted(
         address.refresh_from_db()
 
 
-def test_anonymous_user_create_address(api_client, graphql_address_data):
+def test_anonymous_user_create_address(api_client, graphql_address_data_with_vat):
     query = ACCOUNT_ADDRESS_CREATE_MUTATION
-    variables = {"addressInput": graphql_address_data}
+    variables = {"addressInput": graphql_address_data_with_vat}
     response = api_client.post_graphql(query, variables)
     assert_no_permission(response)
 
@@ -312,10 +312,10 @@ def test_account_address_create_by_app_invalid_customer_id(
 
 
 def test_account_address_create_by_app_no_customer_id(
-    app_api_client, graphql_address_data, permission_impersonate_user
+    app_api_client, graphql_address_data_with_vat, permission_impersonate_user
 ):
     # given
-    variables = {"addressInput": graphql_address_data}
+    variables = {"addressInput": graphql_address_data_with_vat}
 
     # when
     response = app_api_client.post_graphql(

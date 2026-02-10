@@ -326,7 +326,7 @@ def test_get_default_fulfillment_payload(fulfillment, digital_content, site_sett
         "order": order_payload,
         "fulfillment": {
             "tracking_url": fulfillment.tracking_url,
-            "is_tracking_url_url": fulfillment.is_tracking_url_url,
+            "is_tracking_number_url": fulfillment.is_tracking_number_url,
         },
         "physical_lines": [
             get_default_fulfillment_line_payload(physical_line, attribute_data)

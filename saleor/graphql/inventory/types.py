@@ -11,6 +11,7 @@ from ..core.types import BaseInputObjectType, Error, ModelObjectType, Money, Non
 from ..meta.inputs import MetadataInput
 from ..product.dataloaders import ProductVariantByIdLoader
 from ..warehouse.dataloaders import WarehouseByIdLoader
+from .dataloaders import PurchaseOrderByIdLoader
 from .enums import (
     PurchaseOrderItemAdjustmentReasonEnum,
     PurchaseOrderItemAdjustmentStatusEnum,
@@ -86,6 +87,10 @@ class PurchaseOrderItem(ModelObjectType[models.PurchaseOrderItem]):
         description = "Represents a line item in a purchase order."
         model = models.PurchaseOrderItem
         interfaces = [graphene.relay.Node]
+
+    @staticmethod
+    def resolve_purchase_order(root, info: ResolveInfo):
+        return PurchaseOrderByIdLoader(info.context).load(root.order_id)
 
     @staticmethod
     def resolve_product_variant(root, info: ResolveInfo):

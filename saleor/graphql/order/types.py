@@ -1701,6 +1701,10 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         description="Returns True if order has to be exempt from taxes.",
         required=True,
     )
+    should_refresh_prices = graphene.Boolean(
+        description="Returns True if order prices need to be recalculated.",
+        required=True,
+    )
     transactions = NonNullList(
         TransactionItem,
         description=(

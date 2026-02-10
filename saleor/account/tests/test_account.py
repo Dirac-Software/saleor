@@ -245,7 +245,7 @@ def test_address_as_data(address):
         "country": "PL",
         "country_area": "",
         "phone": "+48713988102",
-        "metadata": {"vat_number": "PL1234567890"},
+        "metadata": {},
         "private_metadata": {},
         "validation_skipped": False,
     }

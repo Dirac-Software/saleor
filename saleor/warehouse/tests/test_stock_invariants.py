@@ -748,6 +748,10 @@ def test_invariant_after_allocation_and_deallocation(
     # Invariant before allocation
     assert_stock_poi_invariant(owned_warehouse, variant)
 
+    # Update order_line quantity to match allocation
+    order_line.quantity = 60
+    order_line.save(update_fields=["quantity"])
+
     # when - allocate
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=60)],
@@ -823,6 +827,10 @@ def test_invariant_when_confirming_poi_moves_allocations_from_supplier(
     order = order_line.order
     order.status = OrderStatus.UNCONFIRMED
     order.save(update_fields=["status"])
+
+    # Update order_line quantity to match what we're allocating
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     # given - stock at supplier
     Stock.objects.create(
@@ -938,19 +946,20 @@ def test_invariant_when_multiple_customer_orders_then_confirm_poi(
     # Ensure order lines use the same variant
     order.lines.all().delete()  # Clear any existing lines
 
-    # Create 3 customer orders
+    # Create 3 customer orders with quantities 30, 40, 20
     order_lines = []
-    for i in range(3):
+    quantities = [30, 40, 20]
+    for i, qty in enumerate(quantities):
         line = order.lines.create(
             product_name=f"Product {i}",
             variant_name=variant.name,
             product_sku=variant.sku,
             variant=variant,
-            quantity=1,
+            quantity=qty,
             unit_price_gross_amount=10,
             unit_price_net_amount=10,
-            total_price_gross_amount=10,
-            total_price_net_amount=10,
+            total_price_gross_amount=10 * qty,
+            total_price_net_amount=10 * qty,
             currency="USD",
             is_shipping_required=False,
             is_gift_card=False,
@@ -1075,11 +1084,11 @@ def test_invariant_when_poi_quantity_less_than_allocations(
         variant_name=variant.name,
         product_sku=variant.sku,
         variant=variant,
-        quantity=1,
+        quantity=100,
         unit_price_gross_amount=10,
         unit_price_net_amount=10,
-        total_price_gross_amount=10,
-        total_price_net_amount=10,
+        total_price_gross_amount=1000,
+        total_price_net_amount=1000,
         currency="USD",
         is_shipping_required=False,
         is_gift_card=False,
@@ -1186,6 +1195,10 @@ def test_invariant_when_order_auto_confirms_after_poi_confirmation(
     order = order_line.order
     order.status = OrderStatus.UNCONFIRMED
     order.save(update_fields=["status"])
+
+    # Update order_line quantity to match allocation
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     # Allocate from supplier
     allocate_stocks(
@@ -1338,11 +1351,11 @@ def test_invariant_with_mixed_allocations_owned_and_nonowned(
         variant_name=variant.name,
         product_sku=variant.sku,
         variant=variant,
-        quantity=1,
+        quantity=80,
         unit_price_gross_amount=10,
         unit_price_net_amount=10,
-        total_price_gross_amount=10,
-        total_price_net_amount=10,
+        total_price_gross_amount=800,
+        total_price_net_amount=800,
         currency="USD",
         is_shipping_required=False,
         is_gift_card=False,
@@ -1468,11 +1481,11 @@ def test_invariant_stress_test_realistic_daily_operations(
             variant_name=variant.name,
             product_sku=variant.sku,
             variant=variant,
-            quantity=1,
+            quantity=qty,
             unit_price_gross_amount=10,
             unit_price_net_amount=10,
-            total_price_gross_amount=10,
-            total_price_net_amount=10,
+            total_price_gross_amount=10 * qty,
+            total_price_net_amount=10 * qty,
             currency="USD",
             is_shipping_required=False,
             is_gift_card=False,
@@ -1527,11 +1540,11 @@ def test_invariant_stress_test_realistic_daily_operations(
             variant_name=variant.name,
             product_sku=variant.sku,
             variant=variant,
-            quantity=1,
+            quantity=qty,
             unit_price_gross_amount=10,
             unit_price_net_amount=10,
-            total_price_gross_amount=10,
-            total_price_net_amount=10,
+            total_price_gross_amount=10 * qty,
+            total_price_net_amount=10 * qty,
             currency="USD",
             is_shipping_required=False,
             is_gift_card=False,
@@ -1642,6 +1655,10 @@ def test_allocation_creates_allocation_sources(
     # After confirmation: nonowned has 100, owned has 100
     # Allocation strategy now prefers owned warehouse
 
+    # Update order_line quantity to match allocation
+    order_line.quantity = 60
+    order_line.save(update_fields=["quantity"])
+
     # when - allocate 60 units
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=60)],
@@ -1714,6 +1731,10 @@ def test_stock_quantity_constant_during_allocation(
 
     stock = Stock.objects.get(warehouse=owned_warehouse, product_variant=variant)
     initial_quantity = stock.quantity
+
+    # Update order_line quantity to match allocation
+    order_line.quantity = 60
+    order_line.save(update_fields=["quantity"])
 
     # when - allocate
     allocate_stocks(
@@ -1805,6 +1826,10 @@ def test_allocation_spans_poi_batches_fifo(
     # After confirmation: nonowned has 170, owned has 130
     # Allocation strategy now prefers owned warehouse
 
+    # Update order_line quantity to match allocation
+    order_line.quantity = 100
+    order_line.save(update_fields=["quantity"])
+
     # when - allocate 100 (spans both POIs)
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=100)],
@@ -1871,6 +1896,10 @@ def test_partial_deallocation(
     # After confirmation: nonowned has 100, owned has 100
     # Allocation strategy now prefers owned warehouse
 
+    # Update order_line quantity to match allocation
+    order_line.quantity = 100
+    order_line.save(update_fields=["quantity"])
+
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=100)],
         "US",
@@ -1903,6 +1932,144 @@ def test_partial_deallocation(
 
     # and - invariants still hold
     assert_stock_poi_invariant(owned_warehouse, variant)
+
+
+def test_partial_allocation_is_allowed(
+    owned_warehouse,
+    variant,
+    purchase_order,
+    nonowned_warehouse,
+    order_line,
+    channel_USD,
+):
+    """Partial allocation (less than order line quantity) is allowed.
+
+    Purpose: Validate that you can allocate part of an order line's quantity.
+    This supports use cases like backorders, pre-orders, and incremental allocation.
+    """
+    from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order.fetch import OrderLineInfo
+    from ...plugins.manager import get_plugins_manager
+    from ...shipping.models import Shipment
+    from ..management import allocate_stocks
+    from ..models import Allocation
+
+    # given
+    Stock.objects.create(
+        warehouse=nonowned_warehouse, product_variant=variant, quantity=200
+    )
+    shipment = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+        arrived_at=timezone.now(),
+    )
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=100,
+        quantity_allocated=0,
+        total_price_amount=1000.0,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+    confirm_purchase_order_item(poi)
+
+    # Customer ordered 100 units, but we only allocate 30 (partial)
+    order_line.quantity = 100
+    order_line.save(update_fields=["quantity"])
+
+    # when - allocate only 30 out of 100
+    allocate_stocks(
+        [OrderLineInfo(line=order_line, variant=variant, quantity=30)],
+        "US",
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then - allocation succeeds with partial quantity
+    allocation = Allocation.objects.get(order_line=order_line)
+    assert allocation.quantity_allocated == 30  # Only 30 allocated
+    assert order_line.quantity == 100  # Order line still has 100 total
+
+    # and - invariants hold
+    assert_stock_poi_invariant(owned_warehouse, variant)
+
+
+def test_allocation_raises_error_on_over_allocation(
+    owned_warehouse,
+    variant,
+    purchase_order,
+    nonowned_warehouse,
+    order_line,
+    channel_USD,
+):
+    """Allocating more than ordered raises AllocationQuantityError.
+
+    Purpose: Validate that OrderLineInfo.quantity cannot exceed OrderLine.quantity.
+    Partial allocation (less than ordered) is allowed.
+    """
+    from ...core.exceptions import AllocationQuantityError
+    from ...inventory.stock_management import confirm_purchase_order_item
+    from ...order.fetch import OrderLineInfo
+    from ...plugins.manager import get_plugins_manager
+    from ...shipping.models import Shipment
+    from ..management import allocate_stocks
+
+    # given
+    Stock.objects.create(
+        warehouse=nonowned_warehouse, product_variant=variant, quantity=200
+    )
+    shipment = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+        arrived_at=timezone.now(),
+    )
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=100,
+        quantity_allocated=0,
+        total_price_amount=1000.0,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+    confirm_purchase_order_item(poi)
+
+    # Set order line to 50 units, but try to allocate 60 (over-allocation)
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
+    # when/then - attempting to over-allocate raises error
+    with pytest.raises(AllocationQuantityError) as exc_info:
+        allocate_stocks(
+            [OrderLineInfo(line=order_line, variant=variant, quantity=60)],
+            "US",
+            channel_USD,
+            manager=get_plugins_manager(allow_replica=False),
+        )
+
+    # Verify error details
+    error = exc_info.value
+    assert error.order_line == order_line
+    assert error.requested_quantity == 60
+    assert error.line_quantity == 50
+    assert "Cannot allocate 60 units when order line only has 50 units" in str(error)
 
 
 # ==============================================================================

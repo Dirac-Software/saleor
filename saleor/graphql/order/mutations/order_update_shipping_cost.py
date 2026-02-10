@@ -121,7 +121,9 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         order.base_shipping_price_amount = net_amount
         order.undiscounted_base_shipping_price_amount = net_amount
         order.shipping_tax_rate = vat_percentage / Decimal(100)
-        order.shipping_method_name = "Manual Shipping Cost"
+
+        if not order.shipping_method:
+            order.shipping_method_name = "Manual Shipping Cost"
 
         if inco_term:
             order.inco_term = inco_term
@@ -134,10 +136,11 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             "base_shipping_price_amount",
             "undiscounted_base_shipping_price_amount",
             "shipping_tax_rate",
-            "shipping_method_name",
             "should_refresh_prices",
             "updated_at",
         ]
+        if not order.shipping_method:
+            update_fields.append("shipping_method_name")
         if inco_term:
             update_fields.append("inco_term")
 

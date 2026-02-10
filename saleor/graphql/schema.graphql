@@ -11461,6 +11461,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Returns True if order has to be exempt from taxes."""
   taxExemption: Boolean!
 
+  """Returns True if order prices need to be recalculated."""
+  shouldRefreshPrices: Boolean!
+
   """
   List of transactions for the order. Requires one of the following permissions: MANAGE_ORDERS, HANDLE_PAYMENTS.
   """
@@ -25847,6 +25850,12 @@ input OrderLineCreateInput @doc(category: "Orders") {
   """
   price: PositiveDecimal
 
+  """Custom net price of the item. Only works for draft orders."""
+  priceNet: PositiveDecimal
+
+  """Custom gross price of the item. Only works for draft orders."""
+  priceGross: PositiveDecimal
+
   """Product variant ID."""
   variantId: ID!
 
@@ -26530,6 +26539,12 @@ input OrderLineInput @doc(category: "Orders") {
 
   """Custom price of the item. Only works for draft orders."""
   price: PositiveDecimal
+
+  """Custom net price of the item. Only works for draft orders."""
+  priceNet: PositiveDecimal
+
+  """Custom gross price of the item. Only works for draft orders."""
+  priceGross: PositiveDecimal
 }
 
 """

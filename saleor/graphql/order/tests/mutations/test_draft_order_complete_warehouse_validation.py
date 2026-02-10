@@ -6,6 +6,7 @@ are in owned warehouses with proper AllocationSources tracking.
 
 import graphene
 import pytest
+from django.utils import timezone
 
 from .....order import OrderStatus
 from .....warehouse.models import Allocation, AllocationSource, Stock
@@ -137,44 +138,26 @@ def test_draft_order_complete_auto_confirms_with_owned_warehouse(
     order_line = order.lines.first()
     variant = order_line.variant
 
-    # Update POI to match the variant in the order
+    from saleor.inventory import PurchaseOrderItemStatus
+
+    # Update POI to match the variant in the order and set to CONFIRMED status
     purchase_order_item.product_variant = variant
     purchase_order_item.order.destination_warehouse = owned_warehouse
     purchase_order_item.order.save(update_fields=["destination_warehouse"])
     purchase_order_item.quantity_ordered = order_line.quantity * 2  # Buffer
-    purchase_order_item.save(update_fields=["product_variant", "quantity_ordered"])
+    purchase_order_item.status = PurchaseOrderItemStatus.CONFIRMED
+    purchase_order_item.confirmed_at = timezone.now()
+    purchase_order_item.save(update_fields=["product_variant", "quantity_ordered", "status", "confirmed_at"])
 
     # Create stock in OWNED warehouse
-    stock, _ = Stock.objects.get_or_create(
+    Stock.objects.get_or_create(
         warehouse=owned_warehouse,
         product_variant=variant,
         defaults={"quantity": 1000, "quantity_allocated": 0},
     )
 
-    # Manually create allocation in owned warehouse
-    allocation = Allocation.objects.create(
-        order_line=order_line,
-        stock=stock,
-        quantity_allocated=order_line.quantity,
-    )
-
-    # Create AllocationSource linking to POI
-    AllocationSource.objects.create(
-        allocation=allocation,
-        purchase_order_item=purchase_order_item,
-        quantity=order_line.quantity,
-    )
-
-    # Update stock to reflect allocation
-    stock.quantity_allocated = order_line.quantity
-    stock.save(update_fields=["quantity_allocated"])
-
-    # Verify allocation exists in owned warehouse with sources
-    assert allocation.stock.warehouse.is_owned is True
-    allocation_sources = AllocationSource.objects.filter(allocation=allocation)
-    assert allocation_sources.exists()
-    total_sourced = sum(src.quantity for src in allocation_sources)
-    assert total_sourced == allocation.quantity_allocated
+    # Don't manually create allocations - let draft_order_complete do it
+    # This will trigger allocate_stocks which will create allocations and sources
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     order_id = graphene.Node.to_global_id("Order", order.id)

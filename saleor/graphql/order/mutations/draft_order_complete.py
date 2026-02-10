@@ -142,43 +142,8 @@ class DraftOrderComplete(BaseMutation):
             update_fields.extend(update_user_fields)
             channel = order.channel
 
-            # Determine if order should be auto-confirmed
-            # Only auto-confirm if BOTH conditions are met:
-            # 1. Channel setting allows auto-confirmation
-            # 2. Order can be confirmed (all allocations in owned warehouses with sources)
-            should_auto_confirm = (
-                channel.automatically_confirm_all_new_orders
-                and can_confirm_order(order)
-            )
-
-            # Validate shipping cost is set if auto-confirming
-            # Default inco_term is DDP (seller pays) which requires shipping cost > $0
-            # Only EXW (buyer pays) allows $0 shipping cost
-            if should_auto_confirm and order.is_shipping_required():
-                from ....shipping import IncoTerm
-
-                if order.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
-                    # EXW: buyer pays shipping, $0 is valid
-                    pass
-                else:
-                    # DDP/DAP/FOB/etc: seller pays shipping, must have cost
-                    if (
-                        not order.shipping_price_net_amount
-                        or order.shipping_price_net_amount <= 0
-                    ):
-                        raise ValidationError(
-                            f"Cannot auto-confirm order with inco_term '{order.inco_term}' without shipping cost. "
-                            f"Seller is responsible for shipping under {order.inco_term} terms. "
-                            "Either set the shipping cost first, disable auto-confirmation, "
-                            "or change inco_term to 'EXW' if buyer pays shipping.",
-                            code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
-                        )
-
-            order.status = (
-                OrderStatus.UNFULFILLED
-                if should_auto_confirm
-                else OrderStatus.UNCONFIRMED
-            )
+            # Start with UNCONFIRMED status - will check if can confirm after allocations
+            order.status = OrderStatus.UNCONFIRMED
 
             if not order.is_shipping_required():
                 order.shipping_method_name = None
@@ -249,6 +214,9 @@ class DraftOrderComplete(BaseMutation):
                 # clear draft base price expiration time
                 line.draft_base_price_expire_at = None
                 OrderLine.objects.bulk_update(lines, ["draft_base_price_expire_at"])
+
+            # Refresh order status - allocate_stocks may have auto-confirmed it
+            order.refresh_from_db()
 
             order_info = OrderInfo(
                 order=order,

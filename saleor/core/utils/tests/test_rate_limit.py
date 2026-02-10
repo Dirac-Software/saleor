@@ -42,9 +42,9 @@ def isolated_cache():
     return mock
 
 
-def test_rate_limiter_allows_requests_under_limit():
+def test_rate_limiter_allows_requests_under_limit(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=3, window_seconds=60)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=3, window_seconds=60)
 
     # when/then - First 3 requests should be allowed
     for _ in range(3):
@@ -53,9 +53,9 @@ def test_rate_limiter_allows_requests_under_limit():
         assert retry_after is None
 
 
-def test_rate_limiter_blocks_requests_over_limit():
+def test_rate_limiter_blocks_requests_over_limit(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=3, window_seconds=60)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=3, window_seconds=60)
 
     # when - Make 4 requests (limit is 3)
     for _ in range(3):
@@ -68,9 +68,9 @@ def test_rate_limiter_blocks_requests_over_limit():
     assert retry_after > 0
 
 
-def test_rate_limiter_different_identifiers_independent():
+def test_rate_limiter_different_identifiers_independent(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=2, window_seconds=60)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=2, window_seconds=60)
 
     # when - User1 makes 2 requests, user2 makes 1 request
     limiter.is_allowed("user1")
@@ -81,9 +81,9 @@ def test_rate_limiter_different_identifiers_independent():
     assert is_allowed is True
 
 
-def test_rate_limiter_sliding_window():
+def test_rate_limiter_sliding_window(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=2, window_seconds=1)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=2, window_seconds=1)
 
     # when - Make 2 requests
     limiter.is_allowed("user1")
@@ -114,9 +114,9 @@ def test_rate_limiter_cache_key_format():
     assert cache_key == "ratelimit:contact_form:192.168.1.1"
 
 
-def test_rate_limiter_handles_cache_failure_gracefully():
+def test_rate_limiter_handles_cache_failure_gracefully(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=3, window_seconds=60)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=3, window_seconds=60)
 
     # when - Cache fails
     with patch(
@@ -129,9 +129,9 @@ def test_rate_limiter_handles_cache_failure_gracefully():
     assert retry_after is None
 
 
-def test_rate_limiter_check_or_raise_allows_when_under_limit():
+def test_rate_limiter_check_or_raise_allows_when_under_limit(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=3, window_seconds=60)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=3, window_seconds=60)
 
     # when/then - Should not raise
     limiter.check_or_raise("user1")
@@ -267,9 +267,9 @@ def test_retry_after_calculation(isolated_cache):
         assert 55 <= retry_after <= 60  # Should be close to window size
 
 
-def test_rate_limiter_expired_timestamps_removed():
+def test_rate_limiter_expired_timestamps_removed(unique_prefix):
     # given
-    limiter = RateLimiter(key_prefix="test", max_requests=2, window_seconds=1)
+    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=2, window_seconds=1)
 
     # when - Make requests, wait for expiry, make more requests
     limiter.is_allowed("user1")

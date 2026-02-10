@@ -44,6 +44,9 @@ def test_allocate_sources_creates_allocation_source_for_owned_warehouse(
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     # when
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -77,6 +80,9 @@ def test_allocate_sources_not_created_for_nonowned_warehouse(
         warehouse=nonowned_warehouse, product_variant=variant, quantity=100
     )
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     # when
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -106,6 +112,9 @@ def test_deallocate_sources_restores_poi_quantity_allocated(
     )
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -148,6 +157,9 @@ def test_partial_deallocate_updates_poi_correctly(
     )
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -224,6 +236,13 @@ def test_allocation_uses_fifo_across_multiple_pois(
         is_gift_card=False,
     )
 
+    order_line.quantity = 100
+    order_line.save(update_fields=["quantity"])
+    order_line_2.quantity = 100
+    order_line_2.save(update_fields=["quantity"])
+    order_line_3.quantity = 50
+    order_line_3.save(update_fields=["quantity"])
+
     # when - allocate 250 units (100 + 100 + 50)
     allocate_stocks(
         [
@@ -263,6 +282,9 @@ def test_insufficient_poi_quantity_raises_error(
     )
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 30
+    order_line.save(update_fields=["quantity"])
 
     # when/then - trying to allocate 30 more (total 110 > 100 capacity) fails
     with pytest.raises(InsufficientStock):
@@ -308,6 +330,13 @@ def test_poi_quantity_allocated_invariant(
     )
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    lines[0].quantity = 10
+    lines[0].save(update_fields=["quantity"])
+    lines[1].quantity = 20
+    lines[1].save(update_fields=["quantity"])
+    lines[2].quantity = 15
+    lines[2].save(update_fields=["quantity"])
 
     # when - allocate different amounts to each line (10 + 20 + 15 = 45)
     allocate_stocks(
@@ -378,6 +407,9 @@ def test_increase_existing_allocation_creates_incremental_sources(
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 35
+    order_line.save(update_fields=["quantity"])
+
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=20)],
         COUNTRY_CODE,
@@ -427,6 +459,9 @@ def test_order_auto_confirms_when_all_allocations_sourced(
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     # when - allocate (which creates AllocationSources)
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
@@ -457,6 +492,9 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
     )
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     # Create DRAFT POI (should be ignored)
     from ...shipping import IncoTerm

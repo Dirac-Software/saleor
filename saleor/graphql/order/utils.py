@@ -94,6 +94,12 @@ def validate_shipping_method(
     allow_sync_webhooks: bool = True,
 ):
     if not order.shipping_method:
+        errors["shipping"].append(
+            ValidationError(
+                "Shipping method is required.",
+                code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
+            )
+        )
         return
 
     if (
@@ -144,7 +150,12 @@ def validate_billing_address(order: "Order", errors: T_ERRORS):
 
 def validate_shipping_address(order: "Order", errors: T_ERRORS):
     if not order.shipping_address:
-        return
+        errors["order"].append(
+            ValidationError(
+                "Can't finalize draft with no shipping address.",
+                code=OrderErrorCode.ORDER_NO_SHIPPING_ADDRESS.value,
+            )
+        )
 
 
 def validate_order_lines(

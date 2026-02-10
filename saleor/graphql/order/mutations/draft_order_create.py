@@ -59,6 +59,14 @@ class OrderLineInput(BaseInputObjectType):
         required=False,
         description="Custom price of the item. Only works for draft orders.",
     )
+    price_net = PositiveDecimal(
+        required=False,
+        description="Custom net price of the item. Only works for draft orders.",
+    )
+    price_gross = PositiveDecimal(
+        required=False,
+        description="Custom gross price of the item. Only works for draft orders.",
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
