@@ -282,7 +282,7 @@ def generate_order_payload(
     serializer = PayloadSerializer()
     fulfillment_fields = (
         "status",
-        "tracking_number",
+        "tracking_url",
         "shipping_refund_amount",
         "total_refund_amount",
     )

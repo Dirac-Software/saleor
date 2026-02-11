@@ -53,19 +53,20 @@ def test_rate_limiter_allows_requests_under_limit(unique_prefix):
         assert retry_after is None
 
 
-def test_rate_limiter_blocks_requests_over_limit(unique_prefix):
+def test_rate_limiter_blocks_requests_over_limit(isolated_cache):
     # given
-    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=3, window_seconds=60)
+    limiter = RateLimiter(key_prefix="test_blocks", max_requests=3, window_seconds=60)
 
     # when - Make 4 requests (limit is 3)
-    for _ in range(3):
-        limiter.is_allowed("user1")
+    with patch("saleor.core.utils.rate_limit.cache", isolated_cache):
+        for _ in range(3):
+            limiter.is_allowed("user1")
 
-    # then - 4th request should be blocked
-    is_allowed, retry_after = limiter.is_allowed("user1")
-    assert is_allowed is False
-    assert retry_after is not None
-    assert retry_after > 0
+        # then - 4th request should be blocked
+        is_allowed, retry_after = limiter.is_allowed("user1")
+        assert is_allowed is False
+        assert retry_after is not None
+        assert retry_after > 0
 
 
 def test_rate_limiter_different_identifiers_independent(unique_prefix):
@@ -81,24 +82,25 @@ def test_rate_limiter_different_identifiers_independent(unique_prefix):
     assert is_allowed is True
 
 
-def test_rate_limiter_sliding_window(unique_prefix):
+def test_rate_limiter_sliding_window(isolated_cache):
     # given
-    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=2, window_seconds=1)
+    limiter = RateLimiter(key_prefix="test_sliding", max_requests=2, window_seconds=1)
 
-    # when - Make 2 requests
-    limiter.is_allowed("user1")
-    limiter.is_allowed("user1")
+    with patch("saleor.core.utils.rate_limit.cache", isolated_cache):
+        # when - Make 2 requests
+        limiter.is_allowed("user1")
+        limiter.is_allowed("user1")
 
-    # then - 3rd request should be blocked
-    is_allowed, _ = limiter.is_allowed("user1")
-    assert is_allowed is False
+        # then - 3rd request should be blocked
+        is_allowed, _ = limiter.is_allowed("user1")
+        assert is_allowed is False
 
-    # when - Wait for window to expire
-    time.sleep(1.1)
+        # when - Wait for window to expire
+        time.sleep(1.1)
 
-    # then - Should be allowed again
-    is_allowed, _ = limiter.is_allowed("user1")
-    assert is_allowed is True
+        # then - Should be allowed again
+        is_allowed, _ = limiter.is_allowed("user1")
+        assert is_allowed is True
 
 
 def test_rate_limiter_cache_key_format():
@@ -267,25 +269,26 @@ def test_retry_after_calculation(isolated_cache):
         assert 55 <= retry_after <= 60  # Should be close to window size
 
 
-def test_rate_limiter_expired_timestamps_removed(unique_prefix):
+def test_rate_limiter_expired_timestamps_removed(isolated_cache):
     # given
-    limiter = RateLimiter(key_prefix=unique_prefix, max_requests=2, window_seconds=1)
+    limiter = RateLimiter(key_prefix="test_expired", max_requests=2, window_seconds=1)
 
-    # when - Make requests, wait for expiry, make more requests
-    limiter.is_allowed("user1")
-    limiter.is_allowed("user1")
+    with patch("saleor.core.utils.rate_limit.cache", isolated_cache):
+        # when - Make requests, wait for expiry, make more requests
+        limiter.is_allowed("user1")
+        limiter.is_allowed("user1")
 
-    # Verify at limit
-    is_allowed, _ = limiter.is_allowed("user1")
-    assert is_allowed is False
+        # Verify at limit
+        is_allowed, _ = limiter.is_allowed("user1")
+        assert is_allowed is False
 
-    # Wait for window to expire
-    time.sleep(1.1)
+        # Wait for window to expire
+        time.sleep(1.1)
 
-    # Make 2 more requests (old ones should be expired)
-    is_allowed1, _ = limiter.is_allowed("user1")
-    is_allowed2, _ = limiter.is_allowed("user1")
+        # Make 2 more requests (old ones should be expired)
+        is_allowed1, _ = limiter.is_allowed("user1")
+        is_allowed2, _ = limiter.is_allowed("user1")
 
-    # then - Both new requests should succeed
-    assert is_allowed1 is True
-    assert is_allowed2 is True
+        # then - Both new requests should succeed
+        assert is_allowed1 is True
+        assert is_allowed2 is True

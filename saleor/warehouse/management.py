@@ -618,6 +618,8 @@ def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None
     sources_to_delete = []
     sources_to_update = []
     pois_to_update_map = {}
+    poi_deallocate_amounts = {}  # Track accumulated deallocation per POI
+    poi_fulfill_amounts = {}  # Track accumulated fulfillment per POI
     fulfillment_sources_to_create = []
 
     for source in sources:
@@ -626,23 +628,18 @@ def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None
 
         deallocate_from_source = min(source.quantity, remaining)
 
-        # Track POI updates
-        if source.purchase_order_item_id not in pois_to_update_map:
-            poi = source.purchase_order_item
-            pois_to_update_map[source.purchase_order_item_id] = poi
-            poi.quantity_allocated = F("quantity_allocated") - deallocate_from_source
+        # Track POI updates - accumulate amounts for the same POI
+        poi_id = source.purchase_order_item_id
+        if poi_id not in pois_to_update_map:
+            pois_to_update_map[poi_id] = source.purchase_order_item
+            poi_deallocate_amounts[poi_id] = deallocate_from_source
             if fulfillment_line:
-                poi.quantity_fulfilled = (
-                    F("quantity_fulfilled") + deallocate_from_source
-                )
+                poi_fulfill_amounts[poi_id] = deallocate_from_source
         else:
-            # Already in map, accumulate the changes
-            poi = pois_to_update_map[source.purchase_order_item_id]
-            poi.quantity_allocated = F("quantity_allocated") - deallocate_from_source
+            # Same POI appears multiple times - accumulate the amounts
+            poi_deallocate_amounts[poi_id] += deallocate_from_source
             if fulfillment_line:
-                poi.quantity_fulfilled = (
-                    F("quantity_fulfilled") + deallocate_from_source
-                )
+                poi_fulfill_amounts[poi_id] += deallocate_from_source
 
         # Create FulfillmentSource if fulfilling (not cancelling)
         if fulfillment_line:
@@ -672,6 +669,16 @@ def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None
     if sources_to_update:
         AllocationSource.objects.bulk_update(sources_to_update, ["quantity"])
     if pois_to_update_map:
+        # Apply accumulated amounts to each POI using F() expressions
+        for poi_id, poi in pois_to_update_map.items():
+            poi.quantity_allocated = F("quantity_allocated") - poi_deallocate_amounts[
+                poi_id
+            ]
+            if fulfillment_line:
+                poi.quantity_fulfilled = F("quantity_fulfilled") + poi_fulfill_amounts[
+                    poi_id
+                ]
+
         update_fields = ["quantity_allocated"]
         if fulfillment_line:
             update_fields.append("quantity_fulfilled")

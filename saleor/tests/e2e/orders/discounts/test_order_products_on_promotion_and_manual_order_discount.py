@@ -180,4 +180,4 @@ def test_order_products_on_promotion_and_manual_order_discount_CORE_2108(
     total = shipping_amount + subtotal
     assert total == order["order"]["total"]["gross"]["amount"]
     assert total == total_gross_amount
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"

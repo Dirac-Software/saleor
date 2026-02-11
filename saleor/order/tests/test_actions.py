@@ -44,7 +44,12 @@ def test_order_created_order_confirmed_with_turned_flag_on(
 
     # then
     mock_order_confirmed.assert_called_once_with(
-        order, customer_user, None, plugins_manager, webhook_event_map=webhook_event_map
+        order,
+        customer_user,
+        None,
+        plugins_manager,
+        send_confirmation_email=True,
+        webhook_event_map=webhook_event_map,
     )
 
 

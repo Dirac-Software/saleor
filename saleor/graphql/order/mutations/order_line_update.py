@@ -230,31 +230,15 @@ class OrderLineUpdate(
                     ]
                 )
             else:
-                # No custom prices provided
-                # Only invalidate if the line doesn't have both net and gross already set
-                # If both are set, preserve them (custom pricing)
-                has_custom_pricing = (
-                    instance.unit_price_net_amount is not None
-                    and instance.unit_price_gross_amount is not None
-                    and instance.unit_price_net_amount
-                    != instance.unit_price_gross_amount
-                )
-                if not has_custom_pricing:
-                    # Mark for refresh so discounts and taxes are recalculated
-                    invalidate_order_prices(order, save=False)
-                    should_invalidate_prices = True
+                # No custom prices provided - mark for refresh so discounts and taxes are recalculated
+                invalidate_order_prices(order, save=False)
+                should_invalidate_prices = True
 
             recalculate_order_weight(order)
             update_fields = ["weight", "updated_at"]
             if should_invalidate_prices:
                 update_fields.append("should_refresh_prices")
             order.save(update_fields=update_fields)
-
-            # Refresh prices if needed (but not for manual net+gross override)
-            if should_invalidate_prices:
-                order, _ = fetch_order_prices_if_expired(
-                    order, manager, None, force_update=True
-                )
 
             call_event_by_order_status(order, manager)
 

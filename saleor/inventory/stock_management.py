@@ -194,8 +194,21 @@ def confirm_purchase_order_item(
 
             from django.contrib.sites.models import Site
 
-            from ..order.actions import create_fulfillments
+            from ..order.actions import create_fulfillments, order_confirmed
             from ..plugins.manager import get_plugins_manager
+
+            manager = get_plugins_manager(allow_replica=False)
+
+            # Send order confirmed email
+            transaction.on_commit(
+                lambda ord=order, u=user, a=app, m=manager: order_confirmed(
+                    ord,
+                    u,
+                    a,
+                    m,
+                    send_confirmation_email=True,
+                )
+            )
 
             # Get allocations and group by warehouse
             allocations = Allocation.objects.filter(
@@ -221,7 +234,6 @@ def confirm_purchase_order_item(
                 fulfillment_lines_for_warehouses[warehouse_pk] = lines
 
             # Create fulfillments
-            manager = get_plugins_manager(allow_replica=False)
             site_settings = Site.objects.get_current().settings
 
             create_fulfillments(
@@ -367,11 +379,16 @@ def process_adjustment(
             raise AdjustmentAffectsPaidOrders(adjustment, paid_orders_affected)
 
         # Deallocate from UNCONFIRMED, unpaid orders
+        # Track remaining loss to distribute across affected allocations
+        remaining_loss = loss
         orders_to_check = set()
         for source in unconfirmed_sources:
+            if remaining_loss <= 0:
+                break
+
             allocation = source.allocation
             order = allocation.order_line.order
-            quantity_to_deallocate = min(source.quantity, loss)
+            quantity_to_deallocate = min(source.quantity, remaining_loss)
 
             # Deallocate sources (removes AllocationSource, restores POI.quantity_allocated)
             deallocate_sources(allocation, quantity_to_deallocate)
@@ -390,6 +407,9 @@ def process_adjustment(
             # Update stock quantity_allocated
             stock.quantity_allocated -= quantity_to_deallocate
 
+            # Track remaining loss to distribute
+            remaining_loss -= quantity_to_deallocate
+
         # Decrease physical stock
         stock.quantity -= loss
         stock.save(update_fields=["quantity", "quantity_allocated"])
@@ -397,7 +417,9 @@ def process_adjustment(
         # Note: quantity_received is not modified - it represents what was physically received
         # The adjustment is tracked separately and affects available_quantity
 
-        # Unconfirm orders that lost all their sources
+        # Transition UNCONFIRMED orders back to DRAFT if they lost all their sources
+        # UNCONFIRMED is a transient state waiting for all allocations to have sources
+        # If stock adjustment removes sources, order must go back to DRAFT
         for order in orders_to_check:
             if not can_confirm_order(order):
                 order.status = OrderStatus.DRAFT

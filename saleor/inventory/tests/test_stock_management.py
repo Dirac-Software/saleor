@@ -689,3 +689,92 @@ def test_confirm_poi_enforces_invariant(
     expected_quantity = poi1.quantity_ordered + poi2.quantity_ordered
     assert destination.quantity == expected_quantity
     assert destination.quantity == 50  # 30 + 20
+
+
+def test_confirm_poi_auto_confirm_sends_order_confirmed_email(
+    variant,
+    nonowned_warehouse,
+    owned_warehouse,
+    purchase_order,
+    channel_USD,
+    django_capture_on_commit_callbacks,
+):
+    from unittest.mock import patch
+
+    from ...core.notify import NotifyEventType
+    from ...order import OrderStatus
+    from ...order.models import Order, OrderLine
+    from ...shipping.models import Shipment
+    from ...warehouse.models import Allocation, Stock
+
+    # given
+    source = Stock.objects.create(
+        product_variant=variant,
+        warehouse=nonowned_warehouse,
+        quantity=0,
+        quantity_allocated=5,
+    )
+
+    order = Order.objects.create(
+        channel=channel_USD,
+        billing_address=purchase_order.source_warehouse.address,
+        shipping_address=purchase_order.source_warehouse.address,
+        status=OrderStatus.UNCONFIRMED,
+        lines_count=1,
+    )
+    order_line = OrderLine.objects.create(
+        order=order,
+        variant=variant,
+        quantity=5,
+        unit_price_gross_amount=100,
+        unit_price_net_amount=100,
+        total_price_gross_amount=500,
+        total_price_net_amount=500,
+        currency="USD",
+        is_shipping_required=True,
+        is_gift_card=False,
+    )
+
+    Allocation.objects.create(
+        order_line=order_line, stock=source, quantity_allocated=5
+    )
+
+    shipment = Shipment.objects.create(
+        source=nonowned_warehouse.address,
+        destination=owned_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+        arrived_at=timezone.now(),
+    )
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=5,
+        quantity_allocated=0,
+        total_price_amount=50.0,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    # when
+    with patch("saleor.plugins.manager.PluginsManager.notify") as mock_notify:
+        with django_capture_on_commit_callbacks(execute=True):
+            confirm_purchase_order_item(poi)
+
+        # then
+        order.refresh_from_db()
+        assert order.status == OrderStatus.UNFULFILLED
+
+        notify_calls = [call for call in mock_notify.call_args_list]
+        order_confirmed_calls = [
+            call
+            for call in notify_calls
+            if call.args and call.args[0] == NotifyEventType.ORDER_CONFIRMED
+        ]
+        assert len(order_confirmed_calls) == 1

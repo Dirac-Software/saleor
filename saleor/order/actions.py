@@ -438,7 +438,14 @@ def order_created(
 
     channel = order_info.channel
     if channel.automatically_confirm_all_new_orders and order.status != OrderStatus.UNCONFIRMED:
-        order_confirmed(order, user, app, manager, webhook_event_map=webhook_event_map)
+        order_confirmed(
+            order,
+            user,
+            app,
+            manager,
+            send_confirmation_email=True,
+            webhook_event_map=webhook_event_map,
+        )
 
     if _order_has_negative_prices(order, order_info.lines_data):
         _log_order_with_negative_price(order, order_info.lines_data)

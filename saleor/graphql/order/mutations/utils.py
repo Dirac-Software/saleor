@@ -113,6 +113,11 @@ class ShippingMethodUpdateMixin:
 
     @classmethod
     def update_shipping_method(cls, order: models.Order, method: ShippingMethod):
+        # Clear shipping price so new price can be calculated from the new method
+        # This ensures assign_shipping_price will recalculate from the new method's price
+        order.base_shipping_price = zero_money(order.currency)
+        order.undiscounted_base_shipping_price = zero_money(order.currency)
+
         order.shipping_method = method
         order.shipping_method_name = method.name
 
