@@ -113,24 +113,6 @@ class OrderQueryset(models.QuerySet["Order"]):
 
         from ..warehouse.models import Allocation
 
-        # Subquery: Check if order has any allocation violations
-        # (non-owned warehouse, missing sources, or quantity mismatch)
-        allocation_violations = (
-            Allocation.objects.filter(order_line__order_id=OuterRef("id"))
-            .annotate(total_sourced=Sum("allocation_sources__quantity"))
-            .filter(
-                Q(stock__warehouse__is_owned=False)  # Non-owned warehouse
-                | Q(total_sourced__isnull=True)  # No sources (not received)
-                | ~Q(total_sourced=F("quantity_allocated"))  # Quantity mismatch
-            )
-            .values("id")[:1]
-        )
-
-        # Subquery: Check if order has allocations at all
-        has_allocations = Allocation.objects.filter(
-            order_line__order_id=OuterRef("id")
-        ).values("id")[:1]
-
         return self.filter(
             status=OrderStatus.UNCONFIRMED,
             # Has at least one allocation
@@ -995,8 +977,9 @@ class Fulfillment(ModelWithMetadata):
 
 
 class FulfillmentLine(models.Model):
-    """Represents line items in a fulfillment. For our use case quantity needs to equal
-    order_line quantity.
+    """Represents line items in a fulfillment.
+
+    For our use case quantity needs to equal order_line quantity.
     """
 
     order_line = models.ForeignKey(

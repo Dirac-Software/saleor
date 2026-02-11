@@ -396,7 +396,9 @@ def allocate_stocks(
         # Auto-confirm orders that now have all allocations with sources
         # Only auto-confirm if channel setting allows it
         for order in orders_to_check:
-            if channel.automatically_confirm_all_new_orders and can_confirm_order(order):
+            if channel.automatically_confirm_all_new_orders and can_confirm_order(
+                order
+            ):
                 order.status = OrderStatus.UNFULFILLED
                 order.save(update_fields=["status", "updated_at"])
 
@@ -692,6 +694,9 @@ def deallocate_stock(
     raise an exception.
 
     Args:
+        order_lines_data: List of OrderLineInfo objects containing order lines
+            and related information for deallocation.
+        manager: PluginsManager instance for handling plugin hooks.
         fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
             FulfillmentLine. When provided, creates FulfillmentSource audit trail.
 
@@ -941,6 +946,10 @@ def decrease_stock(
     If allow_stock_to_be_exceeded flag is True then quantity could be < 0.
 
     Args:
+        order_lines_info: List of OrderLineInfo objects containing order lines
+            and warehouse information for stock decrease.
+        manager: PluginsManager instance for handling plugin hooks.
+        allow_stock_to_be_exceeded: If True, allows stock quantity to go below zero.
         fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
             FulfillmentLine. When provided, creates FulfillmentSource audit trail.
 

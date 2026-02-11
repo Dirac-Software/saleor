@@ -402,13 +402,6 @@ class Shipment(models.Model):
         amount_field="shipping_cost_amount", currency_field="currency"
     )
 
-    inco_term = models.CharField(
-        max_length=3,
-        blank=True,
-        null=True,
-        choices=IncoTerm.CHOICES,
-    )
-
     # instead of using a duties invoice we can get these from the unit price, hs code on
     # a ProductVariant and the shipment source and destination.
     # duties_cost = MoneyField(

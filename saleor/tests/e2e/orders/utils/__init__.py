@@ -6,6 +6,7 @@ from .draft_order_update import draft_order_update, raw_draft_order_update
 from .order_bulk_create import order_bulk_create
 from .order_by_checkout_id_query import order_by_checkout_id_query
 from .order_cancel import order_cancel
+from .order_confirm import order_confirm
 from .order_create_from_checkout import (
     order_create_from_checkout,
     raw_order_create_from_checkout,
@@ -23,6 +24,7 @@ from .order_mark_as_paid import mark_order_paid
 from .order_query import order_query
 from .order_update import order_update
 from .order_update_shipping import order_update_shipping
+from .order_update_shipping_cost import order_update_shipping_cost
 from .order_void import order_void, raw_order_void
 
 __all__ = [
@@ -36,6 +38,7 @@ __all__ = [
     "order_by_checkout_id_query",
     "mark_order_paid",
     "order_cancel",
+    "order_confirm",
     "draft_order_delete",
     "order_create_from_checkout",
     "order_discount_add",
@@ -46,6 +49,7 @@ __all__ = [
     "order_fulfillment_cancel",
     "order_invoice_create",
     "order_update_shipping",
+    "order_update_shipping_cost",
     "draft_order_bulk_delete",
     "order_line_update",
     "order_line_delete",

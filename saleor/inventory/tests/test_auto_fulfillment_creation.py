@@ -131,6 +131,7 @@ def test_confirm_poi_creates_multiple_fulfillments_for_multiple_warehouses(
     warehouse.is_owned = True
     warehouse.save()
     warehouse_JPY.is_owned = True
+    warehouse_JPY.channels.add(order.channel)
     warehouse_JPY.save()
 
     from ...inventory.models import PurchaseOrder

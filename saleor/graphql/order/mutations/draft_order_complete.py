@@ -30,7 +30,6 @@ from ....permission.enums import OrderPermissions
 from ....warehouse.management import (
     allocate_preorders,
     allocate_stocks,
-    can_confirm_order,
 )
 from ....warehouse.reservations import is_reservation_enabled
 from ...app.dataloaders import get_app_promise

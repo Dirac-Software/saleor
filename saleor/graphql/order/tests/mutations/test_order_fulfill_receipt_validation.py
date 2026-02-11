@@ -48,6 +48,7 @@ def test_order_fulfill_blocked_when_goods_not_received(
     channel_USD,
     purchase_order,
     shipment,
+    site_settings,
 ):
     """Cannot fulfill order when PurchaseOrderItems haven't been received.
 
@@ -55,6 +56,7 @@ def test_order_fulfill_blocked_when_goods_not_received(
     - An UNFULFILLED order with allocations in owned warehouse
     - AllocationSources link to PurchaseOrderItems
     - PurchaseOrderItems are CONFIRMED but NOT yet RECEIVED
+    - Fulfillment auto-approve is enabled
 
     When: Attempting to fulfill the order
 
@@ -62,7 +64,13 @@ def test_order_fulfill_blocked_when_goods_not_received(
     - Fulfillment should fail with appropriate error
     - Error indicates goods must be received before fulfillment
     """
+    from .....inventory.stock_management import confirm_purchase_order_item
+
     # given
+    # Enable auto-approve so receipt validation is enforced
+    site_settings.fulfillment_auto_approve = True
+    site_settings.save(update_fields=["fulfillment_auto_approve"])
+
     order = order_with_lines
     order.status = OrderStatus.UNFULFILLED
     order.save(update_fields=["status"])
@@ -70,30 +78,38 @@ def test_order_fulfill_blocked_when_goods_not_received(
     order_line = order.lines.first()
     variant = order_line.variant
 
-    # Create confirmed POI that is NOT received
+    # Clear any existing stock from order_with_lines fixture (in non-owned warehouses)
+    Stock.objects.filter(product_variant=variant).exclude(
+        warehouse=owned_warehouse
+    ).delete()
+
+    # Setup purchase order
     purchase_order.destination_warehouse = owned_warehouse
     purchase_order.save()
 
-    poi = PurchaseOrderItem.objects.create(
-        order=purchase_order,
-        product_variant=variant,
-        quantity_ordered=order_line.quantity * 2,  # Buffer
-        total_price_amount=1000.00,
-        currency="USD",
-        shipment=shipment,
-        country_of_origin="US",
-        status=PurchaseOrderItemStatus.CONFIRMED,  # CONFIRMED but NOT RECEIVED
-        # quantity_received = 0 (default)
-    )
-
-    # Create stock in owned warehouse
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse,
+    # Create stock at SOURCE warehouse (supplier)
+    Stock.objects.create(
+        warehouse=purchase_order.source_warehouse,
         product_variant=variant,
         quantity=1000,
     )
 
-    # Allocate stocks (creates allocations and sources)
+    # Create POI in DRAFT status
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=order_line.quantity * 2,
+        total_price_amount=1000.00,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    # Confirm POI (moves stock to owned warehouse, creates AllocationSources)
+    confirm_purchase_order_item(poi)
+
+    # Allocate stocks (will link to POI via AllocationSources)
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=order_line.quantity)],
         "US",
@@ -110,7 +126,7 @@ def test_order_fulfill_blocked_when_goods_not_received(
     assert allocation_sources.exists()
     assert allocation_sources.first().purchase_order_item == poi
 
-    # Verify POI is NOT received
+    # Verify POI is confirmed but NOT received (no ReceiptLines)
     poi.refresh_from_db()
     assert poi.status == PurchaseOrderItemStatus.CONFIRMED
     assert poi.quantity_received == 0
@@ -170,6 +186,7 @@ def test_order_fulfill_succeeds_when_goods_received(
     channel_USD,
     purchase_order,
     shipment,
+    site_settings,
 ):
     """Can fulfill order when PurchaseOrderItems have been received.
 
@@ -177,6 +194,7 @@ def test_order_fulfill_succeeds_when_goods_received(
     - An UNFULFILLED order with allocations in owned warehouse
     - AllocationSources link to PurchaseOrderItems
     - PurchaseOrderItems are RECEIVED (quantity_received > 0)
+    - Fulfillment auto-approve is enabled
 
     When: Attempting to fulfill the order
 
@@ -184,7 +202,14 @@ def test_order_fulfill_succeeds_when_goods_received(
     - Fulfillment should succeed
     - Order transitions to appropriate status
     """
+    from .....inventory.models import Receipt, ReceiptLine, ReceiptStatus
+    from .....inventory.stock_management import confirm_purchase_order_item
+
     # given
+    # Enable auto-approve
+    site_settings.fulfillment_auto_approve = True
+    site_settings.save(update_fields=["fulfillment_auto_approve"])
+
     order = order_with_lines
     order.status = OrderStatus.UNFULFILLED
     order.save(update_fields=["status"])
@@ -192,10 +217,23 @@ def test_order_fulfill_succeeds_when_goods_received(
     order_line = order.lines.first()
     variant = order_line.variant
 
-    # Create POI that IS received
+    # Clear any existing stock from order_with_lines fixture (in non-owned warehouses)
+    Stock.objects.filter(product_variant=variant).exclude(
+        warehouse=owned_warehouse
+    ).delete()
+
+    # Setup purchase order
     purchase_order.destination_warehouse = owned_warehouse
     purchase_order.save()
 
+    # Create stock at SOURCE warehouse (supplier)
+    Stock.objects.create(
+        warehouse=purchase_order.source_warehouse,
+        product_variant=variant,
+        quantity=1000,
+    )
+
+    # Create POI in DRAFT status
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
         product_variant=variant,
@@ -204,18 +242,25 @@ def test_order_fulfill_succeeds_when_goods_received(
         currency="USD",
         shipment=shipment,
         country_of_origin="US",
-        status=PurchaseOrderItemStatus.RECEIVED,  # RECEIVED!
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    # Confirm POI (moves stock to owned warehouse)
+    confirm_purchase_order_item(poi)
+
+    # Create Receipt and ReceiptLine to mark goods as physically received
+    receipt = Receipt.objects.create(
+        shipment=shipment,
+        status=ReceiptStatus.COMPLETED,
+    )
+    ReceiptLine.objects.create(
+        receipt=receipt,
+        purchase_order_item=poi,
         quantity_received=order_line.quantity * 2,  # All received
+        received_by=staff_api_client.user,
     )
 
-    # Create stock in owned warehouse
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse,
-        product_variant=variant,
-        quantity=1000,
-    )
-
-    # Allocate stocks
+    # Allocate stocks (will link to POI via AllocationSources)
     allocate_stocks(
         [OrderLineInfo(line=order_line, variant=variant, quantity=order_line.quantity)],
         "US",
@@ -230,7 +275,6 @@ def test_order_fulfill_succeeds_when_goods_received(
 
     # Verify POI IS received
     poi.refresh_from_db()
-    assert poi.status == PurchaseOrderItemStatus.RECEIVED
     assert poi.quantity_received > 0
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
@@ -278,6 +322,7 @@ def test_order_fulfill_blocked_when_partial_receipt(
     channel_USD,
     purchase_order,
     shipment,
+    site_settings,
 ):
     """Cannot fulfill order when only PART of the goods have been received.
 
@@ -285,6 +330,7 @@ def test_order_fulfill_blocked_when_partial_receipt(
     - An UNFULFILLED order requesting 10 units
     - PurchaseOrderItem has only 5 units received (partial receipt)
     - Attempting to fulfill all 10 units
+    - Fulfillment auto-approve is enabled
 
     When: Attempting to fulfill the full order
 
@@ -292,7 +338,14 @@ def test_order_fulfill_blocked_when_partial_receipt(
     - Fulfillment should fail
     - Error indicates insufficient received stock
     """
+    from .....inventory.models import Receipt, ReceiptLine, ReceiptStatus
+    from .....inventory.stock_management import confirm_purchase_order_item
+
     # given
+    # Enable auto-approve so receipt validation is enforced
+    site_settings.fulfillment_auto_approve = True
+    site_settings.save(update_fields=["fulfillment_auto_approve"])
+
     order = order_with_lines
     order.status = OrderStatus.UNFULFILLED
     order.save(update_fields=["status"])
@@ -302,10 +355,23 @@ def test_order_fulfill_blocked_when_partial_receipt(
     order_line.save(update_fields=["quantity"])
     variant = order_line.variant
 
-    # Create POI with PARTIAL receipt
+    # Clear any existing stock from order_with_lines fixture (in non-owned warehouses)
+    Stock.objects.filter(product_variant=variant).exclude(
+        warehouse=owned_warehouse
+    ).delete()
+
+    # Setup purchase order
     purchase_order.destination_warehouse = owned_warehouse
     purchase_order.save()
 
+    # Create stock at SOURCE warehouse (supplier)
+    Stock.objects.create(
+        warehouse=purchase_order.source_warehouse,
+        product_variant=variant,
+        quantity=1000,
+    )
+
+    # Create POI in DRAFT status
     poi = PurchaseOrderItem.objects.create(
         order=purchase_order,
         product_variant=variant,
@@ -314,15 +380,22 @@ def test_order_fulfill_blocked_when_partial_receipt(
         currency="USD",
         shipment=shipment,
         country_of_origin="US",
-        status=PurchaseOrderItemStatus.PARTIALLY_RECEIVED,
-        quantity_received=5,  # Only 5 out of 10 received!
+        status=PurchaseOrderItemStatus.DRAFT,
     )
 
-    # Create stock in owned warehouse
-    stock = Stock.objects.create(
-        warehouse=owned_warehouse,
-        product_variant=variant,
-        quantity=1000,
+    # Confirm POI (moves stock to owned warehouse)
+    confirm_purchase_order_item(poi)
+
+    # Create Receipt and ReceiptLine to record partial receipt (5 out of 10)
+    receipt = Receipt.objects.create(
+        shipment=shipment,
+        status=ReceiptStatus.IN_PROGRESS,
+    )
+    ReceiptLine.objects.create(
+        receipt=receipt,
+        purchase_order_item=poi,
+        quantity_received=5,  # Only 5 out of 10 received!
+        received_by=staff_api_client.user,
     )
 
     # Allocate stocks for all 10 units

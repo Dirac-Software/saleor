@@ -179,7 +179,7 @@ Populates database with sample data and creates admin user with credentials:
 """
 
 [tool.poe.tasks.test]
-shell = "DATABASE_URL=${SUPERUSER_DATABASE_URL:-$DATABASE_URL} uv run pytest --reuse-db ${paths}"
+shell = "DATABASE_URL=${SUPERUSER_DATABASE_URL:-$DATABASE_URL} uv run pytest --reuse-db  ${paths}"
 help = "Run tests with --reuse-db (uses SUPERUSER_DATABASE_URL if set, otherwise DATABASE_URL)"
 
   [[tool.poe.tasks.test.args]]

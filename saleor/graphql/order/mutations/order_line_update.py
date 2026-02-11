@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from ....core.exceptions import InsufficientStock
 from ....core.tracing import traced_atomic_transaction
 from ....order import models
+from ....order.calculations import fetch_order_prices_if_expired
 from ....order.error_codes import OrderErrorCode
 from ....order.fetch import OrderLineInfo
 from ....order.utils import (
@@ -125,6 +126,7 @@ class OrderLineUpdate(
             price_net = cleaned_input.get("price_net")
             price_gross = cleaned_input.get("price_gross")
             legacy_price = cleaned_input.get("price")
+            should_invalidate_prices = False
 
             # Validate: priceGross cannot be set without priceNet
             if price_gross is not None and price_net is None:
@@ -161,6 +163,7 @@ class OrderLineUpdate(
                     instance.undiscounted_unit_price_net_amount = price_net
                     # Mark for refresh so tax system calculates gross
                     invalidate_order_prices(order, save=False)
+                    should_invalidate_prices = True
                     instance.save(
                         update_fields=[
                             "unit_price_net_amount",
@@ -182,7 +185,9 @@ class OrderLineUpdate(
                     instance.undiscounted_unit_price_net_amount = price_net
                     instance.undiscounted_unit_price_gross_amount = price_gross
                     instance.undiscounted_total_price_net_amount = price_net * quantity
-                    instance.undiscounted_total_price_gross_amount = price_gross * quantity
+                    instance.undiscounted_total_price_gross_amount = (
+                        price_gross * quantity
+                    )
                     # Don't mark for refresh - manual override is final
                     instance.save(
                         update_fields=[
@@ -225,10 +230,31 @@ class OrderLineUpdate(
                     ]
                 )
             else:
-                # No custom prices provided, just mark for refresh
-                invalidate_order_prices(order, save=False)
+                # No custom prices provided
+                # Only invalidate if the line doesn't have both net and gross already set
+                # If both are set, preserve them (custom pricing)
+                has_custom_pricing = (
+                    instance.unit_price_net_amount is not None
+                    and instance.unit_price_gross_amount is not None
+                    and instance.unit_price_net_amount
+                    != instance.unit_price_gross_amount
+                )
+                if not has_custom_pricing:
+                    # Mark for refresh so discounts and taxes are recalculated
+                    invalidate_order_prices(order, save=False)
+                    should_invalidate_prices = True
+
             recalculate_order_weight(order)
-            order.save(update_fields=["should_refresh_prices", "weight", "updated_at"])
+            update_fields = ["weight", "updated_at"]
+            if should_invalidate_prices:
+                update_fields.append("should_refresh_prices")
+            order.save(update_fields=update_fields)
+
+            # Refresh prices if needed (but not for manual net+gross override)
+            if should_invalidate_prices:
+                order, _ = fetch_order_prices_if_expired(
+                    order, manager, None, force_update=True
+                )
 
             call_event_by_order_status(order, manager)
 

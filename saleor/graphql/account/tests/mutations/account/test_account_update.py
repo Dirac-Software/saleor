@@ -96,7 +96,6 @@ def test_logged_customer_update_addresses(user_api_client, graphql_address_data)
     # instances weren't created, but the existing ones got updated
     user = user_api_client.user
     new_first_name = graphql_address_data["firstName"]
-    metadata = graphql_address_data["metadata"]
     updated_at = user.updated_at
     assert user.default_billing_address
     assert user.default_shipping_address

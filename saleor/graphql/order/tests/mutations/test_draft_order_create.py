@@ -234,26 +234,32 @@ def test_draft_order_create_with_voucher_entire_order(
     assert data["externalReference"] == external_reference
     assert (
         data["billingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
     assert (
         data["shippingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
-    assert data["billingAddress"]["metadata"] == graphql_address_data["metadata"]
-    assert data["shippingAddress"]["metadata"] == graphql_address_data["metadata"]
-    order_total = (
+    assert (
+        data["billingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+    )
+    assert (
+        data["shippingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+    )
+    subtotal = (
         channel_listing_0.discounted_price_amount * variant_0_qty
         + channel_listing_1.discounted_price_amount * variant_1_qty
     )
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    order_total = subtotal + shipping_listing.price_amount
     assert data["undiscountedTotal"]["gross"]["amount"] == order_total
     assert (
         data["total"]["gross"]["amount"] == order_total - voucher_listing.discount_value
     )
 
     order = Order.objects.first()
-    subtotal = get_subtotal(order.lines.all(), order.currency)
-    assert data["subtotal"]["gross"]["amount"] == subtotal.gross.amount
+    subtotal_from_lines = get_subtotal(order.lines.all(), order.currency)
+    assert data["subtotal"]["gross"]["amount"] == subtotal_from_lines.gross.amount
 
     assert order.voucher_code == voucher.code
     assert order.user == customer_user
@@ -526,26 +532,32 @@ def test_draft_order_create_with_voucher_code(
     assert data["externalReference"] == external_reference
     assert (
         data["billingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
     assert (
         data["shippingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
-    assert data["billingAddress"]["metadata"] == graphql_address_data["metadata"]
-    assert data["shippingAddress"]["metadata"] == graphql_address_data["metadata"]
-    order_total = (
+    assert (
+        data["billingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+    )
+    assert (
+        data["shippingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+    )
+    subtotal = (
         channel_listing_0.discounted_price_amount * variant_0_qty
         + channel_listing_1.discounted_price_amount * variant_1_qty
     )
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    order_total = subtotal + shipping_listing.price_amount
     assert data["undiscountedTotal"]["gross"]["amount"] == order_total
     assert (
         data["total"]["gross"]["amount"] == order_total - voucher_listing.discount_value
     )
 
     order = Order.objects.first()
-    subtotal = get_subtotal(order.lines.all(), order.currency)
-    assert data["subtotal"]["gross"]["amount"] == subtotal.gross.amount
+    subtotal_from_lines = get_subtotal(order.lines.all(), order.currency)
+    assert data["subtotal"]["gross"]["amount"] == subtotal_from_lines.gross.amount
     assert order.voucher_code == voucher.code
     assert order.user == customer_user
     assert order.shipping_method == shipping_method
@@ -601,7 +613,7 @@ def test_draft_order_create_percentage_voucher(
     variant,
     voucher_percentage,
     channel_USD,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     # given
     query = DRAFT_ORDER_CREATE_MUTATION
@@ -618,7 +630,7 @@ def test_draft_order_create_percentage_voucher(
     variant_list = [
         {"variantId": variant_id, "quantity": variant_qty},
     ]
-    shipping_address = graphql_address_data
+    shipping_address = graphql_address_data_with_vat
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
     voucher_listing = voucher_percentage.channel_listings.get(channel=channel_USD)
     voucher_id = graphene.Node.to_global_id("Voucher", voucher_percentage.id)
@@ -648,14 +660,18 @@ def test_draft_order_create_percentage_voucher(
     assert data["redirectUrl"] == redirect_url
     assert (
         data["billingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
     assert (
         data["shippingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
-    assert data["billingAddress"]["metadata"] == graphql_address_data["metadata"]
-    assert data["shippingAddress"]["metadata"] == graphql_address_data["metadata"]
+    assert (
+        data["billingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+    )
+    assert (
+        data["shippingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+    )
     subtotal = channel_listing.discounted_price_amount * variant_qty
     discount_amount = subtotal * voucher_listing.discount_value / 100
 
@@ -1146,15 +1162,17 @@ def test_draft_order_create_with_voucher_including_drafts_in_voucher_usage(
     data = content["data"]["draftOrderCreate"]["order"]
     assert data["status"] == OrderStatus.DRAFT.upper()
     assert data["voucher"]["code"] == voucher.code
-    order_total = channel_listing.discounted_price_amount * variant_qty
+    subtotal = channel_listing.discounted_price_amount * variant_qty
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    order_total = subtotal + shipping_listing.price_amount
     assert data["undiscountedTotal"]["gross"]["amount"] == order_total
     assert (
         data["total"]["gross"]["amount"] == order_total - voucher_listing.discount_value
     )
 
     order = Order.objects.first()
-    subtotal = get_subtotal(order.lines.all(), order.currency)
-    assert data["subtotal"]["gross"]["amount"] == subtotal.gross.amount
+    subtotal_from_lines = get_subtotal(order.lines.all(), order.currency)
+    assert data["subtotal"]["gross"]["amount"] == subtotal_from_lines.gross.amount
 
     # Ensure order discount object was properly created
     assert order.discounts.count() == 1
@@ -1293,15 +1311,17 @@ def test_draft_order_create_with_voucher_code_including_drafts_in_voucher_usage(
     data = content["data"]["draftOrderCreate"]["order"]
     assert data["status"] == OrderStatus.DRAFT.upper()
     assert data["voucher"]["code"] == voucher.code
-    order_total = channel_listing.discounted_price_amount * variant_qty
+    subtotal = channel_listing.discounted_price_amount * variant_qty
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    order_total = subtotal + shipping_listing.price_amount
     assert data["undiscountedTotal"]["gross"]["amount"] == order_total
     assert (
         data["total"]["gross"]["amount"] == order_total - voucher_listing.discount_value
     )
 
     order = Order.objects.first()
-    subtotal = get_subtotal(order.lines.all(), order.currency)
-    assert data["subtotal"]["gross"]["amount"] == subtotal.gross.amount
+    subtotal_from_lines = get_subtotal(order.lines.all(), order.currency)
+    assert data["subtotal"]["gross"]["amount"] == subtotal_from_lines.gross.amount
 
     # Ensure order discount object was properly created
     assert order.discounts.count() == 1
@@ -1450,7 +1470,7 @@ def test_draft_order_create_with_same_variant_and_force_new_line(
     variant,
     voucher,
     channel_USD,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     variant_0 = variant
     query = DRAFT_ORDER_CREATE_MUTATION
@@ -1467,7 +1487,7 @@ def test_draft_order_create_with_same_variant_and_force_new_line(
         {"variantId": variant_id, "quantity": 2},
         {"variantId": variant_id, "quantity": 1, "forceNewLine": True},
     ]
-    shipping_address = graphql_address_data
+    shipping_address = graphql_address_data_with_vat
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
     voucher_id = graphene.Node.to_global_id("Voucher", voucher.id)
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
@@ -1496,11 +1516,11 @@ def test_draft_order_create_with_same_variant_and_force_new_line(
     assert data["redirectUrl"] == redirect_url
     assert (
         data["billingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
     assert (
         data["shippingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
 
     order = Order.objects.first()
@@ -1618,7 +1638,7 @@ def test_draft_order_create_without_sku(
     variant,
     voucher,
     channel_USD,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     variant_0 = variant
     query = DRAFT_ORDER_CREATE_MUTATION
@@ -1640,7 +1660,7 @@ def test_draft_order_create_without_sku(
         {"variantId": variant_0_id, "quantity": 2},
         {"variantId": variant_1_id, "quantity": 1},
     ]
-    shipping_address = graphql_address_data
+    shipping_address = graphql_address_data_with_vat
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
     voucher_id = graphene.Node.to_global_id("Voucher", voucher.id)
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
@@ -1669,11 +1689,11 @@ def test_draft_order_create_without_sku(
     assert data["redirectUrl"] == redirect_url
     assert (
         data["billingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
     assert (
         data["shippingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
 
     order = Order.objects.first()
@@ -2910,11 +2930,13 @@ def test_draft_order_create_product_catalogue_promotion(
     assert assigned_discount["total"]["amount"] == expected_unit_discount * quantity
     assert assigned_discount["value"] == rule.reward_value
 
-    assert data["total"]["gross"]["amount"] == line_total
-    assert (
-        data["undiscountedTotal"]["gross"]["amount"]
-        == variant_channel_listing.price_amount * quantity
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    expected_total = line_total + shipping_listing.price_amount
+    expected_undiscounted = (
+        variant_channel_listing.price_amount * quantity + shipping_listing.price_amount
     )
+    assert data["total"]["gross"]["amount"] == expected_total
+    assert data["undiscountedTotal"]["gross"]["amount"] == expected_undiscounted
 
     # Ensure the correct event was created
     created_draft_event = OrderEvent.objects.get(
@@ -3051,11 +3073,13 @@ def test_draft_order_create_product_catalogue_promotion_flat_taxes(
     assert assigned_discount["total"]["amount"] == expected_unit_discount * quantity
     assert assigned_discount["value"] == rule.reward_value
 
-    assert data["total"]["gross"]["amount"] == line_total
-    assert (
-        data["undiscountedTotal"]["gross"]["amount"]
-        == variant_channel_listing.price_amount * quantity
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    expected_total = line_total + shipping_listing.price_amount
+    expected_undiscounted = (
+        variant_channel_listing.price_amount * quantity + shipping_listing.price_amount
     )
+    assert data["total"]["gross"]["amount"] == expected_total
+    assert data["undiscountedTotal"]["gross"]["amount"] == expected_undiscounted
 
     # Ensure the correct event was created
     created_draft_event = OrderEvent.objects.get(
@@ -3125,7 +3149,10 @@ def test_draft_order_create_order_promotion_flat_rates(
     )
     subtotal_net = undiscounted_subtotal_net - discount_amount
     subtotal_gross = quantize_price(tax_rate * subtotal_net, currency)
-    total_gross = subtotal_gross
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    shipping_price = shipping_listing.price_amount
+    shipping_gross = quantize_price(tax_rate * shipping_price, currency)
+    total_gross = subtotal_gross + shipping_gross
 
     shipping_address = graphql_address_data
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
@@ -3234,7 +3261,10 @@ def test_draft_order_create_gift_promotion_flat_rates(
     ).discounted_price_amount
     subtotal_net = quantity * variant_price
     subtotal_gross = quantize_price(tax_rate * subtotal_net, currency)
-    total_gross = subtotal_gross
+    shipping_listing = shipping_method.channel_listings.get(channel=channel_USD)
+    shipping_price = shipping_listing.price_amount
+    shipping_gross = quantize_price(tax_rate * shipping_price, currency)
+    total_gross = subtotal_gross + shipping_gross
 
     shipping_address = graphql_address_data
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
@@ -3765,7 +3795,7 @@ def test_draft_order_create_with_save_address_option_provided(
     shipping_method,
     variant,
     channel_USD,
-    graphql_address_data,
+    graphql_address_data_with_vat,
 ):
     # given input with provided shipping, billing addresses with save settings
     query = DRAFT_ORDER_CREATE_MUTATION
@@ -3776,7 +3806,7 @@ def test_draft_order_create_with_save_address_option_provided(
     variant_list = [
         {"variantId": variant_id, "quantity": 2},
     ]
-    shipping_address = graphql_address_data
+    shipping_address = graphql_address_data_with_vat
     shipping_id = graphene.Node.to_global_id("ShippingMethod", shipping_method.id)
     channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
 
@@ -3803,11 +3833,11 @@ def test_draft_order_create_with_save_address_option_provided(
     assert data["status"] == OrderStatus.DRAFT.upper()
     assert (
         data["billingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
     assert (
         data["shippingAddress"]["streetAddress1"]
-        == graphql_address_data["streetAddress1"]
+        == graphql_address_data_with_vat["streetAddress1"]
     )
 
     order = Order.objects.first()

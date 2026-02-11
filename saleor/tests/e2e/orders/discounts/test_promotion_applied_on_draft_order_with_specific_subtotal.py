@@ -234,7 +234,7 @@ def test_order_promotion_should_be_applied_to_draft_order_with_specific_subtotal
     # Step 4 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["total"]["gross"]["amount"] == expected_total_price
     assert completed_order["total"]["tax"]["amount"] == expected_total_tax
     assert (

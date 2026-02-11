@@ -3,7 +3,6 @@ from decimal import Decimal
 import graphene
 import pytest
 
-from .....order import OrderStatus
 from .....order.calculations import fetch_order_prices_if_expired
 from ....tests.utils import get_graphql_content
 
@@ -489,8 +488,13 @@ def test_total_price_calculated_from_unit_price(
     data = content["data"]["orderLineUpdate"]
 
     assert not data["errors"]
-    assert Decimal(data["orderLine"]["totalPrice"]["net"]["amount"]) == expected_total_net
-    assert Decimal(data["orderLine"]["totalPrice"]["gross"]["amount"]) == expected_total_gross
+    assert (
+        Decimal(data["orderLine"]["totalPrice"]["net"]["amount"]) == expected_total_net
+    )
+    assert (
+        Decimal(data["orderLine"]["totalPrice"]["gross"]["amount"])
+        == expected_total_gross
+    )
 
     line.refresh_from_db()
     assert line.total_price_net_amount == expected_total_net

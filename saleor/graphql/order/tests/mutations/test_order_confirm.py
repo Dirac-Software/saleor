@@ -884,7 +884,7 @@ def test_order_confirm_succeeds_with_allocation_sources(
 
     # Use allocate_stocks which creates AllocationSources automatically
     allocate_stocks(
-        [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
+        [OrderLineInfo(line=order_line, variant=variant, quantity=order_line.quantity)],
         "US",
         channel_USD,
         manager=get_plugins_manager(allow_replica=False),
@@ -935,7 +935,7 @@ def test_order_confirm_blocked_with_nonowned_warehouse(
 
     # Allocate in non-owned warehouse (no AllocationSources created)
     allocate_stocks(
-        [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
+        [OrderLineInfo(line=order_line, variant=variant, quantity=order_line.quantity)],
         "US",
         channel_USD,
         manager=get_plugins_manager(allow_replica=False),

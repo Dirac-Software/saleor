@@ -181,7 +181,7 @@ def test_mark_departed_requires_permission(
 
 @pytest.fixture
 def shipment_factory(owned_warehouse, nonowned_warehouse):
-    """Factory for creating test shipments."""
+    """Create test shipments."""
     from decimal import Decimal
 
     from django.utils import timezone

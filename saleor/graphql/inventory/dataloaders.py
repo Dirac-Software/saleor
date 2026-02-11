@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 from ...inventory.models import PurchaseOrder
 from ..core.dataloaders import DataLoader
 

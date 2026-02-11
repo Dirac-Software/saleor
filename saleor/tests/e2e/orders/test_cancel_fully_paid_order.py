@@ -86,7 +86,7 @@ def test_cancel_fully_paid_order_CORE_0206(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
 
     # Step 5 - Create a full payment for the order
     create_transaction(

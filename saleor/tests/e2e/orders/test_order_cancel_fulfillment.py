@@ -119,7 +119,7 @@ def test_order_cancel_fulfillment_CORE_0220(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
 
     # Step 2 - Mark order as paid
     order_paid_data = mark_order_paid(
@@ -128,7 +128,9 @@ def test_order_cancel_fulfillment_CORE_0220(
     )
     assert order_paid_data["order"]["isPaid"] is True
     assert order_paid_data["order"]["paymentStatus"] == "FULLY_CHARGED"
-    assert order_paid_data["order"]["status"] == "UNFULFILLED"
+    assert (
+        order_paid_data["order"]["status"] == "UNCONFIRMED"
+    )  # Remains unconfirmed after mark as paid
 
     # Step 3 - Fulfill the order and check the status
     input = {

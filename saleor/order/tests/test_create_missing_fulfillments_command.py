@@ -87,7 +87,13 @@ def test_command_skips_orders_without_allocation_sources(
         tax_rate=0,
     )
 
-    stock = variant.stocks.get(warehouse=warehouse)
+    from ...warehouse.models import Stock
+
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=warehouse,
+        product_variant=variant,
+        defaults={"quantity": 10, "quantity_allocated": 0},
+    )
 
     # Create allocation WITHOUT AllocationSource (shouldn't happen in practice)
     Allocation.objects.create(
