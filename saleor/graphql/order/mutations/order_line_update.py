@@ -4,7 +4,6 @@ from django.core.exceptions import ValidationError
 from ....core.exceptions import InsufficientStock
 from ....core.tracing import traced_atomic_transaction
 from ....order import models
-from ....order.calculations import fetch_order_prices_if_expired
 from ....order.error_codes import OrderErrorCode
 from ....order.fetch import OrderLineInfo
 from ....order.utils import (
@@ -128,6 +127,13 @@ class OrderLineUpdate(
             legacy_price = cleaned_input.get("price")
             should_invalidate_prices = False
 
+            # Check if any price field was explicitly provided (even if None)
+            has_price_input = (
+                "price_net" in cleaned_input
+                or "price_gross" in cleaned_input
+                or "price" in cleaned_input
+            )
+
             # Validate: priceGross cannot be set without priceNet
             if price_gross is not None and price_net is None:
                 raise ValidationError(
@@ -229,10 +235,11 @@ class OrderLineUpdate(
                         "unit_price_gross_amount",
                     ]
                 )
-            else:
-                # No custom prices provided - mark for refresh so discounts and taxes are recalculated
+            elif not has_price_input:
+                # No price fields provided at all - mark for refresh so discounts and taxes are recalculated
                 invalidate_order_prices(order, save=False)
                 should_invalidate_prices = True
+            # else: price field was explicitly provided as None - don't change price
 
             recalculate_order_weight(order)
             update_fields = ["weight", "updated_at"]

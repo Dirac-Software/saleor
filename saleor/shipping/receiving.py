@@ -104,7 +104,7 @@ def create_shipment(
     if shipping_cost is not None:
         shipment_data["shipping_cost_amount"] = Decimal(str(shipping_cost))
 
-    shipment = Shipment.objects.create(**shipment_data)  # type: ignore[misc]
+    shipment = Shipment.objects.create(**shipment_data)
 
     # Link POIs to shipment and log events
     for poi in purchase_order_items:

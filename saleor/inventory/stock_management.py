@@ -1,5 +1,7 @@
 """Stock management utilities for purchase orders and inventory tracking."""
 
+from uuid import UUID
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -194,21 +196,26 @@ def confirm_purchase_order_item(
 
             from django.contrib.sites.models import Site
 
-            from ..order.actions import create_fulfillments, order_confirmed
+            from ..order.actions import (
+                OrderFulfillmentLineInfo,
+                create_fulfillments,
+                order_confirmed,
+            )
             from ..plugins.manager import get_plugins_manager
 
             manager = get_plugins_manager(allow_replica=False)
 
             # Send order confirmed email
-            transaction.on_commit(
-                lambda ord=order, u=user, a=app, m=manager: order_confirmed(
-                    ord,
-                    u,
-                    a,
-                    m,
+            def send_order_confirmation():
+                order_confirmed(
+                    order,
+                    user,
+                    app,
+                    manager,
                     send_confirmation_email=True,
                 )
-            )
+
+            transaction.on_commit(send_order_confirmation)
 
             # Get allocations and group by warehouse
             allocations = Allocation.objects.filter(
@@ -221,15 +228,17 @@ def confirm_purchase_order_item(
                 warehouse_groups[warehouse_pk].append(allocation)
 
             # Build fulfillment_lines_for_warehouses dict
-            fulfillment_lines_for_warehouses = {}
+            fulfillment_lines_for_warehouses: dict[
+                UUID, list[OrderFulfillmentLineInfo]
+            ] = {}
             for warehouse_pk, allocations_list in warehouse_groups.items():
-                lines = []
+                lines: list[OrderFulfillmentLineInfo] = []
                 for allocation in allocations_list:
                     lines.append(
-                        {
-                            "order_line": allocation.order_line,
-                            "quantity": allocation.quantity_allocated,
-                        }
+                        OrderFulfillmentLineInfo(
+                            order_line=allocation.order_line,
+                            quantity=allocation.quantity_allocated,
+                        )
                     )
                 fulfillment_lines_for_warehouses[warehouse_pk] = lines
 

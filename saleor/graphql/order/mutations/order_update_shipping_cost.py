@@ -72,15 +72,16 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         error_type_field = "order_errors"
 
     @classmethod
-    def perform_mutation(cls, _root, info: ResolveInfo, /, *, id: str, input):
+    def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
         order = cls.get_node_or_error(
             info,
-            id,
+            data["id"],
             only_type=Order,
             qs=models.Order.objects.prefetch_related("lines"),
         )
 
         order = cast(models.Order, order)
+        input = data["input"]
 
         cls.check_channel_permissions(info, [order.channel_id])
         cls.validate_order(order)

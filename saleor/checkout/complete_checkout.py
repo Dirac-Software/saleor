@@ -794,7 +794,6 @@ def _create_order(
     """
     from ..order.utils import add_gift_cards_to_order
 
-    print("\nDEBUG: _create_order called (line 771)\n")
     checkout = checkout_info.checkout
     order = Order.objects.filter(checkout_token=checkout.token).first()
     if order is not None:
@@ -806,8 +805,7 @@ def _create_order(
     if site_settings is None:
         site_settings = Site.objects.get_current().settings
 
-    auto_confirm = checkout_info.channel.automatically_confirm_all_new_orders
-    print(f"\nDEBUG _create_order: auto_confirm={auto_confirm}, channel.automatically_confirm_all_new_orders={checkout_info.channel.automatically_confirm_all_new_orders}\n")
+    auto_confirm = bool(checkout_info.channel.automatically_confirm_all_new_orders)
     status = OrderStatus.UNFULFILLED if auto_confirm else OrderStatus.UNCONFIRMED
     order = Order.objects.create(
         **order_data,
@@ -1434,9 +1432,9 @@ def _create_order_from_checkout(
     )
 
     # status
-    checkout_is_zero = checkout_info.checkout.total.gross.amount == Decimal(0)
-    auto_confirm = checkout_info.channel.automatically_confirm_all_new_orders and (
-        checkout_is_zero or checkout_info.checkout.payment_transactions.exists()
+    auto_confirm = bool(
+        checkout_info.channel.automatically_confirm_all_new_orders
+        and checkout_info.checkout.payment_transactions.exists()
     )
     status = OrderStatus.UNFULFILLED if auto_confirm else OrderStatus.UNCONFIRMED
     checkout_metadata = get_or_create_checkout_metadata(checkout_info.checkout)

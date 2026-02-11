@@ -16,7 +16,6 @@ from ....discount.utils.voucher import (
 )
 from ....order import OrderStatus, models
 from ....order.actions import call_order_event
-from ....order.calculations import fetch_order_prices_if_expired
 from ....order.error_codes import OrderErrorCode
 from ....order.search import update_order_search_vector
 from ....order.utils import invalidate_order_prices
@@ -431,12 +430,6 @@ class DraftOrderUpdate(
         order_modified, metadata_modified = cls._save(
             instance_tracker, metadata_collection, private_metadata_collection
         )
-
-        # Recalculate prices if needed (shipping method, address, voucher changes)
-        if instance.should_refresh_prices:
-            instance, _ = fetch_order_prices_if_expired(
-                instance, manager, None, force_update=True
-            )
 
         if order_modified or metadata_modified:
             site = get_site_promise(info.context).get()

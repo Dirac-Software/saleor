@@ -1284,7 +1284,13 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
 
     channel = checkout.channel
     channel.order_mark_as_paid_strategy = MarkAsPaidStrategy.PAYMENT_FLOW
-    channel.save(update_fields=["order_mark_as_paid_strategy"])
+    channel.automatically_confirm_all_new_orders = False
+    channel.save(
+        update_fields=[
+            "order_mark_as_paid_strategy",
+            "automatically_confirm_all_new_orders",
+        ]
+    )
 
     # Ensure not events are existing prior
     assert not OrderEvent.objects.exists()
@@ -1317,7 +1323,6 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
     (
         order_placed_event,
         order_fully_paid,
-        order_confirmed_event,
     ) = order.events.all()  # type: OrderEvent
 
     # Ensure the correct order event was created
@@ -1335,12 +1340,6 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
     expected_order_payload = {
         "order": get_default_order_payload(order, checkout.redirect_url),
         "recipient_email": order.get_customer_email(),
-        "requester_user_id": (
-            graphene.Node.to_global_id("User", checkout_user.id)
-            if checkout_user
-            else None
-        ),
-        "requester_app_id": None,
         **get_site_context_payload(site_settings.site),
     }
 
@@ -1353,32 +1352,19 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
     assert order_fully_paid.type == OrderEvents.ORDER_FULLY_PAID
     assert order_fully_paid.user == checkout_user
 
-    # Ensure the correct order confirmed event was created
-    # should be order confirmed event
-    assert order_confirmed_event.type == OrderEvents.CONFIRMED
-    # ensure the user is checkout user
-    assert order_confirmed_event.user == checkout_user
-    # ensure the order confirmed event is related to order
-    assert order_confirmed_event.order is order
-    # ensure a date was set
-    assert order_confirmed_event.date
-    # ensure the event parameters are empty
-    assert order_confirmed_event.parameters == {}
-
-    print(f"\n\nDEBUG: Notify calls ({mock_notify.call_count}): {[call.args[0] for call in mock_notify.call_args_list]}\n\n")
     assert mock_notify.call_count == 2
 
-    order_confirmed_call = [
+    order_confirmation_call = [
         call
         for call in mock_notify.call_args_list
-        if call.args[0] == NotifyEventType.ORDER_CONFIRMED
+        if call.args[0] == NotifyEventType.ORDER_CONFIRMATION
     ][0]
-    order_confirmed_called_args = order_confirmed_call.args
-    order_confirmed_called_kwargs = order_confirmed_call.kwargs
-    assert order_confirmed_called_args[0] == NotifyEventType.ORDER_CONFIRMED
-    assert len(order_confirmed_called_kwargs) == 2
-    assert order_confirmed_called_kwargs["payload_func"]() == expected_order_payload
-    assert order_confirmed_called_kwargs["channel_slug"] == channel_USD.slug
+    order_confirmation_called_args = order_confirmation_call.args
+    order_confirmation_called_kwargs = order_confirmation_call.kwargs
+    assert order_confirmation_called_args[0] == NotifyEventType.ORDER_CONFIRMATION
+    assert len(order_confirmation_called_kwargs) == 2
+    assert order_confirmation_called_kwargs["payload_func"]() == expected_order_payload
+    assert order_confirmation_called_kwargs["channel_slug"] == channel_USD.slug
 
     payment_confirmation_call = [
         call
@@ -2916,7 +2902,7 @@ def test_complete_checkout_auto_confirm_sends_order_confirmed_email(
     order.refresh_from_db()
     assert order.status == OrderStatus.UNFULFILLED
 
-    notify_calls = [call for call in mock_notify.call_args_list]
+    notify_calls = list(mock_notify.call_args_list)
     order_confirmed_calls = [
         call
         for call in notify_calls

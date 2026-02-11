@@ -895,7 +895,7 @@ class Fulfillment(ModelWithMetadata):
 
         super().clean()
 
-        if self.shipment_id:
+        if self.shipment_id and self.shipment:
             if self.shipment.shipment_type != ShipmentType.OUTBOUND:
                 raise ValidationError(
                     {
