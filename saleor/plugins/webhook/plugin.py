@@ -150,6 +150,7 @@ if TYPE_CHECKING:
     from ...discount.models import Promotion, PromotionRule, Voucher, VoucherCode
     from ...giftcard.models import GiftCard
     from ...graphql.core.dataloaders import DataLoader
+    from ...inventory.models import PurchaseOrder
     from ...invoice.models import Invoice
     from ...menu.models import Menu, MenuItem
     from ...order.models import Fulfillment, Order
@@ -1638,7 +1639,7 @@ class WebhookPlugin(BasePlugin):
         )
         return previous_value
 
-    def tracking_number_updated(
+    def tracking_url_updated(
         self, fulfillment: "Fulfillment", previous_value: None
     ) -> None:
         if not self.active:
@@ -1650,7 +1651,6 @@ class WebhookPlugin(BasePlugin):
                 fulfillment_data,
                 event_type,
                 webhooks,
-                fulfillment,
                 self.requestor,
             )
         return previous_value
@@ -2611,6 +2611,43 @@ class WebhookPlugin(BasePlugin):
             return previous_value
         self._trigger_warehouse_event(
             WebhookEventAsyncType.WAREHOUSE_UPDATED, warehouse
+        )
+        return previous_value
+
+    def _trigger_purchase_order_event(self, event_type, purchase_order):
+        if webhooks := get_webhooks_for_event(event_type):
+            payload = self._serialize_payload(
+                {
+                    "id": graphene.Node.to_global_id(
+                        "PurchaseOrder", purchase_order.id
+                    ),
+                }
+            )
+            self.trigger_webhooks_async(
+                payload,
+                event_type,
+                webhooks,
+                purchase_order,
+                self.requestor,
+            )
+
+    def purchase_order_created(
+        self, purchase_order: "PurchaseOrder", previous_value: None
+    ) -> None:
+        if not self.active:
+            return previous_value
+        self._trigger_purchase_order_event(
+            WebhookEventAsyncType.PURCHASE_ORDER_CREATED, purchase_order
+        )
+        return previous_value
+
+    def purchase_order_confirmed(
+        self, purchase_order: "PurchaseOrder", previous_value: None
+    ) -> None:
+        if not self.active:
+            return previous_value
+        self._trigger_purchase_order_event(
+            WebhookEventAsyncType.PURCHASE_ORDER_CONFIRMED, purchase_order
         )
         return previous_value
 

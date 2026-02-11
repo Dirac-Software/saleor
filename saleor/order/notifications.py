@@ -397,7 +397,7 @@ def get_default_fulfillment_payload(order, fulfillment):
             order, order.redirect_url, attribute_data=attribute_data
         ),
         "fulfillment": {
-            "tracking_number": fulfillment.tracking_number,
+            "tracking_url": fulfillment.tracking_url,
             "is_tracking_number_url": fulfillment.is_tracking_number_url,
         },
         "physical_lines": [

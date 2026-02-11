@@ -310,6 +310,19 @@ class StockBulkUpdate(BaseMutation):
             filter_stock = selectors_stock_map.get(f"{variant_value}_{warehouse_value}")
 
             if filter_stock:
+                # Check if warehouse is owned - owned warehouses cannot be updated directly
+                if filter_stock.warehouse.is_owned:
+                    index_error_map[index].append(
+                        StockBulkUpdateError(
+                            message="Cannot update stock for owned warehouse. Stock updates for owned warehouses are managed through OrderConsumption.",
+                            code=StockBulkUpdateErrorCode.OWNED_WAREHOUSE.value,
+                        )
+                    )
+                    instances_data_and_errors_list.append(
+                        {"instance": None, "errors": index_error_map[index]}
+                    )
+                    continue
+
                 quantity_updated = filter_stock.quantity != cleaned_input["quantity"]
                 filter_stock.quantity = cleaned_input["quantity"]
                 instances_data_and_errors_list.append(
@@ -364,6 +377,7 @@ class StockBulkUpdate(BaseMutation):
         stocks = (
             stock_qs_select_for_update()
             .filter(warehouse_lookup & variant_lookup)
+            .select_related("warehouse")
             .annotate(
                 variant_external_reference=F("product_variant__external_reference"),
                 warehouse_external_reference=F("warehouse__external_reference"),

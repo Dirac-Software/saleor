@@ -205,7 +205,7 @@ def test_gift_cards_create(
     manager = get_plugins_manager(allow_replica=False)
     line_1, line_2 = gift_card_shippable_order_line, gift_card_non_shippable_order_line
     user_email = order.user_email
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     fulfillment_line_1 = fulfillment.lines.create(
         order_line=line_1,
         quantity=line_1.quantity,
@@ -315,7 +315,7 @@ def test_gift_cards_create_expiry_date_set(
     )
     line_1 = gift_card_non_shippable_order_line
     user_email = order.user_email
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     fulfillment_line_1 = fulfillment.lines.create(
         order_line=line_1,
         quantity=line_1.quantity,
@@ -382,7 +382,7 @@ def test_gift_cards_create_multiple_quantity(
     quantity = 3
     gift_card_non_shippable_order_line.quantity = quantity
     gift_card_non_shippable_order_line.save(update_fields=["quantity"])
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     stock = gift_card_non_shippable_order_line.allocations.get().stock
     fulfillment_line = fulfillment.lines.create(
         order_line=gift_card_non_shippable_order_line, quantity=quantity, stock=stock
@@ -438,7 +438,7 @@ def test_gift_cards_create_trigger_webhook(
 
     manager = get_plugins_manager(allow_replica=False)
     line_1, line_2 = gift_card_shippable_order_line, gift_card_non_shippable_order_line
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     fulfillment_line_1 = fulfillment.lines.create(
         order_line=line_1,
         quantity=line_1.quantity,

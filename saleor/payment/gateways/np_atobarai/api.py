@@ -224,7 +224,7 @@ def report_fulfillment(
         config,
         shipping_company_code,
         payment.psp_reference,
-        fulfillment.tracking_number,
+        fulfillment.tracking_url,
     )
 
     errors = get_error_messages_from_codes(

@@ -2142,14 +2142,14 @@ def test_fulfillment_metadata_updated(
     assert deliveries[0].webhook == webhooks[0]
 
 
-def test_fulfillment_tracking_number_updated(
-    fulfillment, subscription_fulfillment_tracking_number_updated
+def test_fulfillment_tracking_url_updated(
+    fulfillment, subscription_fulfillment_tracking_url_updated
 ):
     # given
-    webhooks = [subscription_fulfillment_tracking_number_updated]
+    webhooks = [subscription_fulfillment_tracking_url_updated]
     event_type = WebhookEventAsyncType.FULFILLMENT_TRACKING_NUMBER_UPDATED
     expected_payload = generate_fulfillment_payload(
-        fulfillment, subscription_fulfillment_tracking_number_updated.app
+        fulfillment, subscription_fulfillment_tracking_url_updated.app
     )
 
     # when

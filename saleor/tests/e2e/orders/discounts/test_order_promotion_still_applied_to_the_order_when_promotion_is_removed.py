@@ -160,4 +160,4 @@ def test_order_promotion_still_applied_to_the_order_when_promotion_is_removed_CO
     assert total == order["order"]["total"]["gross"]["amount"]
     assert total == float(total_gross_amount)
 
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"

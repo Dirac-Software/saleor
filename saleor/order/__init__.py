@@ -38,6 +38,15 @@ class OrderStatus:
 
 ORDER_EDITABLE_STATUS = (OrderStatus.DRAFT, OrderStatus.UNCONFIRMED)
 
+# Statuses where items have physically left the warehouse (shipped/returned)
+# Orders in these statuses cannot have their allocations modified
+ORDER_ITEMS_SHIPPED_STATUS = (
+    OrderStatus.PARTIALLY_FULFILLED,
+    OrderStatus.FULFILLED,
+    OrderStatus.PARTIALLY_RETURNED,
+    OrderStatus.RETURNED,
+)
+
 
 class OrderOrigin:
     CHECKOUT = "checkout"  # order created from checkout
@@ -74,6 +83,18 @@ class FulfillmentStatus:
         (REFUNDED_AND_RETURNED, "Refunded and returned"),
         (CANCELED, "Canceled"),
         (WAITING_FOR_APPROVAL, "Waiting for approval"),
+    ]
+
+
+class PickStatus:
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+    CHOICES = [
+        (NOT_STARTED, "Not Started"),
+        (IN_PROGRESS, "In Progress"),
+        (COMPLETED, "Completed"),
     ]
 
 

@@ -6,7 +6,7 @@ from ....order.models import Fulfillment
 from ....plugins.base_plugin import BasePlugin, ConfigurationTypeField
 from ....plugins.error_codes import PluginErrorCode
 from ...interface import GatewayConfig
-from . import capture, process_payment, refund, tracking_number_updated, void
+from . import capture, process_payment, refund, tracking_url_updated, void
 from .api_helpers import health_check
 from .api_types import get_api_config
 from .const import (
@@ -143,8 +143,8 @@ class NPAtobaraiGatewayPlugin(BasePlugin):
             get_api_config(self._get_gateway_config().connection_params),
         )
 
-    def tracking_number_updated(self, fulfillment: "Fulfillment", previous_value):
-        tracking_number_updated(
+    def tracking_url_updated(self, fulfillment: "Fulfillment", previous_value):
+        tracking_url_updated(
             fulfillment, get_api_config(self._get_gateway_config().connection_params)
         )
 

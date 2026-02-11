@@ -122,6 +122,6 @@ def test_digital_order_calculate_simple_tax_based_on_billing_country_CORE_2008(
         e2e_staff_api_client,
         order_id,
     )
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     assert order["order"]["paymentStatus"] == "NOT_CHARGED"
     assert order["order"]["total"]["tax"]["amount"] == billing_tax

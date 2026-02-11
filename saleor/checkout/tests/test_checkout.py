@@ -1624,6 +1624,7 @@ def test_change_address_in_checkout_from_user_address_to_other(
 ):
     address_id = address.id
     checkout.user = customer_user
+    customer_user.addresses.add(address)
     checkout.shipping_address = address
     checkout.billing_address = address.get_copy()
     checkout.save(update_fields=["shipping_address", "billing_address"])

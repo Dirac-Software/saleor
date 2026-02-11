@@ -144,7 +144,7 @@ def generate_fulfillment_payload(
             "shippingRefundedAmount": None,
             "totalRefundedAmount": None,
             "fulfillmentOrder": fulfillment.fulfillment_order,
-            "trackingNumber": fulfillment.tracking_number,
+            "trackingUrl": fulfillment.tracking_url,
             "status": fulfillment.status.upper(),
             "lines": generate_fulfillment_lines_payload(fulfillment),
         },

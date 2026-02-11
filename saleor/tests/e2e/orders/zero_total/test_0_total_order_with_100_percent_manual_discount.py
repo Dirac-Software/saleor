@@ -162,7 +162,7 @@ def test_complete_draft_order_with_0_total_100_percent_manual_total_discount_COR
         e2e_staff_api_client,
         order_id,
     )
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     assert order["order"]["total"]["gross"]["amount"] == 0
     assert order["order"]["subtotal"]["gross"]["amount"] == 0
     assert order["order"]["discounts"][0]["amount"]["amount"] == calculated_total

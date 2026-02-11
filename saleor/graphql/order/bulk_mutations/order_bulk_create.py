@@ -1873,7 +1873,7 @@ class OrderBulkCreate(BaseMutation, I18nMixin):
         fulfillment = Fulfillment(
             order=order_data.order,
             status=FulfillmentStatus.FULFILLED,
-            tracking_number=fulfillment_input.get("tracking_code") or "",
+            tracking_url=fulfillment_input.get("tracking_code") or "",
             fulfillment_order=1,
         )
 
@@ -2151,6 +2151,12 @@ class OrderBulkCreate(BaseMutation, I18nMixin):
             user_orders_count[order_data.user.id] += 1
         order_data.order.billing_address = order_data.billing_address
         order_data.order.shipping_address = order_data.shipping_address
+
+        from ....account.vat_utils import should_apply_vat_exemption
+
+        if should_apply_vat_exemption(order_data.billing_address):
+            order_data.order.tax_exemption = True
+
         order_data.order.language_code = order_input["language_code"]
         order_data.order.user_email = (
             order_data.user.email

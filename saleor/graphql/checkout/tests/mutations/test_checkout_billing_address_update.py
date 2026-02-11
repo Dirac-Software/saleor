@@ -745,7 +745,7 @@ def test_checkout_billing_address_triggers_webhooks(
 def test_checkout_billing_address_update_reset_the_save_address_flag_to_default_value(
     checkout_with_items,
     user_api_client,
-    graphql_address_data,
+    graphql_address_data_with_vat,
     address,
 ):
     checkout = checkout_with_items
@@ -766,7 +766,7 @@ def test_checkout_billing_address_update_reset_the_save_address_flag_to_default_
 
     variables = {
         "id": to_global_id_or_none(checkout_with_items),
-        "billingAddress": graphql_address_data,
+        "billingAddress": graphql_address_data_with_vat,
     }
 
     # when the checkout billing address is updated without providing saveAddress flag
@@ -782,7 +782,7 @@ def test_checkout_billing_address_update_reset_the_save_address_flag_to_default_
     assert not data["errors"]
 
     checkout.refresh_from_db()
-    assert_address_data(checkout.billing_address, graphql_address_data)
+    assert_address_data(checkout.billing_address, graphql_address_data_with_vat)
     assert checkout.save_billing_address is True
     assert checkout.save_shipping_address is False
 

@@ -271,10 +271,32 @@ class ProductVariantCreate(DeprecatedModelMutation):
 
     @classmethod
     def create_variant_stocks(cls, variant, stocks):
+        from .....warehouse.error_codes import StockErrorCode
+
         warehouse_ids = [stock["warehouse"] for stock in stocks]
         warehouses = cls.get_nodes_or_error(
             warehouse_ids, "warehouse", only_type=Warehouse
         )
+
+        # Check for owned warehouses - cannot create stocks in owned warehouses
+        owned_warehouse_indexes = []
+        for i, warehouse in enumerate(warehouses):
+            if warehouse.is_owned:
+                owned_warehouse_indexes.append(i)
+
+        if owned_warehouse_indexes:
+            error_msg = (
+                "Cannot create stock for owned warehouse. Stocks for owned "
+                "warehouses are managed through PurchaseOrder."
+            )
+            raise ValidationError(
+                {
+                    "stocks": ValidationError(
+                        error_msg, code=StockErrorCode.OWNED_WAREHOUSE.value
+                    )
+                }
+            )
+
         create_stocks(variant, stocks, warehouses)
 
     @classmethod

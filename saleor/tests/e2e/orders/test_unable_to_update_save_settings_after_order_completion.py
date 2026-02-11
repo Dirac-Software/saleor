@@ -105,7 +105,7 @@ def test_unable_to_update_save_settings_after_order_complete_CORE_0255(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     order_billing_address = order["order"]["billingAddress"]
     order_shipping_address = order["order"]["shippingAddress"]
     assert_address_data(order_billing_address, billing_address)

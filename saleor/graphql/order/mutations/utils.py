@@ -113,6 +113,11 @@ class ShippingMethodUpdateMixin:
 
     @classmethod
     def update_shipping_method(cls, order: models.Order, method: ShippingMethod):
+        # Clear shipping price so new price can be calculated from the new method
+        # This ensures assign_shipping_price will recalculate from the new method's price
+        order.base_shipping_price = zero_money(order.currency)
+        order.undiscounted_base_shipping_price = zero_money(order.currency)
+
         order.shipping_method = method
         order.shipping_method_name = method.name
 
@@ -152,23 +157,27 @@ class ShippingMethodUpdateMixin:
 
     @classmethod
     def assign_shipping_price(cls, order, shipping_channel_listing):
+        # Auto-calculate shipping price ONLY if not already set (base_shipping_price is zero)
+        # This allows both workflows:
+        # 1. Normal flow: Auto-calculate from channel listing on first set
+        # 2. Manual override: Use orderUpdateShippingCost - won't be overwritten
+        # Once set (auto or manual), price is stable until explicitly changed
+
         if not shipping_channel_listing:
             order.base_shipping_price = zero_money(order.currency)
             order.undiscounted_base_shipping_price = zero_money(order.currency)
             return
 
+        # Only auto-calculate if price is currently zero (not yet set)
         if (
             order.shipping_method
             and order.shipping_address
             and order.is_shipping_required()
+            and order.base_shipping_price_amount == 0
         ):
             undiscounted_shipping_price = shipping_channel_listing.price
             order.undiscounted_base_shipping_price = undiscounted_shipping_price
             order.base_shipping_price = undiscounted_shipping_price
-
-        else:
-            order.base_shipping_price = zero_money(order.currency)
-            order.undiscounted_base_shipping_price = zero_money(order.currency)
 
     @classmethod
     def update_shipping_discount(cls, order: models.Order):

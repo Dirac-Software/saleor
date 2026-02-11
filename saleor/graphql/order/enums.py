@@ -11,6 +11,7 @@ from ...order import (
     OrderGrantedRefundStatus,
     OrderOrigin,
     OrderStatus,
+    PickStatus,
     StockUpdatePolicy,
     error_codes,
 )
@@ -29,6 +30,9 @@ FulfillmentStatusEnum: Final[graphene.Enum] = to_enum(
     FulfillmentStatus, type_name="FulfillmentStatus"
 )
 FulfillmentStatusEnum.doc_category = DOC_CATEGORY_ORDERS
+
+PickStatusEnum: Final[graphene.Enum] = to_enum(PickStatus, type_name="PickStatus")
+PickStatusEnum.doc_category = DOC_CATEGORY_ORDERS
 
 OrderEventsEnum: Final[graphene.Enum] = to_enum(
     OrderEvents, description=order_event_enum_description

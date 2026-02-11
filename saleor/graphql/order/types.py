@@ -177,6 +177,7 @@ from .enums import (
     OrderGrantedRefundStatusEnum,
     OrderOriginEnum,
     OrderStatusEnum,
+    PickStatusEnum,
 )
 from .utils import validate_draft_order
 
@@ -846,8 +847,8 @@ class Fulfillment(
         description="Sequence in which the fulfillments were created for an order.",
     )
     status = FulfillmentStatusEnum(required=True, description="Status of fulfillment.")
-    tracking_number = graphene.String(
-        required=True, description="Fulfillment tracking number."
+    tracking_url = graphene.String(
+        required=False, description="Fulfillment tracking URL."
     )
     created = DateTime(
         required=True, description="Date and time when fulfillment was created."
@@ -870,6 +871,37 @@ class Fulfillment(
         Money,
         description="Total refunded amount assigned to this fulfillment.",
         required=False,
+    )
+    order = graphene.Field(
+        lambda: Order,
+        description="Order that this fulfillment belongs to.",
+        required=True,
+    )
+    pick = graphene.Field(
+        lambda: Pick,
+        description="Pick associated with this fulfillment for warehouse picking workflow.",
+        required=False,
+    )
+    shipment = graphene.Field(
+        "saleor.graphql.shipping.types.Shipment",
+        description="Shipment associated with this fulfillment.",
+        required=False,
+    )
+    departed_at = DateTime(
+        description="When the shipment departed (for outbound fulfillments).",
+        required=False,
+    )
+    arrived_at = DateTime(
+        description="When the shipment arrived (for inbound fulfillments).",
+        required=False,
+    )
+    has_inventory_received = graphene.Boolean(
+        description=(
+            "Indicates if all required inventory from purchase orders has been "
+            "received in the warehouse. True when all allocations have matching "
+            "allocation sources, meaning the purchased goods have physically arrived."
+        ),
+        required=True,
     )
 
     class Meta:
@@ -968,6 +1000,47 @@ class Fulfillment(
             .load(fulfillment.order_id)
             .then(_resolve_total_refund_amount)
         )
+
+    @staticmethod
+    def resolve_order(root: SyncWebhookControlContext[models.Fulfillment], info):
+        return (
+            OrderByIdLoader(info.context)
+            .load(root.node.order_id)
+            .then(
+                lambda order: SyncWebhookControlContext(
+                    node=order, allow_sync_webhooks=root.allow_sync_webhooks
+                )
+            )
+        )
+
+    @staticmethod
+    def resolve_pick(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        try:
+            return root.node.pick
+        except models.Pick.DoesNotExist:
+            return None
+
+    @staticmethod
+    def resolve_shipment(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        return root.node.shipment
+
+    @staticmethod
+    def resolve_departed_at(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        if root.node.shipment:
+            return root.node.shipment.departed_at
+        return None
+
+    @staticmethod
+    def resolve_arrived_at(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        if root.node.shipment:
+            return root.node.shipment.arrived_at
+        return None
+
+    @staticmethod
+    def resolve_has_inventory_received(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        return root.node.has_inventory_received
 
 
 class OrderLine(
@@ -1626,6 +1699,10 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     )
     tax_exemption = graphene.Boolean(
         description="Returns True if order has to be exempt from taxes.",
+        required=True,
+    )
+    should_refresh_prices = graphene.Boolean(
+        description="Returns True if order prices need to be recalculated.",
         required=True,
     )
     transactions = NonNullList(
@@ -3140,3 +3217,115 @@ class OrderCountableConnection(CountableConnection):
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
         node = Order
+
+
+class PickItem(ModelObjectType[models.PickItem]):
+    order_line = graphene.Field(
+        OrderLine,
+        description="The order line being picked.",
+        required=True,
+    )
+    quantity_to_pick = graphene.Int(
+        description="Quantity that needs to be picked.",
+        required=True,
+    )
+    quantity_picked = graphene.Int(
+        description="Quantity physically picked from warehouse.",
+        required=True,
+    )
+    is_fully_picked = graphene.Boolean(
+        description="Whether this item has been fully picked.",
+        required=True,
+    )
+    picked_at = DateTime(
+        description="When this item was marked as fully picked.",
+    )
+    picked_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who picked this item.",
+    )
+    notes = graphene.String(
+        description="Notes about picking this specific item.",
+    )
+
+    @staticmethod
+    def resolve_order_line(root: models.PickItem, _info):
+        from ..core.context import SyncWebhookControlContext
+
+        return SyncWebhookControlContext(node=root.order_line)
+
+    class Meta:
+        description = "Represents a line item in a pick document."
+        interfaces = [graphene.relay.Node]
+        model = models.PickItem
+        doc_category = DOC_CATEGORY_ORDERS
+
+
+class Pick(ModelObjectType[models.Pick]):
+    fulfillment = graphene.Field(
+        Fulfillment,
+        description="The fulfillment being picked.",
+        required=True,
+    )
+    status = PickStatusEnum(
+        description="Current status of the pick.",
+        required=True,
+    )
+    items = graphene.List(
+        graphene.NonNull(PickItem),
+        description="Items to be picked in this pick document.",
+        required=True,
+    )
+    created_at = DateTime(
+        description="When the pick was created.",
+        required=True,
+    )
+    started_at = DateTime(
+        description="When picking was started.",
+    )
+    completed_at = DateTime(
+        description="When picking was completed.",
+    )
+    created_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="User who created the pick.",
+    )
+    started_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who started picking.",
+    )
+    completed_by = graphene.Field(
+        "saleor.graphql.account.types.User",
+        description="Warehouse staff who completed picking.",
+    )
+    notes = graphene.String(
+        description="Notes about this pick.",
+    )
+
+    @staticmethod
+    def resolve_fulfillment(root: models.Pick, _info):
+        from ..core.context import SyncWebhookControlContext
+
+        return SyncWebhookControlContext(node=root.fulfillment)
+
+    @staticmethod
+    def resolve_items(root: models.Pick, _info):
+        return root.items.all()
+
+    class Meta:
+        description = "Represents a pick document for order fulfillment."
+        interfaces = [graphene.relay.Node]
+        model = models.Pick
+        doc_category = DOC_CATEGORY_ORDERS
+
+
+class FulfillmentCountableConnection(CountableConnection):
+    class Meta:
+        doc_category = DOC_CATEGORY_ORDERS
+        node = Fulfillment
+
+
+class PickCountableConnection(CountableConnection):
+    class Meta:
+        doc_category = DOC_CATEGORY_ORDERS
+        node = Pick

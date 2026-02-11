@@ -91,7 +91,7 @@ def test_unable_to_void_order_without_payment_CORE_0210(
     order_line = order["order"]["lines"][0]
     assert order_complete_id == order_id
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
 
     # Step 5 - Void the order
     order = raw_order_void(

@@ -20,6 +20,7 @@ from ..core.context import (
 from ..core.descriptions import DEFAULT_DEPRECATION_REASON, RICH_CONTENT
 from ..core.doc_category import DOC_CATEGORY_SHIPPING
 from ..core.fields import ConnectionField, JSONString, PermissionsField
+from ..core.scalars import DateTime
 from ..core.tracing import traced_resolver
 from ..core.types import (
     BaseObjectType,
@@ -47,7 +48,12 @@ from .dataloaders import (
     ShippingMethodsByShippingZoneIdAndChannelSlugLoader,
     ShippingMethodsByShippingZoneIdLoader,
 )
-from .enums import PostalCodeRuleInclusionTypeEnum, ShippingMethodTypeEnum
+from .enums import (
+    IncoTermEnum,
+    PostalCodeRuleInclusionTypeEnum,
+    ShipmentTypeEnum,
+    ShippingMethodTypeEnum,
+)
 
 
 class ShippingMethodChannelListing(
@@ -433,3 +439,74 @@ class ShippingMethodsPerCountry(BaseObjectType):
     class Meta:
         doc_category = DOC_CATEGORY_SHIPPING
         description = "List of shipping methods available for the country."
+
+
+class Shipment(ModelObjectType[models.Shipment]):
+    id = graphene.GlobalID(required=True, description="The ID of the shipment.")
+    source = graphene.Field(
+        "saleor.graphql.account.types.Address",
+        required=True,
+        description="Source address (where shipment originates).",
+    )
+    destination = graphene.Field(
+        "saleor.graphql.account.types.Address",
+        required=True,
+        description="Destination address (where shipment is going).",
+    )
+    shipping_cost = graphene.Field(
+        Money,
+        description="Shipping cost including VAT (estimated until invoice added, null if not set).",
+    )
+    shipping_invoice = graphene.Field(
+        "saleor.graphql.invoice.types.Invoice",
+        description="Shipping invoice (null if not yet received).",
+    )
+    arrived_at = DateTime(
+        description="When shipment arrived (null if still in transit)."
+    )
+    departed_at = DateTime(
+        description="When shipment departed (null for inbound shipments)."
+    )
+    carrier = graphene.String(description="Carrier name (e.g., DHL, FedEx).")
+    tracking_url = graphene.String(
+        description="Tracking URL or number. Can be used to fetch shipment status from carrier APIs."
+    )
+    inco_term = IncoTermEnum(
+        description="Incoterm defining shipping cost responsibility."
+    )
+    shipment_type = ShipmentTypeEnum(
+        required=True,
+        description="Type of shipment: inbound from supplier or outbound to customer.",
+    )
+    shipment_processed_at = DateTime(
+        description="When shipment was processed/finalized."
+    )
+    purchase_order_items = NonNullList(
+        "saleor.graphql.inventory.types.PurchaseOrderItem",
+        required=True,
+        description="Purchase order items in this shipment.",
+    )
+    receipt = graphene.Field(
+        "saleor.graphql.inventory.types.Receipt",
+        description="Receipt for this shipment (null if not yet received).",
+    )
+
+    class Meta:
+        description = "Represents a shipment of goods from supplier to warehouse."
+        model = models.Shipment
+        interfaces = [relay.Node]
+        doc_category = DOC_CATEGORY_SHIPPING
+
+    @staticmethod
+    def resolve_purchase_order_items(root, info):
+        return root.purchase_order_items.all()
+
+    @staticmethod
+    def resolve_receipt(root, info):
+        return getattr(root, "receipt", None)
+
+
+class ShipmentCountableConnection(CountableConnection):
+    class Meta:
+        doc_category = DOC_CATEGORY_SHIPPING
+        node = Shipment

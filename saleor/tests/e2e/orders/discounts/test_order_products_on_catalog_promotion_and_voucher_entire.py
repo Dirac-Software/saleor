@@ -526,7 +526,7 @@ def test_order_products_on_catalog_promotion_and_voucher_entire_order_CORE_2131(
     # Step 5 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["total"]["gross"]["amount"] == total_gross_with_voucher
     assert completed_order["total"]["net"]["amount"] == total_net_with_voucher
     assert completed_order["subtotal"]["gross"]["amount"] == subtotal_gross_with_voucher

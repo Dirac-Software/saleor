@@ -1,14 +1,17 @@
+from decimal import Decimal
 from unittest import mock
 
 import pytest
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from ...channel import AllocationStrategy
 from ...core.exceptions import InsufficientStock
 from ...order.fetch import OrderLineInfo
 from ...order.models import OrderLine
 from ...plugins.manager import get_plugins_manager
+from ...shipping import IncoTerm, ShipmentType
 from ...warehouse.models import Stock
 from ..management import (
     allocate_preorders,
@@ -28,6 +31,9 @@ COUNTRY_CODE = "US"
 def test_allocate_stocks(order_line, stock, channel_USD):
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=50)
 
@@ -64,6 +70,12 @@ def test_allocate_stocks_multiple_lines_the_highest_stock_strategy(
 
     quantity_1 = 50
     quantity_2 = 5
+
+    order_line.quantity = quantity_1
+    order_line.save(update_fields=["quantity"])
+    order_line_2.quantity = quantity_2
+    order_line_2.save(update_fields=["quantity"])
+
     line_data_1 = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity_1
     )
@@ -93,6 +105,9 @@ def test_allocate_stock_many_stocks_the_highest_stock_strategy(
 ):
     variant = variant_with_many_stocks
     stocks = variant.stocks.all()
+
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=5)
     allocate_stocks(
@@ -125,6 +140,9 @@ def test_allocate_stocks_the_highest_stock_strategy_with_collection_point(
     cc_stock.save(update_fields=["quantity", "product_variant"])
 
     stocks = variant.stocks.all()
+
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=5)
     allocate_stocks(
@@ -161,6 +179,9 @@ def test_allocate_stock_many_stocks_prioritize_sorting_order_strategy(
     )
 
     quantity = 5
+
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
@@ -223,6 +244,9 @@ def test_allocate_stock_prioritize_sorting_order_strategy_with_collection_point(
     cc_stock.product_variant = variant
     cc_stock.save(update_fields=["quantity", "product_variant"])
 
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity
     )
@@ -251,6 +275,9 @@ def test_allocate_stock_with_reservations_the_highest_stock_strategy(
 ):
     variant = variant_with_many_stocks
     stocks = variant.stocks.all()
+
+    order_line.quantity = 3
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=3)
     allocate_stocks(
@@ -296,6 +323,9 @@ def test_allocate_stock_with_reservations_prioritize_sorting_order_strategy(
     reservation.stock = stock_2
     reservation.save(update_fields=["stock", "quantity_reserved"])
 
+    order_line.quantity = 3
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=3)
 
     # when
@@ -326,6 +356,9 @@ def test_allocate_stock_insufficient_stock_due_to_reservations(
     variant = variant_with_many_stocks
     variant.stocks.all()
 
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=5)
 
     with pytest.raises(InsufficientStock):
@@ -354,6 +387,9 @@ def test_allocate_stock_many_stocks_partially_allocated(
         .order_by("-available_quantity")
         .values_list("id", flat=True)
     )
+
+    order_line.quantity = 3
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=3)
 
@@ -385,6 +421,9 @@ def test_allocate_stock_partially_allocated_insufficient_stocks(
     variant = allocated_line.variant
     stocks = variant.stocks.all()
 
+    order_line.quantity = 6
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=6)
     with pytest.raises(InsufficientStock):
         allocate_stocks(
@@ -405,6 +444,9 @@ def test_allocate_stocks_no_channel_shipping_zones(order_line, stock, channel_US
     stock.quantity = 100
     stock.save(update_fields=["quantity"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=50)
     with pytest.raises(InsufficientStock):
         allocate_stocks(
@@ -420,6 +462,9 @@ def test_allocate_stock_insufficient_stocks(
 ):
     variant = variant_with_many_stocks
     stocks = variant.stocks.all()
+
+    order_line.quantity = 10
+    order_line.save(update_fields=["quantity"])
 
     line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=10)
     with pytest.raises(InsufficientStock):
@@ -453,6 +498,12 @@ def test_allocate_stock_insufficient_stocks_for_multiple_lines(
 
     quantity_1 = 100
     quantity_2 = 100
+
+    order_line.quantity = quantity_1
+    order_line.save(update_fields=["quantity"])
+    order_line_2.quantity = quantity_2
+    order_line_2.save(update_fields=["quantity"])
+
     line_data_1 = OrderLineInfo(
         line=order_line, variant=order_line.variant, quantity=quantity_1
     )
@@ -626,6 +677,10 @@ def test_increase_stock_with_new_allocation(order_line, stock):
 @pytest.mark.parametrize("quantity", [19, 20])
 def test_increase_allocations(quantity, allocation):
     order_line = allocation.order_line
+    # Set order_line quantity to accommodate initial allocation (80) + increase (19 or 20)
+    order_line.quantity = 100
+    order_line.save(update_fields=["quantity"])
+
     order_line_info = OrderLineInfo(
         line=order_line,
         quantity=quantity,
@@ -674,6 +729,10 @@ def test_increase_allocations_with_multiple_allocations_for_the_same_stock(
     ).delete()
 
     first_order_line = first_allocation.order_line
+    # Set quantities to accommodate initial allocation (80) + increase
+    first_order_line.quantity = 100
+    first_order_line.save(update_fields=["quantity"])
+
     first_order_line_info = OrderLineInfo(
         line=first_order_line,
         quantity=first_quantity,
@@ -682,6 +741,9 @@ def test_increase_allocations_with_multiple_allocations_for_the_same_stock(
     )
 
     second_order_line = second_allocation.order_line
+    second_order_line.quantity = 100
+    second_order_line.save(update_fields=["quantity"])
+
     second_order_line_info = OrderLineInfo(
         line=second_order_line,
         quantity=second_quantity,
@@ -730,6 +792,10 @@ def test_increase_allocations_with_multiple_allocations_for_the_same_stock(
 
 def test_increase_allocation_insufficient_stock(allocation):
     order_line = allocation.order_line
+    # Set order_line quantity to allow total allocation (80 + 21 = 101)
+    order_line.quantity = 101
+    order_line.save(update_fields=["quantity"])
+
     order_line_info = OrderLineInfo(
         line=order_line,
         quantity=21,
@@ -1226,6 +1292,9 @@ def test_allocate_preorders(
     channel_listing.preorder_quantity_threshold = 100
     channel_listing.save(update_fields=["preorder_quantity_threshold"])
 
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=variant, quantity=50)
 
     allocate_preorders([line_data], channel_USD.slug)
@@ -1323,6 +1392,9 @@ def test_allocate_preorders_with_channel_reservations(
     channel_listing.preorder_quantity_threshold = 5
     channel_listing.save(update_fields=["preorder_quantity_threshold"])
 
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=variant, quantity=5)
 
     with pytest.raises(InsufficientStock):
@@ -1349,6 +1421,9 @@ def test_allocate_preorders_with_global_reservations(
     variant.preorder_global_threshold = 5
     variant.save()
 
+    order_line.quantity = 5
+    order_line.save(update_fields=["quantity"])
+
     line_data = OrderLineInfo(line=order_line, variant=variant, quantity=5)
 
     with pytest.raises(InsufficientStock):
@@ -1366,3 +1441,304 @@ def test_allocate_preorders_with_global_reservations(
         check_reservations=True,
         checkout_lines=[checkout_line_with_reserved_preorder_item],
     )
+
+
+# ==============================================================================
+# OWNED WAREHOUSE PRIORITIZATION TESTS
+# ==============================================================================
+
+
+def test_allocate_prioritizes_owned_over_non_owned_high_stock_strategy(
+    order_line, channel_USD, owned_warehouse, nonowned_warehouse, purchase_order
+):
+    """Test PRIORITIZE_HIGH_STOCK strategy prefers owned warehouse even with less stock.
+
+    Given:
+        - Owned warehouse with 5 units (backed by POI)
+        - Non-owned warehouse with 100 units
+        - Order for 3 units
+        - Strategy: PRIORITIZE_HIGH_STOCK
+
+    Expected:
+        - All 3 units allocated from owned warehouse (not the higher-stock non-owned)
+    """
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...shipping.models import Shipment
+
+    # given
+    channel_USD.allocation_strategy = AllocationStrategy.PRIORITIZE_HIGH_STOCK
+    channel_USD.save(update_fields=["allocation_strategy"])
+
+    # Create POI for owned warehouse (required for AllocationSource creation)
+    shipment = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-OWNED",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+        arrived_at=timezone.now(),
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=order_line.variant,
+        quantity_ordered=5,
+        quantity_allocated=0,
+        total_price_amount=50.0,  # 5 qty × $10.0/unit
+        currency="USD",
+        shipment=shipment,
+        status=PurchaseOrderItemStatus.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+
+    # Create stock in owned warehouse (less stock, backed by POI)
+    owned_stock = owned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=5,
+    )
+
+    # Create stock in non-owned warehouse (more stock, no POI needed)
+    nonowned_stock = nonowned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=100,
+    )
+
+    quantity = 3
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(
+        line=order_line, variant=order_line.variant, quantity=quantity
+    )
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then
+    allocations = Allocation.objects.filter(order_line=order_line)
+
+    # Should have allocated from owned warehouse only
+    assert allocations.count() == 1
+    assert allocations[0].stock == owned_stock
+    assert allocations[0].quantity_allocated == quantity
+
+    # Owned stock should have allocation
+    owned_stock.refresh_from_db()
+    assert owned_stock.quantity_allocated == quantity
+
+    # Non-owned stock should have no allocation
+    nonowned_stock.refresh_from_db()
+    assert nonowned_stock.quantity_allocated == 0
+
+
+def test_allocate_falls_back_to_non_owned_when_owned_insufficient(
+    order_line, channel_USD, owned_warehouse, nonowned_warehouse, purchase_order
+):
+    """Test allocation falls back to non-owned when owned warehouse has insufficient stock.
+
+    Given:
+        - Owned warehouse with 5 units (backed by POI)
+        - Non-owned warehouse with 100 units
+        - Order for 10 units
+
+    Expected:
+        - 5 units from owned warehouse
+        - 5 units from non-owned warehouse
+    """
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...shipping.models import Shipment
+
+    # given
+    channel_USD.allocation_strategy = AllocationStrategy.PRIORITIZE_HIGH_STOCK
+    channel_USD.save(update_fields=["allocation_strategy"])
+
+    # Create POI for owned warehouse
+    shipment = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-OWNED-2",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+        arrived_at=timezone.now(),
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=order_line.variant,
+        quantity_ordered=5,
+        quantity_allocated=0,
+        total_price_amount=50.0,  # 5 qty × $10.0/unit
+        currency="USD",
+        shipment=shipment,
+        status=PurchaseOrderItemStatus.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+
+    # Create stock in owned warehouse (insufficient, backed by POI)
+    owned_stock = owned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=5,
+    )
+
+    # Create stock in non-owned warehouse (fallback)
+    nonowned_stock = nonowned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=100,
+    )
+
+    # Add both warehouses to channel
+
+    quantity = 10
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(
+        line=order_line, variant=order_line.variant, quantity=quantity
+    )
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then
+    allocations = Allocation.objects.filter(order_line=order_line).order_by(
+        "-stock__warehouse__is_owned"
+    )
+
+    # Should have 2 allocations
+    assert allocations.count() == 2
+
+    # First allocation: owned warehouse (full capacity)
+    owned_allocation = allocations.filter(stock__warehouse__is_owned=True).first()
+    assert owned_allocation.stock == owned_stock
+    assert owned_allocation.quantity_allocated == 5
+
+    # Second allocation: non-owned warehouse (remaining)
+    nonowned_allocation = allocations.filter(stock__warehouse__is_owned=False).first()
+    assert nonowned_allocation.stock == nonowned_stock
+    assert nonowned_allocation.quantity_allocated == 5
+
+    # Verify stock quantities
+    owned_stock.refresh_from_db()
+    assert owned_stock.quantity_allocated == 5
+
+    nonowned_stock.refresh_from_db()
+    assert nonowned_stock.quantity_allocated == 5
+
+
+def test_allocate_sorting_order_prioritizes_owned_first(
+    order_line, channel_USD, owned_warehouse, nonowned_warehouse, purchase_order
+):
+    """Test PRIORITIZE_SORTING_ORDER strategy prioritizes owned warehouses.
+
+    Given:
+        - Non-owned warehouse with sort_order=0 (higher priority in channel)
+        - Owned warehouse with sort_order=1 (lower priority in channel)
+        - Order for 3 units (backed by POI)
+        - Strategy: PRIORITIZE_SORTING_ORDER
+
+    Expected:
+        - All units allocated from owned warehouse (ownership beats sort order)
+    """
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...shipping.models import Shipment
+
+    # given
+    channel_USD.allocation_strategy = AllocationStrategy.PRIORITIZE_SORTING_ORDER
+    channel_USD.save(update_fields=["allocation_strategy"])
+
+    # Create POI for owned warehouse
+    shipment = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="TEST-OWNED-3",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+        arrived_at=timezone.now(),
+    )
+    PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=order_line.variant,
+        quantity_ordered=10,
+        quantity_allocated=0,
+        total_price_amount=100.0,  # 10 qty × $10.0/unit
+        currency="USD",
+        shipment=shipment,
+        status=PurchaseOrderItemStatus.CONFIRMED,
+        confirmed_at=timezone.now(),
+    )
+
+    # Create stock in both warehouses (owned backed by POI)
+    owned_stock = owned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=10,
+    )
+
+    nonowned_stock = nonowned_warehouse.stock_set.create(
+        product_variant=order_line.variant,
+        quantity=10,
+    )
+
+    # Add both to channel with supplier having HIGHER priority (lower sort order)
+    channel_USD.warehouses.add(nonowned_warehouse, owned_warehouse)
+
+    nonowned_cw = ChannelWarehouse.objects.get(
+        channel=channel_USD, warehouse=nonowned_warehouse
+    )
+    nonowned_cw.sort_order = 0
+    nonowned_cw.save()
+
+    owned_cw = ChannelWarehouse.objects.get(
+        channel=channel_USD, warehouse=owned_warehouse
+    )
+    owned_cw.sort_order = 1
+    owned_cw.save()
+
+    quantity = 3
+    order_line.quantity = quantity
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(
+        line=order_line, variant=order_line.variant, quantity=quantity
+    )
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then
+    allocations = Allocation.objects.filter(order_line=order_line)
+
+    # Should allocate from owned warehouse despite lower sort order
+    assert allocations.count() == 1
+    assert allocations[0].stock == owned_stock
+    assert allocations[0].quantity_allocated == quantity
+
+    owned_stock.refresh_from_db()
+    assert owned_stock.quantity_allocated == quantity
+
+    nonowned_stock.refresh_from_db()
+    assert nonowned_stock.quantity_allocated == 0

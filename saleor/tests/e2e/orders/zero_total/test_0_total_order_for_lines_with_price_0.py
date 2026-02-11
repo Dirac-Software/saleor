@@ -85,7 +85,7 @@ def test_complete_draft_order_with_0_price_lines_CORE_0244(
         e2e_staff_api_client,
         order_id,
     )
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     assert order["order"]["total"]["gross"]["amount"] == 0
     assert order["order"]["lines"][0]["totalPrice"]["gross"]["amount"] == 0
     assert order["order"]["lines"][0]["undiscountedTotalPrice"]["gross"]["amount"] == 0

@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from ..csv.models import ExportFile
     from ..discount.models import Promotion, PromotionRule, Voucher, VoucherCode
     from ..giftcard.models import GiftCard
+    from ..inventory.models import PurchaseOrder
     from ..invoice.models import Invoice
     from ..menu.models import Menu, MenuItem
     from ..order.models import Fulfillment, Order, OrderLine
@@ -1333,10 +1334,10 @@ class PluginsManager(PaymentInterface):
             channel_slug=fulfillment.order.channel.slug,
         )
 
-    def tracking_number_updated(self, fulfillment: "Fulfillment"):
+    def tracking_url_updated(self, fulfillment: "Fulfillment"):
         default_value = None
         return self.__run_method_on_plugins(
-            "tracking_number_updated",
+            "tracking_url_updated",
             default_value,
             fulfillment,
             channel_slug=fulfillment.order.channel.slug,
@@ -2176,6 +2177,28 @@ class PluginsManager(PaymentInterface):
             "warehouse_created",
             default_value,
             warehouse,
+            channel_slug=None,
+        )
+
+    # Note: this method is deprecated and will be removed in a future release.
+    # Webhook-related functionality will be moved from plugin to core modules.
+    def purchase_order_created(self, purchase_order: "PurchaseOrder"):
+        default_value = None
+        return self.__run_method_on_plugins(
+            "purchase_order_created",
+            default_value,
+            purchase_order,
+            channel_slug=None,
+        )
+
+    # Note: this method is deprecated and will be removed in a future release.
+    # Webhook-related functionality will be moved from plugin to core modules.
+    def purchase_order_confirmed(self, purchase_order: "PurchaseOrder"):
+        default_value = None
+        return self.__run_method_on_plugins(
+            "purchase_order_confirmed",
+            default_value,
+            purchase_order,
             channel_slug=None,
         )
 

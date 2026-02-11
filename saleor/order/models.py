@@ -30,6 +30,7 @@ from ..payment import ChargeStatus, TransactionKind
 from ..payment.model_helpers import get_subtotal
 from ..payment.models import Payment
 from ..permission.enums import OrderPermissions
+from ..shipping import IncoTerm
 from ..shipping.models import ShippingMethod
 from . import (
     FulfillmentStatus,
@@ -39,6 +40,7 @@ from . import (
     OrderGrantedRefundStatus,
     OrderOrigin,
     OrderStatus,
+    PickStatus,
 )
 
 if TYPE_CHECKING:
@@ -94,6 +96,47 @@ class OrderQueryset(models.QuerySet["Order"]):
     def ready_to_confirm(self):
         """Return unconfirmed orders."""
         return self.filter(status=OrderStatus.UNCONFIRMED)
+
+    def ready_to_fulfill_with_inventory(self):
+        """Return UNCONFIRMED orders where all inventory has arrived in owned warehouses.
+
+        These orders meet the criteria:
+        1. Status is UNCONFIRMED
+        2. All allocations are in owned warehouses
+        3. All allocations have AllocationSources (inventory received from POs)
+        4. AllocationSources quantities match allocation quantities
+
+        Use this to find orders that are waiting for confirmation but have
+        inventory ready to ship.
+        """
+        from django.db.models import OuterRef, Q, Subquery, Sum
+
+        from ..warehouse.models import Allocation
+
+        return self.filter(
+            status=OrderStatus.UNCONFIRMED,
+            # Has at least one allocation
+            id__in=Subquery(
+                Allocation.objects.filter(
+                    order_line__order__status=OrderStatus.UNCONFIRMED
+                )
+                .values("order_line__order_id")
+                .distinct()
+            ),
+        ).exclude(
+            # Exclude orders with allocation violations
+            id__in=Subquery(
+                Allocation.objects.filter(order_line__order_id=OuterRef("id"))
+                .annotate(total_sourced=Sum("allocation_sources__quantity"))
+                .filter(
+                    Q(stock__warehouse__is_owned=False)
+                    | Q(total_sourced__isnull=True)
+                    | ~Q(total_sourced=F("quantity_allocated"))
+                )
+                .values("order_line__order_id")
+                .distinct()
+            )
+        )
 
 
 OrderManager = models.Manager.from_queryset(OrderQueryset)
@@ -260,6 +303,12 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
     )
     shipping_method_metadata = JSONField(
         blank=True, null=True, default=dict, encoder=CustomJsonEncoder
+    )
+
+    inco_term = models.CharField(
+        max_length=3,
+        default=IncoTerm.DDP,
+        choices=IncoTerm.CHOICES,
     )
 
     # Token of a checkout instance that this order was created from
@@ -781,6 +830,12 @@ class OrderLine(ModelWithMetadata):
 
 
 class Fulfillment(ModelWithMetadata):
+    """Note that an Order can be fulfilled by multiple shipments.
+
+    We can put multiple orders in the same shipment. This is how we see the stock
+    that has left the warehouse.
+    """
+
     fulfillment_order = models.PositiveIntegerField(editable=False)
     order = models.ForeignKey(
         Order,
@@ -793,7 +848,18 @@ class Fulfillment(ModelWithMetadata):
         default=FulfillmentStatus.FULFILLED,
         choices=FulfillmentStatus.CHOICES,
     )
-    tracking_number = models.CharField(max_length=255, default="", blank=True)
+    shipment = models.ForeignKey(
+        "shipping.Shipment",
+        on_delete=models.DO_NOTHING,
+        null=True,
+        related_name="fulfillments",
+    )
+    tracking_url = models.CharField(
+        max_length=255,
+        default="",
+        blank=True,
+        help_text="Tracking URL or number from carrier",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     shipping_refund_amount = models.DecimalField(
@@ -822,6 +888,24 @@ class Fulfillment(ModelWithMetadata):
     def __iter__(self):
         return iter(self.lines.all())
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        from ..shipping import ShipmentType
+
+        super().clean()
+
+        if self.shipment_id and self.shipment:
+            if self.shipment.shipment_type != ShipmentType.OUTBOUND:
+                raise ValidationError(
+                    {
+                        "shipment": (
+                            f"Cannot link fulfillment to {self.shipment.shipment_type} shipment. "
+                            "Fulfillments can only be linked to outbound shipments."
+                        )
+                    }
+                )
+
     def save(self, *args, **kwargs):
         """Assign an auto incremented value as a fulfillment order."""
         if not self.pk:
@@ -829,6 +913,10 @@ class Fulfillment(ModelWithMetadata):
             existing_max = groups.aggregate(Max("fulfillment_order"))
             existing_max = existing_max.get("fulfillment_order__max")
             self.fulfillment_order = existing_max + 1 if existing_max is not None else 1
+
+        if self.shipment_id:
+            self.clean()
+
         return super().save(*args, **kwargs)
 
     @property
@@ -843,10 +931,57 @@ class Fulfillment(ModelWithMetadata):
 
     @property
     def is_tracking_number_url(self):
-        return bool(match(r"^[-\w]+://", self.tracking_number))
+        return bool(match(r"^[-\w]+://", self.tracking_url))
+
+    @property
+    def has_inventory_received(self):
+        """Check if all required inventory has been received in the warehouse.
+
+        Returns True if all allocations for this fulfillment's order lines
+        have AllocationSources with quantities matching the allocation quantities,
+        AND all linked purchase order shipments have arrived (arrived_at is set).
+
+        Returns False if any owned warehouse allocations lack sources, have
+        mismatched quantities, or if any shipments haven't arrived yet.
+        """
+        from django.db.models import Sum
+
+        has_owned_allocations = False
+
+        for line in self.lines.all():
+            order_line = line.order_line
+            allocations = order_line.allocations.filter(stock__warehouse__is_owned=True)
+
+            for allocation in allocations:
+                has_owned_allocations = True
+                total_sourced = (
+                    allocation.allocation_sources.aggregate(total=Sum("quantity"))[
+                        "total"
+                    ]
+                    or 0
+                )
+
+                if total_sourced != allocation.quantity_allocated:
+                    return False
+
+                for allocation_source in allocation.allocation_sources.all():
+                    poi = allocation_source.purchase_order_item
+
+                    if not poi.shipment:
+                        return False
+
+                    if not poi.shipment.arrived_at:
+                        return False
+
+        return has_owned_allocations
 
 
 class FulfillmentLine(models.Model):
+    """Represents line items in a fulfillment.
+
+    For our use case quantity needs to equal order_line quantity.
+    """
+
     order_line = models.ForeignKey(
         OrderLine,
         related_name="fulfillment_lines",
@@ -863,6 +998,145 @@ class FulfillmentLine(models.Model):
         blank=True,
         null=True,
     )
+
+
+class Pick(models.Model):
+    """Document for picking items from warehouse for order fulfillment.
+
+    Tracks the physical picking process for outbound fulfillments. When warehouse staff
+    pick items for an order, they work through a Pick document to record what was
+    physically picked from the warehouse.
+
+    Workflow:
+    1. Auto-created when Fulfillment is created with WAITING_FOR_APPROVAL status
+    2. Warehouse staff start pick (status=IN_PROGRESS)
+    3. Staff scan/update items as they pick (updates PickItems)
+    4. Complete Pick (status=COMPLETED) → enables FulfillmentApprove
+    """
+
+    fulfillment = models.OneToOneField(
+        Fulfillment,
+        on_delete=models.CASCADE,
+        related_name="pick",
+        help_text="Fulfillment being picked",
+    )
+
+    status = models.CharField(
+        max_length=32,
+        choices=PickStatus.CHOICES,
+        default=PickStatus.NOT_STARTED,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When picking was started",
+    )
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When picking was completed",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="picks_created",
+        help_text="User who created the pick",
+    )
+
+    started_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="picks_started",
+        help_text="Warehouse staff who started picking",
+    )
+
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="picks_completed",
+        help_text="Warehouse staff who completed picking",
+    )
+
+    notes = models.TextField(blank=True, help_text="Additional notes about this pick")
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["fulfillment", "-created_at"]),
+            models.Index(fields=["status", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Pick #{self.id} for Fulfillment #{self.fulfillment_id}"
+
+
+class PickItem(models.Model):
+    """Individual line item in a pick document.
+
+    Tracks what needs to be picked vs what was actually picked for each OrderLine.
+    """
+
+    pick = models.ForeignKey(
+        Pick,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+
+    order_line = models.ForeignKey(
+        OrderLine,
+        on_delete=models.CASCADE,
+        related_name="pick_items",
+        help_text="Which order line this item picks for",
+    )
+
+    quantity_to_pick = models.PositiveIntegerField(
+        help_text="Quantity that needs to be picked (from fulfillment line)"
+    )
+
+    quantity_picked = models.PositiveIntegerField(
+        default=0,
+        help_text="Quantity physically picked from warehouse",
+    )
+
+    picked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this item was marked as fully picked",
+    )
+
+    picked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pick_items_picked",
+        help_text="Warehouse staff who picked this item",
+    )
+
+    notes = models.TextField(
+        blank=True, help_text="Notes about picking this specific item"
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["pick", "order_line"]),
+        ]
+
+    @property
+    def is_fully_picked(self):
+        return self.quantity_picked >= self.quantity_to_pick
+
+    def __str__(self):
+        return f"PickItem #{self.id}: {self.quantity_picked}/{self.quantity_to_pick} for OrderLine #{self.order_line_id}"
 
 
 class OrderEvent(models.Model):

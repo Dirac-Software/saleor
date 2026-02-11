@@ -1,0 +1,335 @@
+import pytest
+
+from ...order import FulfillmentStatus, OrderStatus, PickStatus
+from ...order.models import Fulfillment
+from ...warehouse.models import Allocation
+from ..stock_management import confirm_purchase_order_item
+
+
+@pytest.fixture
+def unconfirmed_order_with_allocations(
+    order, warehouse, warehouse_for_cc, product_variant_list
+):
+    """Order in UNCONFIRMED status with allocations in non-owned warehouse."""
+    order.status = OrderStatus.UNCONFIRMED
+    order.save()
+
+    # Non-owned source warehouse
+    warehouse_for_cc.is_owned = False
+    warehouse_for_cc.save()
+
+    # Owned destination warehouse
+    warehouse.is_owned = True
+    warehouse.save()
+
+    # Create order lines
+    variant = product_variant_list[0]
+    line = order.lines.create(
+        product_name=variant.product.name,
+        variant_name=variant.name,
+        product_sku=variant.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=5,
+        variant=variant,
+        unit_price_net_amount=10,
+        unit_price_gross_amount=10,
+        total_price_net_amount=50,
+        total_price_gross_amount=50,
+        undiscounted_unit_price_net_amount=10,
+        undiscounted_unit_price_gross_amount=10,
+        undiscounted_total_price_net_amount=50,
+        undiscounted_total_price_gross_amount=50,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    # Create stock in both warehouses
+    source_stock, _ = variant.stocks.get_or_create(
+        warehouse=warehouse_for_cc,
+        defaults={"quantity": 10, "quantity_allocated": 0},
+    )
+    dest_stock, _ = variant.stocks.get_or_create(
+        warehouse=warehouse,
+        defaults={"quantity": 0, "quantity_allocated": 0},
+    )
+
+    # Create allocation in non-owned warehouse (UNCONFIRMED orders allocate here)
+    Allocation.objects.create(
+        order_line=line,
+        stock=source_stock,
+        quantity_allocated=5,
+    )
+
+    # Update stock to reflect allocation
+    source_stock.quantity_allocated = 5
+    source_stock.save()
+
+    return order
+
+
+def test_confirm_poi_creates_fulfillments_automatically(
+    unconfirmed_order_with_allocations,
+    purchase_order,
+    warehouse,
+    warehouse_for_cc,
+    staff_user,
+):
+    # given
+    order = unconfirmed_order_with_allocations
+    line = order.lines.first()
+
+    # Create POI for the order
+    from ..models import PurchaseOrderItem
+
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=line.variant,
+        quantity_ordered=5,
+        total_price_amount=50.0,
+    )
+
+    # Link PO to correct warehouses
+    purchase_order.source_warehouse = warehouse_for_cc
+    purchase_order.destination_warehouse = warehouse
+    purchase_order.save()
+
+    assert order.status == OrderStatus.UNCONFIRMED
+    assert Fulfillment.objects.filter(order=order).count() == 0
+
+    # when
+    confirm_purchase_order_item(poi, user=staff_user)
+
+    # then
+    order.refresh_from_db()
+
+    # Order should be auto-confirmed
+    assert order.status == OrderStatus.UNFULFILLED
+
+    # Fulfillments should be auto-created
+    fulfillments = Fulfillment.objects.filter(order=order)
+    assert fulfillments.count() == 1
+
+    fulfillment = fulfillments.first()
+    assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
+    assert fulfillment.lines.count() == 1
+
+    # Pick should be created
+    assert hasattr(fulfillment, "pick")
+    assert fulfillment.pick.status == PickStatus.NOT_STARTED
+
+
+def test_confirm_poi_creates_multiple_fulfillments_for_multiple_warehouses(
+    order, warehouse, warehouse_JPY, warehouse_for_cc, product_variant_list, staff_user
+):
+    # given
+    order.status = OrderStatus.UNCONFIRMED
+    order.save()
+
+    warehouse_for_cc.is_owned = False
+    warehouse_for_cc.save()
+    warehouse.is_owned = True
+    warehouse.save()
+    warehouse_JPY.is_owned = True
+    warehouse_JPY.channels.add(order.channel)
+    warehouse_JPY.save()
+
+    from ...inventory.models import PurchaseOrder
+
+    po1 = PurchaseOrder.objects.create(
+        source_warehouse=warehouse_for_cc,
+        destination_warehouse=warehouse,
+    )
+    po2 = PurchaseOrder.objects.create(
+        source_warehouse=warehouse_for_cc,
+        destination_warehouse=warehouse_JPY,
+    )
+
+    # Create two order lines
+    variant1 = product_variant_list[0]
+    variant2 = product_variant_list[1]
+
+    line1 = order.lines.create(
+        product_name=variant1.product.name,
+        variant_name=variant1.name,
+        product_sku=variant1.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=3,
+        variant=variant1,
+        unit_price_net_amount=10,
+        unit_price_gross_amount=10,
+        total_price_net_amount=30,
+        total_price_gross_amount=30,
+        undiscounted_unit_price_net_amount=10,
+        undiscounted_unit_price_gross_amount=10,
+        undiscounted_total_price_net_amount=30,
+        undiscounted_total_price_gross_amount=30,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    line2 = order.lines.create(
+        product_name=variant2.product.name,
+        variant_name=variant2.name,
+        product_sku=variant2.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=2,
+        variant=variant2,
+        unit_price_net_amount=20,
+        unit_price_gross_amount=20,
+        total_price_net_amount=40,
+        total_price_gross_amount=40,
+        undiscounted_unit_price_net_amount=20,
+        undiscounted_unit_price_gross_amount=20,
+        undiscounted_total_price_net_amount=40,
+        undiscounted_total_price_gross_amount=40,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    # Create stocks and allocations
+    source_stock1, _ = variant1.stocks.get_or_create(
+        warehouse=warehouse_for_cc,
+        defaults={"quantity": 10, "quantity_allocated": 0},
+    )
+    dest_stock1, _ = variant1.stocks.get_or_create(
+        warehouse=warehouse,
+        defaults={"quantity": 0, "quantity_allocated": 0},
+    )
+
+    source_stock2, _ = variant2.stocks.get_or_create(
+        warehouse=warehouse_for_cc,
+        defaults={"quantity": 10, "quantity_allocated": 0},
+    )
+    dest_stock2, _ = variant2.stocks.get_or_create(
+        warehouse=warehouse_JPY,
+        defaults={"quantity": 0, "quantity_allocated": 0},
+    )
+
+    Allocation.objects.create(
+        order_line=line1, stock=source_stock1, quantity_allocated=3
+    )
+    Allocation.objects.create(
+        order_line=line2, stock=source_stock2, quantity_allocated=2
+    )
+
+    source_stock1.quantity_allocated = 3
+    source_stock1.save()
+    source_stock2.quantity_allocated = 2
+    source_stock2.save()
+
+    # Create POIs
+    from ..models import PurchaseOrderItem
+
+    poi1 = PurchaseOrderItem.objects.create(
+        order=po1,
+        product_variant=variant1,
+        quantity_ordered=3,
+        total_price_amount=30.0,
+    )
+
+    poi2 = PurchaseOrderItem.objects.create(
+        order=po2,
+        product_variant=variant2,
+        quantity_ordered=2,
+        total_price_amount=40.0,
+    )
+
+    # when - confirm both POIs
+    confirm_purchase_order_item(poi1, user=staff_user)
+    confirm_purchase_order_item(poi2, user=staff_user)
+
+    # then
+    order.refresh_from_db()
+    assert order.status == OrderStatus.UNFULFILLED
+
+    # Should have 2 fulfillments (one per warehouse)
+    fulfillments = Fulfillment.objects.filter(order=order)
+    assert fulfillments.count() == 2
+
+    # Each fulfillment should have correct warehouse
+    warehouses_with_fulfillments = set()
+    for fulfillment in fulfillments:
+        assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
+        assert fulfillment.lines.count() == 1
+        assert hasattr(fulfillment, "pick")
+
+        stock = fulfillment.lines.first().stock
+        warehouses_with_fulfillments.add(stock.warehouse_id)
+
+    assert warehouse.id in warehouses_with_fulfillments
+    assert warehouse_JPY.id in warehouses_with_fulfillments
+
+
+def test_confirm_poi_does_not_create_fulfillments_if_not_all_inventory_ready(
+    unconfirmed_order_with_allocations,
+    purchase_order,
+    warehouse,
+    warehouse_for_cc,
+    product_variant_list,
+    staff_user,
+):
+    # given
+    order = unconfirmed_order_with_allocations
+
+    # Add another line that doesn't have a POI yet
+    variant2 = product_variant_list[1]
+    line2 = order.lines.create(
+        product_name=variant2.product.name,
+        variant_name=variant2.name,
+        product_sku=variant2.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=2,
+        variant=variant2,
+        unit_price_net_amount=20,
+        unit_price_gross_amount=20,
+        total_price_net_amount=40,
+        total_price_gross_amount=40,
+        undiscounted_unit_price_net_amount=20,
+        undiscounted_unit_price_gross_amount=20,
+        undiscounted_total_price_net_amount=40,
+        undiscounted_total_price_gross_amount=40,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    source_stock2, _ = variant2.stocks.get_or_create(
+        warehouse=warehouse_for_cc,
+        defaults={"quantity": 10, "quantity_allocated": 0},
+    )
+
+    Allocation.objects.create(
+        order_line=line2, stock=source_stock2, quantity_allocated=2
+    )
+    source_stock2.quantity_allocated = 2
+    source_stock2.save()
+
+    # Only create POI for first line
+    line1 = order.lines.first()
+    from ..models import PurchaseOrderItem
+
+    poi1 = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=line1.variant,
+        quantity_ordered=5,
+        total_price_amount=50.0,
+    )
+
+    purchase_order.source_warehouse = warehouse_for_cc
+    purchase_order.destination_warehouse = warehouse
+    purchase_order.save()
+
+    # when
+    confirm_purchase_order_item(poi1, user=staff_user)
+
+    # then
+    order.refresh_from_db()
+
+    # Order should still be UNCONFIRMED (not all allocations have sources)
+    assert order.status == OrderStatus.UNCONFIRMED
+
+    # No fulfillments should be created
+    assert Fulfillment.objects.filter(order=order).count() == 0

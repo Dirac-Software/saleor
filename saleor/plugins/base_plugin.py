@@ -1601,8 +1601,8 @@ class BasePlugin:
     # Webhook-related functionality will be moved from the plugin to core modules.
     thumbnail_created: Callable[["Thumbnail", Any], Any]
 
-    # Trigger when tracking number is updated.
-    tracking_number_updated: Callable[["Fulfillment", Any], Any]
+    # Trigger when tracking URL is updated.
+    tracking_url_updated: Callable[["Fulfillment", Any], Any]
 
     void_payment: Callable[["PaymentData", Any], GatewayResponse]
 

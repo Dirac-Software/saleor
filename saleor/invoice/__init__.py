@@ -12,3 +12,16 @@ class InvoiceEvents:
         (DELETED, "The invoice was deleted"),
         (SENT, "The invoice has been sent"),
     ]
+
+
+class InvoiceType:
+    FINAL = "final"
+    PROFORMA = "proforma"
+
+    CHOICES = [
+        (FINAL, "A final invoice. Can be uploaded to Xero."),
+        (
+            PROFORMA,
+            "An invoice _sometimes_ sent before a final invoice with expected charge.",
+        ),
+    ]

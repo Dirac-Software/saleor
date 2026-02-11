@@ -588,11 +588,12 @@ def change_order_line_quantity(
     channel = order.channel
     currency = channel.currency_code
     if new_quantity:
+        # Update line quantity first so allocation validation passes
+        line.quantity = new_quantity
         if allocate_stock:
             _update_allocations_for_line(
                 line_info, old_quantity, new_quantity, channel, manager
             )
-        line.quantity = new_quantity
         total_price_net_amount = line.quantity * line.unit_price_net_amount
         total_price_gross_amount = line.quantity * line.unit_price_gross_amount
         line.total_price_net_amount = quantize_price(total_price_net_amount, currency)

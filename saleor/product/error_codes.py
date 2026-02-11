@@ -15,6 +15,7 @@ class ProductErrorCode(Enum):
     NOT_PRODUCTS_IMAGE = "not_products_image"
     NOT_PRODUCTS_VARIANT = "not_products_variant"
     NOT_FOUND = "not_found"
+    OWNED_WAREHOUSE = "owned_warehouse"
     REQUIRED = "required"
     UNIQUE = "unique"
     VARIANT_NO_DIGITAL_CONTENT = "variant_no_digital_content"

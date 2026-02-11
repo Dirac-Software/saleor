@@ -86,7 +86,7 @@ def test_cancel_unpaid_order_CORE_0204(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
 
     # Step 5 - Cancel the order
     cancelled_order = order_cancel(e2e_staff_api_client, order_id)

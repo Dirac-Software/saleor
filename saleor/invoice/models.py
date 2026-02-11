@@ -11,7 +11,7 @@ from ..core.models import Job, ModelWithMetadata
 from ..core.utils import build_absolute_uri
 from ..core.utils.json_serializer import CustomJsonEncoder
 from ..order.models import Order
-from . import InvoiceEvents
+from . import InvoiceEvents, InvoiceType
 
 
 class InvoiceQueryset(models.QuerySet["Invoice"]):
@@ -28,6 +28,19 @@ class Invoice(ModelWithMetadata, Job):
         related_name="invoices",
         null=True,
         on_delete=models.SET_NULL,
+    )
+    purchase_order = models.OneToOneField(
+        "inventory.PurchaseOrder",
+        related_name="invoice",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    xero_invoice_id = models.CharField(
+        max_length=255, null=True, blank=True, unique=True
+    )
+    type = models.CharField(
+        max_length=20, choices=InvoiceType.CHOICES, default=InvoiceType.FINAL
     )
     number = models.CharField(max_length=255, null=True)
     created = models.DateTimeField(null=True)

@@ -270,7 +270,7 @@ def test_cancel_fulfillment_warehouse_without_stock(
     query = CANCEL_FULFILLMENT_MUTATION
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     order = order_line.order
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     fulfillment.lines.create(order_line=order_line, quantity=order_line.quantity)
     order.status = OrderStatus.FULFILLED
     order.save(update_fields=["status"])

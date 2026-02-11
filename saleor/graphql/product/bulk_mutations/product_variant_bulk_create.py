@@ -575,6 +575,32 @@ class ProductVariantBulkCreate(BaseMutation):
             stock_data["warehouse"] = warehouse_global_id_to_instance_map[
                 stock_data["warehouse"]
             ]
+
+            # Check if warehouse is owned - cannot create stocks in owned warehouses
+            if stock_data["warehouse"].is_owned:
+                if errors is not None:
+                    if "stocks" not in errors:
+                        errors["stocks"] = []
+                    errors["stocks"].append(
+                        ValidationError(
+                            "Cannot create stock for owned warehouse. Stocks for owned "
+                            "warehouses are managed through PurchaseOrder.",
+                            code=ProductVariantBulkErrorCode.INVALID.value,
+                            params={"index": variant_index},
+                        )
+                    )
+                index_error_map[variant_index].append(
+                    ProductVariantBulkError(
+                        field="warehouse",
+                        path=f"{path_prefix}.{stock_index}.warehouse",
+                        message="Cannot create stock for owned warehouse. Stocks for owned "
+                        "warehouses are managed through PurchaseOrder.",
+                        code=ProductVariantBulkErrorCode.INVALID.value,
+                        warehouses=[warehouse_ids[stock_index]],
+                    )
+                )
+                continue
+
             stocks_to_create.append(stock_data)
 
         return stocks_to_create

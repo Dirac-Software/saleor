@@ -188,7 +188,7 @@ FULFILLMENT_DETAILS = (
 fragment FulfillmentDetails on Fulfillment {
   id
   fulfillmentOrder
-  trackingNumber
+  trackingUrl
   status
   shippingRefundedAmount{
     amount

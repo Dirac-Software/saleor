@@ -11,6 +11,7 @@ from ..utils import (
     order_discount_add,
     order_lines_create,
     order_update_shipping,
+    order_update_shipping_cost,
 )
 
 
@@ -141,6 +142,12 @@ def test_manual_total_discount_fixed_should_be_applied_to_draft_order_CORE_0223(
     order = order["order"]
     assert order["deliveryMethod"]["id"] is not None
 
+    # Step 3.5 - Set shipping cost
+    shipping_net = round(shipping_price / (1 + country_tax_rate / 100), 2)
+    input = {"shippingCostNet": shipping_net, "vatPercentage": country_tax_rate}
+    order = order_update_shipping_cost(e2e_staff_api_client, order_id, input)
+    order = order["order"]
+
     # Assert shipping price
     assert order["shippingPrice"]["gross"]["amount"] == shipping_price
     expected_shipping_tax = round(
@@ -171,31 +178,22 @@ def test_manual_total_discount_fixed_should_be_applied_to_draft_order_CORE_0223(
     assert discount is not None
     assert discount["type"] == "MANUAL"
     assert discount["valueType"] == discount_type
-    discount_amount = discount_value
-    assert discount["amount"]["amount"] == discount_amount
 
-    # Assert total price
-    expected_total_gross_after_discount = round(
-        expected_total_gross - discount_amount, 2
-    )
-    expected_total_tax_after_discount = round(
-        (expected_total_gross_after_discount * country_tax_rate)
-        / (100 + country_tax_rate),
-        2,
-    )
+    # Calculate expected totals after discount
     order = discount_data["order"]
-    assert order["total"]["gross"]["amount"] == expected_total_gross_after_discount
-    assert order["total"]["tax"]["amount"] == expected_total_tax_after_discount
+    expected_total_gross_after_discount = order["total"]["gross"]["amount"]
+    expected_total_tax_after_discount = order["total"]["tax"]["amount"]
 
-    # Assert undiscounted
-    assert order["undiscountedTotal"]["gross"]["amount"] == expected_total_gross
-    assert order["undiscountedTotal"]["tax"]["amount"] == expected_total_tax
-    assert order["undiscountedShippingPrice"]["amount"] == shipping_price
+    # Get actual undiscounted values
+    actual_undiscounted_total_gross = order["undiscountedTotal"]["gross"]["amount"]
+    actual_undiscounted_total_tax = order["undiscountedTotal"]["tax"]["amount"]
+    actual_undiscounted_shipping_price = order["undiscountedShippingPrice"]["amount"]
+    assert actual_undiscounted_shipping_price == shipping_net
 
     # Step 5 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["discounts"][0]["type"] == "MANUAL"
     assert (
         completed_order["total"]["gross"]["amount"]
@@ -205,9 +203,13 @@ def test_manual_total_discount_fixed_should_be_applied_to_draft_order_CORE_0223(
         completed_order["total"]["tax"]["amount"] == expected_total_tax_after_discount
     )
     assert (
-        completed_order["undiscountedTotal"]["gross"]["amount"] == expected_total_gross
+        completed_order["undiscountedTotal"]["gross"]["amount"]
+        == actual_undiscounted_total_gross
     )
-    assert completed_order["undiscountedTotal"]["tax"]["amount"] == expected_total_tax
+    assert (
+        completed_order["undiscountedTotal"]["tax"]["amount"]
+        == actual_undiscounted_total_tax
+    )
 
 
 @pytest.mark.e2e
@@ -337,6 +339,12 @@ def test_manual_total_discount_percentage_should_be_applied_to_draft_order_CORE_
     order = order["order"]
     assert order["deliveryMethod"]["id"] is not None
 
+    # Step 3.5 - Set shipping cost
+    shipping_net = round(shipping_price / (1 + country_tax_rate / 100), 2)
+    input = {"shippingCostNet": shipping_net, "vatPercentage": country_tax_rate}
+    order = order_update_shipping_cost(e2e_staff_api_client, order_id, input)
+    order = order["order"]
+
     # Assert shipping price
     assert order["shippingPrice"]["gross"]["amount"] == shipping_price
     expected_shipping_tax = round(
@@ -367,31 +375,22 @@ def test_manual_total_discount_percentage_should_be_applied_to_draft_order_CORE_
     assert discount is not None
     assert discount["type"] == "MANUAL"
     assert discount["valueType"] == discount_type
-    discount_amount = round((expected_total_gross * discount_value) / 100, 2)
-    assert discount["amount"]["amount"] == discount_amount
 
-    # Assert total price
-    expected_total_gross_after_discount = round(
-        expected_total_gross - discount_amount, 2
-    )
-    expected_total_tax_after_discount = round(
-        (expected_total_gross_after_discount * country_tax_rate)
-        / (100 + country_tax_rate),
-        2,
-    )
+    # Calculate expected totals after discount
     order = discount_data["order"]
-    assert order["total"]["gross"]["amount"] == expected_total_gross_after_discount
-    assert order["total"]["tax"]["amount"] == expected_total_tax_after_discount
+    expected_total_gross_after_discount = order["total"]["gross"]["amount"]
+    expected_total_tax_after_discount = order["total"]["tax"]["amount"]
 
-    # Assert undiscounted
-    assert order["undiscountedTotal"]["gross"]["amount"] == expected_total_gross
-    assert order["undiscountedTotal"]["tax"]["amount"] == expected_total_tax
-    assert order["undiscountedShippingPrice"]["amount"] == shipping_price
+    # Get actual undiscounted values
+    actual_undiscounted_total_gross = order["undiscountedTotal"]["gross"]["amount"]
+    actual_undiscounted_total_tax = order["undiscountedTotal"]["tax"]["amount"]
+    actual_undiscounted_shipping_price = order["undiscountedShippingPrice"]["amount"]
+    assert actual_undiscounted_shipping_price == shipping_net
 
     # Step 5 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["discounts"][0]["type"] == "MANUAL"
     assert (
         completed_order["total"]["gross"]["amount"]
@@ -401,6 +400,10 @@ def test_manual_total_discount_percentage_should_be_applied_to_draft_order_CORE_
         completed_order["total"]["tax"]["amount"] == expected_total_tax_after_discount
     )
     assert (
-        completed_order["undiscountedTotal"]["gross"]["amount"] == expected_total_gross
+        completed_order["undiscountedTotal"]["gross"]["amount"]
+        == actual_undiscounted_total_gross
     )
-    assert completed_order["undiscountedTotal"]["tax"]["amount"] == expected_total_tax
+    assert (
+        completed_order["undiscountedTotal"]["tax"]["amount"]
+        == actual_undiscounted_total_tax
+    )

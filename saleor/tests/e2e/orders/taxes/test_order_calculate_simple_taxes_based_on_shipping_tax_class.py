@@ -165,7 +165,7 @@ def test_order_calculate_simple_tax_based_on_shipping_tax_class_CORE_2010(
         e2e_staff_api_client,
         order_id,
     )
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     assert order["order"]["paymentStatus"] == "NOT_CHARGED"
     assert order_data["total"]["gross"]["amount"] == total_gross_amount
     assert order_data["total"]["tax"]["amount"] == total_tax_amount

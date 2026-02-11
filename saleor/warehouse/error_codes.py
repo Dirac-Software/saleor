@@ -18,6 +18,7 @@ class StockErrorCode(str, Enum):
     GRAPHQL_ERROR = "graphql_error"
     INVALID = "invalid"
     NOT_FOUND = "not_found"
+    OWNED_WAREHOUSE = "owned_warehouse"
     REQUIRED = "required"
     UNIQUE = "unique"
 
@@ -26,4 +27,5 @@ class StockBulkUpdateErrorCode(str, Enum):
     GRAPHQL_ERROR = "graphql_error"
     INVALID = "invalid"
     NOT_FOUND = "not_found"
+    OWNED_WAREHOUSE = "owned_warehouse"
     REQUIRED = "required"

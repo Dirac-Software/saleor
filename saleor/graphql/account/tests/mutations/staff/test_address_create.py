@@ -40,13 +40,16 @@ ADDRESS_CREATE_MUTATION = """
 
 
 def test_create_address_mutation(
-    staff_api_client, customer_user, permission_manage_users, graphql_address_data
+    staff_api_client,
+    customer_user,
+    permission_manage_users,
+    graphql_address_data_with_vat,
 ):
     # given
     query = ADDRESS_CREATE_MUTATION
-    graphql_address_data["city"] = "Dummy"
+    graphql_address_data_with_vat["city"] = "Dummy"
     user_id = graphene.Node.to_global_id("User", customer_user.id)
-    variables = {"user": user_id, "address": graphql_address_data}
+    variables = {"user": user_id, "address": graphql_address_data_with_vat}
     # when
     response = staff_api_client.post_graphql(
         query, variables, permissions=[permission_manage_users]

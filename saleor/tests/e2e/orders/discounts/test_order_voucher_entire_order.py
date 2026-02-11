@@ -228,7 +228,7 @@ def test_draft_order_with_voucher_fixed_entire_order_CORE_0928(
     # Step 5 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["total"]["gross"]["amount"] == total_gross_with_voucher
     assert completed_order["total"]["tax"]["amount"] == total_tax_with_voucher
     assert (
@@ -416,7 +416,7 @@ def test_draft_order_with_voucher_percentage_entire_order_CORE_0929(
     # Step 5 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["total"]["gross"]["amount"] == total_gross_with_voucher
     assert completed_order["total"]["tax"]["amount"] == total_tax_with_voucher
     assert (

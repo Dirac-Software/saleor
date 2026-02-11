@@ -71,7 +71,7 @@ def test_create_order_from_imported_draft_order(
 
     # then
     db_order = Order.objects.get()
-    assert db_order.status == OrderStatusEnum.UNFULFILLED.name.lower()
+    assert db_order.status == OrderStatusEnum.UNCONFIRMED.name.lower()
 
 
 @pytest.mark.integration

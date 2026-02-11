@@ -26,6 +26,7 @@ from .notify_events import (
     send_contact_form_submission,
     send_csv_export_failed,
     send_csv_export_success,
+    send_pending_adjustments_notification,
     send_set_staff_password_email,
     send_staff_order_confirmation,
     send_staff_reset_password,
@@ -42,6 +43,7 @@ def get_admin_event_map():
         AdminNotifyEvent.CSV_EXPORT_SUCCESS: send_csv_export_success,
         AdminNotifyEvent.CSV_EXPORT_FAILED: send_csv_export_failed,
         AdminNotifyEvent.CONTACT_FORM_SUBMISSION: send_contact_form_submission,
+        AdminNotifyEvent.PENDING_ADJUSTMENTS: send_pending_adjustments_notification,
     }
 
 

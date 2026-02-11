@@ -94,11 +94,15 @@ def validate_shipping_method(
     allow_sync_webhooks: bool = True,
 ):
     if not order.shipping_method:
-        error = ValidationError(
-            "Shipping method is required.",
-            code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
+        errors["shipping"].append(
+            ValidationError(
+                "Shipping method is required.",
+                code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
+            )
         )
-    elif (
+        return
+
+    if (
         order.shipping_address
         and order.shipping_address.country.code
         not in order.shipping_method.shipping_zone.countries

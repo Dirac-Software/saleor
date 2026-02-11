@@ -96,7 +96,6 @@ def test_logged_customer_update_addresses(user_api_client, graphql_address_data)
     # instances weren't created, but the existing ones got updated
     user = user_api_client.user
     new_first_name = graphql_address_data["firstName"]
-    metadata = graphql_address_data["metadata"]
     updated_at = user.updated_at
     assert user.default_billing_address
     assert user.default_shipping_address
@@ -116,8 +115,12 @@ def test_logged_customer_update_addresses(user_api_client, graphql_address_data)
     data = content["data"][mutation_name]
     assert not data["errors"]
 
-    assert data["user"]["defaultShippingAddress"]["metadata"] == metadata
-    assert data["user"]["defaultBillingAddress"]["metadata"] == metadata
+    expected_metadata = [
+        {"key": "public", "value": "public_value"},
+        {"key": "vat_number", "value": "PL1234567890"},
+    ]
+    assert data["user"]["defaultShippingAddress"]["metadata"] == expected_metadata
+    assert data["user"]["defaultBillingAddress"]["metadata"] == expected_metadata
 
     # check that existing instances are updated
     billing_address_pk = user.default_billing_address.pk

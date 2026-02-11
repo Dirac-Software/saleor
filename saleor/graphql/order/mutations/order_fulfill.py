@@ -67,8 +67,8 @@ class OrderFulfillInput(BaseInputObjectType):
         description="If true, then allow proceed fulfillment when stock is exceeded.",
         default_value=False,
     )
-    tracking_number = graphene.String(
-        description="Fulfillment tracking number.",
+    tracking_url = graphene.String(
+        description="Fulfillment tracking URL.",
         required=False,
     )
 
@@ -77,7 +77,7 @@ class OrderFulfillInput(BaseInputObjectType):
 
 
 class FulfillmentUpdateTrackingInput(BaseInputObjectType):
-    tracking_number = graphene.String(description="Fulfillment tracking number.")
+    tracking_url = graphene.String(description="Fulfillment tracking URL.")
     notify_customer = graphene.Boolean(
         default_value=False,
         description="If true, send an email notification to the customer.",
@@ -188,6 +188,92 @@ class OrderFulfill(BaseMutation):
             )
 
     @classmethod
+    def check_unreceived_stock(cls, lines_for_warehouses: dict, auto_approved: bool):
+        """Check if all stock for fulfillment has been physically received.
+
+        Only enforced when auto_approved=True (FULFILLED status).
+        If going to WAITING_FOR_APPROVAL, we allow creating the fulfillment.
+        """
+        if not auto_approved:
+            # Allow creating fulfillment in WAITING_FOR_APPROVAL state
+            return
+        from django.db.models import Sum
+
+        from ....warehouse.models import Allocation, AllocationSource
+
+        for warehouse_pk, lines_data in lines_for_warehouses.items():
+            for line_info in lines_data:
+                order_line = line_info["order_line"]
+                quantity_to_fulfill = line_info["quantity"]
+
+                # Get allocation for this line in this warehouse
+                allocation = Allocation.objects.filter(
+                    order_line=order_line,
+                    stock__warehouse_id=warehouse_pk,
+                ).first()
+
+                if not allocation:
+                    continue
+
+                # Get all allocation sources with their received quantities
+                allocation_sources = AllocationSource.objects.filter(
+                    allocation=allocation
+                ).annotate(
+                    poi_received=Sum(
+                        "purchase_order_item__receipt_lines__quantity_received"
+                    )
+                )
+
+                # Receipt validation only applies to owned warehouses (with AllocationSources)
+                if not allocation_sources.exists():
+                    continue
+
+                total_received = 0
+                has_unreceived_sources = False
+
+                for source in allocation_sources:
+                    if source.poi_received is None or source.poi_received <= 0:
+                        has_unreceived_sources = True
+                        break
+                    total_received += source.poi_received
+
+                # If there are sources with NO receipts at all, it's an unreceived stock error
+                if has_unreceived_sources:
+                    order_line_global_id = graphene.Node.to_global_id(
+                        "OrderLine", order_line.pk
+                    )
+                    raise ValidationError(
+                        {
+                            "stocks": ValidationError(
+                                "Cannot fulfill order with unreceived stock. "
+                                "Goods must be physically received before fulfillment.",
+                                code=OrderErrorCode.CANNOT_FULFILL_UNRECEIVED_STOCK.value,
+                                params={"order_lines": [order_line_global_id]},
+                            )
+                        }
+                    )
+
+                # If total received is insufficient, it's a normal insufficient stock error
+                if total_received < quantity_to_fulfill:
+                    order_line_global_id = graphene.Node.to_global_id(
+                        "OrderLine", order_line.pk
+                    )
+                    raise ValidationError(
+                        {
+                            "stocks": ValidationError(
+                                "Insufficient product stock.",
+                                code=OrderErrorCode.INSUFFICIENT_STOCK.value,
+                                params={
+                                    "order_lines": [order_line_global_id],
+                                    "warehouse": graphene.Node.to_global_id(
+                                        "Warehouse", warehouse_pk
+                                    ),
+                                },
+                            )
+                        }
+                    )
+
+    @classmethod
     def clean_input(cls, info: ResolveInfo, order, data, site):
         if not order.is_fully_paid() and (
             site.settings.fulfillment_auto_approve
@@ -244,6 +330,10 @@ class OrderFulfill(BaseMutation):
                         {"order_line": order_line, "quantity": stock["quantity"]}
                     )
 
+        # Check if all stock has been physically received (only for auto-approved fulfillments)
+        auto_approved = site.settings.fulfillment_auto_approve
+        cls.check_unreceived_stock(lines_for_warehouses, auto_approved)
+
         data["order_lines"] = order_lines
         data["lines_for_warehouses"] = lines_for_warehouses
         return data
@@ -278,7 +368,7 @@ class OrderFulfill(BaseMutation):
             "allow_stock_to_be_exceeded", False
         )
         approved = site.settings.fulfillment_auto_approve
-        tracking_number = cleaned_input.get("tracking_number") or ""
+        tracking_number = cleaned_input.get("tracking_url") or ""
         try:
             fulfillments = create_fulfillments(
                 user,
@@ -290,7 +380,7 @@ class OrderFulfill(BaseMutation):
                 notify_customer=notify_customer,
                 allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
                 auto_approved=approved,
-                tracking_number=tracking_number,
+                tracking_url=tracking_number,
             )
         except InsufficientStock as e:
             errors = prepare_insufficient_stock_order_validation_errors(e)

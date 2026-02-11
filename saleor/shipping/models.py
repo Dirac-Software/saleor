@@ -19,7 +19,7 @@ from ..core.utils.translations import Translation
 from ..core.weight import convert_weight, get_default_weight_unit, zero_weight
 from ..permission.enums import ShippingPermissions
 from ..tax.models import TaxClass
-from . import PostalCodeRuleInclusionType, ShippingMethodType
+from . import IncoTerm, PostalCodeRuleInclusionType, ShipmentType, ShippingMethodType
 from .postal_codes import filter_shipping_methods_by_postal_code_rules
 
 if TYPE_CHECKING:
@@ -352,3 +352,145 @@ class ShippingMethodTranslation(Translation):
             "name": self.name,
             "description": self.description,
         }
+
+
+class Shipment(models.Model):
+    """Represents a Movement of a collection of units from A to B.
+
+    This model is for accounting + inventory, not for the website to create
+    arbritrarily.
+
+    Need some input on tariffs plus duties etc. This is ugly because the costs need
+    to belong to a unit (unless we keep the hts code on the product and then
+    calculate at runtime) but are actually related to a shipment. We want to avoid
+    creating a ShipmentItem that is actually just a Unit.
+    """
+
+    # we use this for accountancy so we CANNOT cascade EVER - we need permanent
+    # records of shipments and inventory etc.
+    source = models.ForeignKey(
+        "account.Address",
+        related_name="outbound_shipments",
+        on_delete=models.DO_NOTHING,
+    )
+    destination = models.ForeignKey(
+        "account.Address", related_name="inbound_shipments", on_delete=models.DO_NOTHING
+    )
+
+    shipment_type = models.CharField(
+        max_length=10,
+        choices=ShipmentType.CHOICES,
+        help_text="Whether this shipment is inbound (from supplier) or outbound (to customer)",
+    )
+
+    # these are estimates until a shipping invoice is final. Do we need to store the
+    # estimates in a separate place
+    # we get these by manually breaking down an invoice
+    shipping_cost_amount = models.DecimalField(
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        default=Decimal("0.0"),
+        null=True,
+        blank=True,
+    )
+    currency = models.CharField(
+        max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH,
+        null=True,
+        blank=True,
+    )
+    shipping_cost = MoneyField(
+        amount_field="shipping_cost_amount", currency_field="currency"
+    )
+
+    # instead of using a duties invoice we can get these from the unit price, hs code on
+    # a ProductVariant and the shipment source and destination.
+    # duties_cost = MoneyField(
+    #     amount_field="duties_cost_amount", currency_field="currency"
+    # )
+    #
+    # this has never been in prod. It has been included as an indicator that
+    # we _dont_ use duties invoices to get duties cost! We use the hs code + country
+    # of origin and buy price instead.
+
+    # duties_invoice = models.ForeignKey(
+    #     "invoice.Invoice",
+    #     related_name="duties",
+    #     null=True,
+    #     blank=True,
+    #     on_delete=models.SET_NULL,
+    # )
+
+    shipping_invoice = models.ForeignKey(
+        "invoice.Invoice",
+        related_name="shipments",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+
+    # for an inbound shipment we need this
+    arrived_at = models.DateTimeField(null=True, blank=True)
+    # for an outbound shipment we need this
+    departed_at = models.DateTimeField(null=True, blank=True)
+
+    carrier = models.CharField(null=True, blank=True)
+    tracking_url = models.CharField(
+        null=True,
+        blank=True,
+        help_text="Tracking URL or number. Can be used to fetch shipment status from carrier APIs.",
+    )
+
+    inco_term = models.CharField(
+        max_length=3,
+        choices=IncoTerm.CHOICES,
+        default=IncoTerm.DDP,
+    )
+
+    shipment_processed_at = models.DateTimeField(null=True, blank=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        super().clean()
+
+        if self.inco_term and self.shipping_cost_amount is not None:
+            if self.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
+                if self.shipping_cost_amount != Decimal(0):
+                    raise ValidationError(
+                        {
+                            "shipping_cost_amount": f"Shipping cost must be 0 for incoterm {self.inco_term} (buyer pays shipping)"
+                        }
+                    )
+            else:
+                if self.shipping_cost_amount == Decimal(0):
+                    raise ValidationError(
+                        {
+                            "shipping_cost_amount": f"Shipping cost must be greater than 0 for incoterm {self.inco_term} (seller pays shipping)"
+                        }
+                    )
+
+        if self.shipment_type == ShipmentType.OUTBOUND:
+            if self.arrived_at is not None:
+                raise ValidationError(
+                    {
+                        "arrived_at": (
+                            "Outbound shipments cannot have arrived_at timestamp. "
+                            "Use departed_at instead."
+                        )
+                    }
+                )
+
+        elif self.shipment_type == ShipmentType.INBOUND:
+            if self.departed_at is not None:
+                raise ValidationError(
+                    {
+                        "departed_at": (
+                            "Inbound shipments cannot have departed_at timestamp. "
+                            "Use arrived_at instead."
+                        )
+                    }
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

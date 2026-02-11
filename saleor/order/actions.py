@@ -10,6 +10,7 @@ from django.conf import settings
 from django.contrib.sites.models import Site
 from django.db import transaction
 from django.db.models import F
+from django.utils.timezone import now
 
 from ..account.models import User
 from ..app.models import App
@@ -436,8 +437,18 @@ def order_created(
         )
 
     channel = order_info.channel
-    if channel.automatically_confirm_all_new_orders:
-        order_confirmed(order, user, app, manager, webhook_event_map=webhook_event_map)
+    if (
+        channel.automatically_confirm_all_new_orders
+        and order.status != OrderStatus.UNCONFIRMED
+    ):
+        order_confirmed(
+            order,
+            user,
+            app,
+            manager,
+            send_confirmation_email=True,
+            webhook_event_map=webhook_event_map,
+        )
 
     if _order_has_negative_prices(order, order_info.lines_data):
         _log_order_with_negative_price(order, order_info.lines_data)
@@ -867,17 +878,17 @@ def fulfillment_tracking_updated(
     fulfillment: Fulfillment,
     user: User,
     app: Optional["App"],
-    tracking_number: str,
+    tracking_url: str,
     manager: "PluginsManager",
 ):
     events.fulfillment_tracking_updated_event(
         order=fulfillment.order,
         user=user,
         app=app,
-        tracking_number=tracking_number,
+        tracking_url=tracking_url,
         fulfillment=fulfillment,
     )
-    call_event(manager.tracking_number_updated, fulfillment)
+    call_event(manager.tracking_url_updated, fulfillment)
     call_order_event(
         manager,
         WebhookEventAsyncType.ORDER_UPDATED,
@@ -994,10 +1005,22 @@ def approve_fulfillment(
         if insufficient_stocks:
             raise InsufficientStock(insufficient_stocks)
 
+        # Build fulfillment_line_map for FulfillmentSource tracking
+        fulfillment_line_map = {}
+        for fulfillment_line in fulfillment_lines:
+            warehouse_pk = (
+                fulfillment_line.stock.warehouse_id if fulfillment_line.stock else None
+            )
+            if warehouse_pk:
+                fulfillment_line_map[(fulfillment_line.order_line_id, warehouse_pk)] = (
+                    fulfillment_line
+                )
+
         decrease_stock(
             lines_to_fulfill,
             manager,
             allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
+            fulfillment_line_map=fulfillment_line_map,
         )
         order.refresh_from_db()
         order_fulfilled(
@@ -1338,10 +1361,19 @@ def _create_fulfillment_lines(
 
     if lines_info:
         if should_decrease_stock:
+            # Save FulfillmentLine objects first so they have PKs for FulfillmentSource
+            FulfillmentLine.objects.bulk_create(fulfillment_lines)
+
+            # Create mapping from (order_line_id, warehouse_id) -> FulfillmentLine
+            fulfillment_line_map = {
+                (fl.order_line_id, warehouse_pk): fl for fl in fulfillment_lines
+            }
+
             decrease_stock(
                 lines_info,
                 manager,
                 allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
+                fulfillment_line_map=fulfillment_line_map,
             )
 
         _increase_order_line_quantity(lines_info)
@@ -1361,7 +1393,7 @@ def create_fulfillments(
     auto: bool = False,
     auto_approved: bool = True,
     allow_stock_to_be_exceeded: bool = False,
-    tracking_number: str = "",
+    tracking_url: str = "",
 ) -> list[Fulfillment]:
     """Fulfill order.
 
@@ -1392,7 +1424,7 @@ def create_fulfillments(
             otherwise waiting_for_approval.
         allow_stock_to_be_exceeded (bool): If `True` then stock quantity could exceed.
             Default value is set to `False`.
-        tracking_number (str): Optional fulfillment tracking number.
+        tracking_url (str): Optional fulfillment tracking URL or number.
 
     Return:
         List[Fulfillment]: Fulfillmet with lines created for this order
@@ -1430,7 +1462,7 @@ def create_fulfillments(
 
         for warehouse_pk in fulfillment_lines_for_warehouses:
             fulfillment = Fulfillment.objects.create(
-                order=order, status=status, tracking_number=tracking_number
+                order=order, status=status, tracking_url=tracking_url
             )
             fulfillments.append(fulfillment)
             fulfillment_lines.extend(
@@ -1445,10 +1477,14 @@ def create_fulfillments(
                     allow_stock_to_be_exceeded=allow_stock_to_be_exceeded,
                 )
             )
-            if tracking_number:
-                call_event(manager.tracking_number_updated, fulfillment)
+            if tracking_url:
+                call_event(manager.tracking_url_updated, fulfillment)
 
-        FulfillmentLine.objects.bulk_create(fulfillment_lines)
+        # Only create fulfillment_lines that haven't been saved yet
+        # (some may have been saved early for FulfillmentSource tracking)
+        unsaved_fulfillment_lines = [fl for fl in fulfillment_lines if fl.pk is None]
+        if unsaved_fulfillment_lines:
+            FulfillmentLine.objects.bulk_create(unsaved_fulfillment_lines)
         order.refresh_from_db()
         if auto_approved:
             order_fulfilled(
@@ -1463,6 +1499,8 @@ def create_fulfillments(
                 auto,
             )
         else:
+            for fulfillment in fulfillments:
+                auto_create_pick_for_fulfillment(fulfillment, user)
             order_awaits_fulfillment_approval(
                 fulfillments,
                 user,
@@ -2170,3 +2208,233 @@ def _process_refund(
         )
     )
     return amount
+
+
+@transaction.atomic
+def auto_create_pick_for_fulfillment(fulfillment, user=None):
+    """Auto-create a Pick document for a fulfillment waiting for approval.
+
+    Args:
+        fulfillment: Fulfillment waiting for approval
+        user: User creating the pick (optional)
+
+    Returns:
+        Pick instance
+
+    """
+    from .models import Pick, PickItem
+
+    if hasattr(fulfillment, "pick"):
+        return fulfillment.pick
+
+    pick = Pick.objects.create(
+        fulfillment=fulfillment,
+        created_by=user,
+    )
+
+    pick_items = []
+    for fulfillment_line in fulfillment.lines.all():
+        pick_items.append(
+            PickItem(
+                pick=pick,
+                order_line=fulfillment_line.order_line,
+                quantity_to_pick=fulfillment_line.quantity,
+                quantity_picked=0,
+            )
+        )
+
+    PickItem.objects.bulk_create(pick_items)
+
+    return pick
+
+
+@transaction.atomic
+def start_pick(pick, user=None):
+    """Start a pick session.
+
+    Args:
+        pick: Pick to start
+        user: User starting the pick (warehouse staff)
+
+    Returns:
+        Pick instance
+
+    Raises:
+        ValueError: If pick is not in NOT_STARTED status
+
+    """
+    from . import PickStatus
+
+    if pick.status != PickStatus.NOT_STARTED:
+        raise ValueError(
+            f"Pick {pick.id} cannot be started. Current status: {pick.get_status_display()}"
+        )
+
+    pick.status = PickStatus.IN_PROGRESS
+    pick.started_at = now()
+    pick.started_by = user
+    pick.save(update_fields=["status", "started_at", "started_by"])
+
+    return pick
+
+
+@transaction.atomic
+def update_pick_item(pick_item, quantity_picked, user=None, notes=""):
+    """Update quantity picked for a pick item.
+
+    Args:
+        pick_item: PickItem to update
+        quantity_picked: New quantity picked
+        user: User who picked the items
+        notes: Optional notes about picking this item
+
+    Returns:
+        PickItem instance
+
+    Raises:
+        ValueError: If pick is not in progress or quantity exceeds expected
+
+    """
+    from . import PickStatus
+
+    if pick_item.pick.status != PickStatus.IN_PROGRESS:
+        raise ValueError(
+            f"Pick {pick_item.pick.id} is not in progress. "
+            f"Current status: {pick_item.pick.get_status_display()}"
+        )
+
+    if quantity_picked > pick_item.quantity_to_pick:
+        raise ValueError(
+            f"Quantity picked ({quantity_picked}) cannot exceed "
+            f"quantity to pick ({pick_item.quantity_to_pick})"
+        )
+
+    pick_item.quantity_picked = quantity_picked
+    pick_item.picked_by = user
+    if notes:
+        pick_item.notes = notes
+
+    if pick_item.is_fully_picked and pick_item.picked_at is None:
+        pick_item.picked_at = now()
+
+    pick_item.save(update_fields=["quantity_picked", "picked_by", "notes", "picked_at"])
+
+    return pick_item
+
+
+def assign_shipment_to_fulfillment(fulfillment, shipment, user=None, auto_approve=True):
+    """Assign a shipment to a fulfillment and optionally try auto-approval.
+
+    Args:
+        fulfillment: Fulfillment to update
+        shipment: Shipment to assign
+        user: User making the assignment (optional)
+        auto_approve: Whether to attempt auto-approval (default: True)
+
+    Returns:
+        Fulfillment with shipment assigned
+
+    """
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    if auto_approve:
+        try_auto_approve_fulfillment(fulfillment, user)
+
+    return fulfillment
+
+
+def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
+    """Automatically approve fulfillment if pick is completed and shipment exists.
+
+    Args:
+        fulfillment: Fulfillment to check
+        user: User triggering the auto-approval (optional)
+        enabled: Whether auto-approval is enabled (default: True)
+
+    Returns:
+        True if auto-approved, False otherwise
+
+    """
+    if not enabled:
+        return False
+    from . import FulfillmentStatus, PickStatus
+    from .models import Pick
+
+    if fulfillment.status != FulfillmentStatus.WAITING_FOR_APPROVAL:
+        return False
+
+    try:
+        pick = fulfillment.pick
+        if pick.status != PickStatus.COMPLETED:
+            return False
+    except Pick.DoesNotExist:
+        return False
+
+    if not fulfillment.shipment:
+        return False
+
+    from ..plugins.manager import get_plugins_manager
+    from ..site.models import Site
+
+    manager = get_plugins_manager(allow_replica=False)
+    settings = Site.objects.get_current().settings
+
+    approve_fulfillment(
+        fulfillment,
+        user,
+        app=None,
+        manager=manager,
+        settings=settings,
+        notify_customer=True,
+        allow_stock_to_be_exceeded=False,
+    )
+    return True
+
+
+@transaction.atomic
+def complete_pick(pick, user=None, auto_approve=False):
+    """Complete a pick document.
+
+    Args:
+        pick: Pick to complete
+        user: User completing the pick
+        auto_approve: Whether to attempt auto-approval if conditions are met (default: False)
+
+    Returns:
+        Pick instance
+
+    Raises:
+        ValueError: If pick is not in progress or items not fully picked
+
+    """
+    from . import PickStatus
+
+    if pick.status != PickStatus.IN_PROGRESS:
+        raise ValueError(
+            f"Pick {pick.id} cannot be completed. "
+            f"Current status: {pick.get_status_display()}"
+        )
+
+    unfulfilled_items = []
+    for item in pick.items.all():
+        if not item.is_fully_picked:
+            unfulfilled_items.append(
+                f"OrderLine {item.order_line_id}: {item.quantity_picked}/{item.quantity_to_pick}"
+            )
+
+    if unfulfilled_items:
+        raise ValueError(
+            f"Cannot complete pick {pick.id}. "
+            f"The following items are not fully picked: {', '.join(unfulfilled_items)}"
+        )
+
+    pick.status = PickStatus.COMPLETED
+    pick.completed_at = now()
+    pick.completed_by = user
+    pick.save(update_fields=["status", "completed_at", "completed_by"])
+
+    if auto_approve:
+        try_auto_approve_fulfillment(pick.fulfillment, user)
+
+    return pick

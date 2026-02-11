@@ -82,7 +82,7 @@ def test_create_order_by_staff_in_accessible_channel(
     response = staff_api_client.post_graphql(QUERY_ORDER_BY_ID, {"id": draft_order_id})
     content = get_graphql_content(response)
     order_data = content["data"]["order"]
-    assert order_data["status"] == OrderStatus.UNFULFILLED.upper()
+    assert order_data["status"] == OrderStatus.UNCONFIRMED.upper()
 
 
 @pytest.mark.integration

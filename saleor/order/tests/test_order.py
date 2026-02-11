@@ -499,10 +499,10 @@ def test_update_order_status_partially_waiting_for_approval(fulfilled_order):
     assert fulfilled_order.status == OrderStatus.PARTIALLY_FULFILLED
 
 
-def test_validate_fulfillment_tracking_number_as_url(fulfilled_order):
+def test_validate_fulfillment_tracking_url_as_url(fulfilled_order):
     fulfillment = fulfilled_order.fulfillments.first()
     assert not fulfillment.is_tracking_number_url
-    fulfillment.tracking_number = "https://www.example.com"
+    fulfillment.tracking_url = "https://www.example.com"
     fulfillment.save()
     assert fulfillment.is_tracking_number_url
 

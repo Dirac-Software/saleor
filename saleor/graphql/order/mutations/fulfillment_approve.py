@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 
 from ....account.models import User
 from ....core.exceptions import InsufficientStock
-from ....order import FulfillmentStatus
+from ....order import FulfillmentStatus, PickStatus
 from ....order.actions import approve_fulfillment
 from ....order.error_codes import OrderErrorCode
 from ....permission.enums import OrderPermissions
@@ -56,6 +56,25 @@ class FulfillmentApprove(BaseMutation):
             raise ValidationError(
                 "Invalid fulfillment status, only WAITING_FOR_APPROVAL "
                 "fulfillments can be accepted.",
+                code=OrderErrorCode.INVALID.value,
+            )
+
+        if not hasattr(fulfillment, "pick"):
+            raise ValidationError(
+                "Fulfillment must have a Pick before it can be approved.",
+                code=OrderErrorCode.INVALID.value,
+            )
+
+        if fulfillment.pick.status != PickStatus.COMPLETED:
+            raise ValidationError(
+                f"Pick must be completed before fulfillment can be approved. "
+                f"Current pick status: {fulfillment.pick.get_status_display()}",
+                code=OrderErrorCode.INVALID.value,
+            )
+
+        if not fulfillment.shipment:
+            raise ValidationError(
+                "Fulfillment must have a Shipment before it can be approved.",
                 code=OrderErrorCode.INVALID.value,
             )
 

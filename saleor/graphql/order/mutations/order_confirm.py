@@ -6,7 +6,7 @@ from django.db import transaction
 
 from ....account.models import User
 from ....core.tracing import traced_atomic_transaction
-from ....order import models
+from ....order import OrderStatus, models
 from ....order.actions import (
     WEBHOOK_EVENTS_FOR_ORDER_CHARGED,
     WEBHOOK_EVENTS_FOR_ORDER_CONFIRMED,
@@ -15,9 +15,10 @@ from ....order.actions import (
 )
 from ....order.error_codes import OrderErrorCode
 from ....order.fetch import fetch_order_info
-from ....order.utils import update_order_display_gross_prices, update_order_status
+from ....order.utils import update_order_display_gross_prices
 from ....payment import gateway
 from ....permission.enums import OrderPermissions
+from ....warehouse.management import can_confirm_order
 from ....webhook.utils import get_webhooks_for_multiple_events
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
@@ -73,9 +74,50 @@ class OrderConfirm(DeprecatedModelMutation):
         user = cast(User, user)
         order = cls.get_instance(info, **data)
         cls.check_channel_permissions(info, [order.channel_id])
-        update_order_status(order)
+
+        # Validate that order can be confirmed (has allocations with sources)
+        if not can_confirm_order(order):
+            raise ValidationError(
+                {
+                    "id": ValidationError(
+                        "Order cannot be confirmed. All allocations must be in owned "
+                        "warehouses and have allocation sources assigned.",
+                        code=OrderErrorCode.INVALID.value,
+                    )
+                }
+            )
+
+        # Validate shipping cost is set if shipping is required
+        # Default inco_term is DDP (seller pays) which requires shipping cost > $0
+        # Only EXW (buyer pays) allows $0 shipping cost
+        if order.is_shipping_required():
+            from ....shipping import IncoTerm
+
+            if order.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
+                # EXW: buyer pays shipping, $0 is valid
+                pass
+            else:
+                # DDP/DAP/FOB/etc: seller pays shipping, must have cost
+                if (
+                    not order.shipping_price_net_amount
+                    or order.shipping_price_net_amount <= 0
+                ):
+                    raise ValidationError(
+                        {
+                            "id": ValidationError(
+                                f"Cannot confirm order with inco_term '{order.inco_term}' without shipping cost. "
+                                f"Seller is responsible for shipping under {order.inco_term} terms. "
+                                "Use orderUpdateShippingCost to set the shipping cost, "
+                                "or change inco_term to 'EXW' if buyer pays shipping.",
+                                code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
+                            )
+                        }
+                    )
+
+        # Transition order from UNCONFIRMED to UNFULFILLED
+        order.status = OrderStatus.UNFULFILLED
         update_order_display_gross_prices(order)
-        order.save(update_fields=["updated_at", "display_gross_prices"])
+        order.save(update_fields=["status", "updated_at", "display_gross_prices"])
         order_info = fetch_order_info(order)
         payment = order_info.payment
         manager = get_plugin_manager_promise(info.context).get()

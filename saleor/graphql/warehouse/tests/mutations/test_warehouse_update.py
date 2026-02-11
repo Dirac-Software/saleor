@@ -45,7 +45,10 @@ mutation updateWarehouse($input: WarehouseUpdateInput!, $id: ID!) {
 
 
 def test_mutation_update_warehouse(
-    staff_api_client, warehouse, permission_manage_products, graphql_address_data
+    staff_api_client,
+    warehouse,
+    permission_manage_products,
+    graphql_address_data_with_vat,
 ):
     # given
     warehouse_id = graphene.Node.to_global_id("Warehouse", warehouse.id)
@@ -57,7 +60,7 @@ def test_mutation_update_warehouse(
         "input": {
             "name": "New name",
             "externalReference": external_reference,
-            "address": graphql_address_data,
+            "address": graphql_address_data_with_vat,
         },
     }
 

@@ -59,8 +59,8 @@ def void(payment_information: PaymentData, config: ApiConfig) -> GatewayResponse
     raise NotImplementedError
 
 
-def tracking_number_updated(fulfillment: Fulfillment, config: ApiConfig) -> None:
-    """Event callback on updating order tracking number.
+def tracking_url_updated(fulfillment: Fulfillment, config: ApiConfig) -> None:
+    """Event callback on updating order tracking URL.
 
     Captures payment in NP Atobarai and sends dashboard notification of the result.
     """
@@ -137,7 +137,7 @@ def refund(payment_information: PaymentData, config: ApiConfig) -> GatewayRespon
         if result.status == PaymentStatus.FOR_REREGISTRATION:
             fulfillment = get_fulfillment_for_order(order)
             shipping_company_code = get_shipping_company_code(config, fulfillment)
-            tracking_number = fulfillment.tracking_number
+            tracking_number = fulfillment.tracking_url
             result = api.reregister_transaction_for_partial_return(
                 config,
                 payment,

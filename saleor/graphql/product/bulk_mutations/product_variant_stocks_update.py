@@ -7,6 +7,7 @@ from ....core.tracing import traced_atomic_transaction
 from ....permission.enums import ProductPermissions
 from ....product import models
 from ....warehouse import models as warehouse_models
+from ....warehouse.error_codes import StockErrorCode
 from ....warehouse.management import stock_bulk_update
 from ....webhook.event_types import WebhookEventAsyncType
 from ....webhook.utils import get_webhooks_for_event
@@ -77,10 +78,40 @@ class ProductVariantStocksUpdate(ProductVariantStocksCreate):
                 warehouse_ids, "warehouse", only_type=Warehouse
             )
 
-            manager = get_plugin_manager_promise(info.context).get()
-            cls.update_or_create_variant_stocks(variant, stocks, warehouses, manager)
+            # Check for owned warehouses and filter them out
+            valid_stocks = []
+            valid_warehouses = []
+            for i, (stock, warehouse) in enumerate(
+                zip(stocks, warehouses, strict=False)
+            ):
+                if warehouse.is_owned:
+                    error_msg = (
+                        "Cannot update stock for owned warehouse. Stock updates for "
+                        "owned warehouses are managed through OrderConsumption."
+                    )
+                    cls.update_errors(
+                        errors,
+                        error_msg,
+                        "warehouse",
+                        StockErrorCode.OWNED_WAREHOUSE,
+                        [i],
+                    )
+                else:
+                    valid_stocks.append(stock)
+                    valid_warehouses.append(warehouse)
+
+            # Only update valid stocks (non-owned warehouses)
+            if valid_stocks:
+                manager = get_plugin_manager_promise(info.context).get()
+                cls.update_or_create_variant_stocks(
+                    variant, valid_stocks, valid_warehouses, manager
+                )
 
         StocksByProductVariantIdLoader(info.context).clear(variant.id)
+
+        # Raise validation errors if any exist (after successful operations complete)
+        if errors:
+            raise ValidationError(errors)
 
         variant = ChannelContext(node=variant, channel_slug=None)
         return cls(product_variant=variant)

@@ -55,6 +55,18 @@ class OrderLineInput(BaseInputObjectType):
     quantity = graphene.Int(
         description="Number of variant items ordered.", required=True
     )
+    price = PositiveDecimal(
+        required=False,
+        description="Custom price of the item. Only works for draft orders.",
+    )
+    price_net = PositiveDecimal(
+        required=False,
+        description="Custom net price of the item. Only works for draft orders.",
+    )
+    price_gross = PositiveDecimal(
+        required=False,
+        description="Custom gross price of the item. Only works for draft orders.",
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
@@ -389,12 +401,17 @@ class DraftOrderCreate(
 
     @classmethod
     def save(cls, info: ResolveInfo, instance, cleaned_input, instance_tracker=None):
+        from ....account.vat_utils import should_apply_vat_exemption
+
         manager = get_plugin_manager_promise(info.context).get()
         app = get_app_promise(info.context).get()
 
         with traced_atomic_transaction():
             # Process addresses
             save_addresses(instance, cleaned_input)
+
+            if should_apply_vat_exemption(instance.billing_address):
+                instance.tax_exemption = True
 
             try:
                 # Process any lines to add

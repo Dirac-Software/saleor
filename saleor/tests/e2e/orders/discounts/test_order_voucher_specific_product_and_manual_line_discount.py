@@ -291,7 +291,7 @@ def test_draft_order_with_voucher_specific_product_and_manual_line_discount_CORE
     # Step 6 - Complete the draft order
     order = draft_order_complete(e2e_staff_api_client, order_id)
     completed_order = order["order"]
-    assert completed_order["status"] == "UNFULFILLED"
+    assert completed_order["status"] == "UNCONFIRMED"
     assert completed_order["total"]["net"]["amount"] == total_net
     assert completed_order["total"]["gross"]["amount"] == total_gross
     assert completed_order["total"]["tax"]["amount"] == total_tax

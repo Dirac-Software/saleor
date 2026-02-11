@@ -246,6 +246,37 @@ def filter_by_gift_card(qs, value, gift_card_type):
     return qs.filter(lookup) if value is True else qs.exclude(lookup)
 
 
+def filter_inventory_ready(qs, _, value):
+    if value is None:
+        return qs
+
+    from ...warehouse.queries import (
+        filter_orders_with_inventory_ready,
+        get_orders_missing_inventory,
+    )
+
+    if value is True:
+        return filter_orders_with_inventory_ready(qs)
+    return get_orders_missing_inventory(qs)
+
+
+def filter_warehouse(qs, _, value):
+    if not value:
+        return qs
+
+    try:
+        _, warehouse_ids = resolve_global_ids_to_primary_keys(value, "Warehouse")
+    except Exception:
+        return qs.none()
+
+    from ...warehouse.models import Allocation
+
+    allocations = Allocation.objects.using(qs.db).filter(
+        stock__warehouse_id__in=warehouse_ids
+    )
+    return qs.filter(Exists(allocations.filter(order_line__order_id=OuterRef("id"))))
+
+
 def filter_order_by_id(qs, _, value):
     if not value:
         return qs
@@ -396,6 +427,8 @@ class OrderFilter(DraftOrderFilter):
         input_class=graphene.String, method=filter_by_order_number
     )
     checkout_ids = GlobalIDMultipleChoiceFilter(method=filter_checkouts)
+    inventory_ready = django_filters.BooleanFilter(method=filter_inventory_ready)
+    warehouse = GlobalIDMultipleChoiceFilter(method=filter_warehouse)
 
     class Meta:
         model = Order
@@ -407,6 +440,33 @@ class OrderFilter(DraftOrderFilter):
                 message="'ids' and 'numbers` are not allowed to use together in filter."
             )
         return super().is_valid()
+
+
+def filter_fulfillment_status(qs, _, value):
+    if value:
+        qs = qs.filter(status__in=value)
+    return qs
+
+
+def filter_fulfillment_warehouse(qs, _, value):
+    if value:
+        warehouse_ids = [
+            from_global_id_or_error(warehouse_id, "Warehouse")[1]
+            for warehouse_id in value
+        ]
+        qs = qs.filter(lines__stock__warehouse_id__in=warehouse_ids).distinct()
+    return qs
+
+
+class FulfillmentFilter(MetadataFilterBase):
+    status = ListObjectTypeFilter(
+        input_class=FulfillmentStatusEnum, method=filter_fulfillment_status
+    )
+    warehouse = GlobalIDMultipleChoiceFilter(method=filter_fulfillment_warehouse)
+
+    class Meta:
+        model = Fulfillment
+        fields = ["status", "warehouse"]
 
 
 class OrderStatusEnumFilterInput(BaseInputObjectType):
@@ -768,6 +828,20 @@ def filter_where_shipping_address(qs, _, value):
     return qs.filter(Exists(address_qs.filter(id=OuterRef("shipping_address_id"))))
 
 
+def filter_where_inventory_ready(qs, _, value):
+    if value is None:
+        return qs.none()
+    return filter_inventory_ready(qs, _, value)
+
+
+def filter_where_warehouse(qs, _, value):
+    if not value:
+        return qs
+    return filter_where_by_id_field(
+        qs, "lines__allocations__stock__warehouse_id", value, "Warehouse"
+    )
+
+
 class OrderWhere(MetadataWhereBase):
     ids = GlobalIDMultipleChoiceWhereFilter(method=filter_by_ids("Order"))
     number = OperationObjectTypeWhereFilter(
@@ -916,6 +990,20 @@ class OrderWhere(MetadataWhereBase):
         input_class=AddressFilterInput,
         method=filter_where_shipping_address,
         help_text="Filter by shipping address of the order.",
+    )
+    inventory_ready = BooleanWhereFilter(
+        method=filter_where_inventory_ready,
+        help_text=(
+            "Filter by inventory readiness. "
+            "Returns orders where all inventory has physically arrived in owned warehouses, "
+            "all shipments have been received (quantity_received > 0), "
+            "and all adjustments have been processed (processed_at IS NOT NULL)."
+        ),
+    )
+    warehouse = OperationObjectTypeWhereFilter(
+        input_class=GlobalIDFilterInput,
+        method=filter_where_warehouse,
+        help_text="Filter by warehouse containing order allocations.",
     )
 
     @staticmethod

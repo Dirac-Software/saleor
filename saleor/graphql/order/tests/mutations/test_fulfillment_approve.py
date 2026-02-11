@@ -3,8 +3,14 @@ from unittest.mock import patch
 import graphene
 
 from .....giftcard.models import GiftCard
-from .....order import FulfillmentStatus, OrderEvents, OrderStatus
-from .....order.actions import fulfill_order_lines
+from .....order import FulfillmentStatus, OrderEvents, OrderStatus, PickStatus
+from .....order.actions import (
+    auto_create_pick_for_fulfillment,
+    complete_pick,
+    fulfill_order_lines,
+    start_pick,
+    update_pick_item,
+)
 from .....order.error_codes import OrderErrorCode
 from .....order.fetch import OrderLineInfo
 from .....order.models import OrderLine
@@ -47,9 +53,37 @@ def test_fulfillment_approve(
     full_fulfillment_awaiting_approval,
     permission_group_manage_orders,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     # given
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-APPROVE",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
 
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
@@ -109,8 +143,37 @@ def test_fulfillment_approve_by_app(
     full_fulfillment_awaiting_approval,
     permission_manage_orders,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     # given
     fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-BY-APP",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
     variables = {"id": fulfillment_id, "notifyCustomer": True}
@@ -146,8 +209,36 @@ def test_fulfillment_approve_delete_products_before_approval_allow_stock_exceede
     full_fulfillment_awaiting_approval,
     permission_group_manage_orders,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-DELETE-TRUE",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
 
     Product.objects.all().delete()
 
@@ -185,9 +276,37 @@ def test_fulfillment_approve_delete_products_before_approval_allow_stock_exceede
     permission_group_manage_orders,
     django_capture_on_commit_callbacks,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     # given
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     fulfillment = partial_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-DELETE-ERROR",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
 
     Product.objects.all().delete()
 
@@ -243,6 +362,13 @@ def test_fulfillment_approve_gift_cards_created(
     gift_card_shippable_order_line,
     gift_card_non_shippable_order_line,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     fulfillment = full_fulfillment_awaiting_approval
 
@@ -272,6 +398,27 @@ def test_fulfillment_approve_gift_cards_created(
         ],
         manager=get_plugins_manager(allow_replica=False),
     )
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-GIFTCARDS",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
 
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
@@ -309,6 +456,13 @@ def test_fulfillment_approve_when_stock_is_exceeded_and_flag_enabled(
     full_fulfillment_awaiting_approval,
     permission_group_manage_orders,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     # make stocks exceeded
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     for stock in [
@@ -318,6 +472,28 @@ def test_fulfillment_approve_when_stock_is_exceeded_and_flag_enabled(
         stock.save()
 
     fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-STOCK-EXCEEDED",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
 
@@ -351,6 +527,13 @@ def test_fulfillment_approve_when_stock_is_exceeded_and_flag_disabled(
     full_fulfillment_awaiting_approval,
     permission_group_manage_orders,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     # make stocks exceeded
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     for stock in [
@@ -360,6 +543,28 @@ def test_fulfillment_approve_when_stock_is_exceeded_and_flag_disabled(
         stock.save()
 
     fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-STOCK-DISABLED",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
 
@@ -423,6 +628,34 @@ def test_fulfillment_approve_partial_order_fulfill(
 
     OrderLine.objects.bulk_update([line_1, line_2], ["quantity_fulfilled"])
 
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
+    warehouse = partial_fulfillment_awaiting_approval.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-PARTIAL",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    partial_fulfillment_awaiting_approval.shipment = shipment
+    partial_fulfillment_awaiting_approval.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(partial_fulfillment_awaiting_approval)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
     fulfillment_id = graphene.Node.to_global_id(
         "Fulfillment", partial_fulfillment_awaiting_approval.id
     )
@@ -467,11 +700,40 @@ def test_fulfillment_approve_order_unpaid(
     site_settings,
     permission_group_manage_orders,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     site_settings.fulfillment_allow_unpaid = False
     site_settings.save(update_fields=["fulfillment_allow_unpaid"])
     fulfillment.status = FulfillmentStatus.WAITING_FOR_APPROVAL
     fulfillment.save(update_fields=["status"])
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-UNPAID",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
     variables = {"id": fulfillment_id, "notifyCustomer": True}
@@ -484,6 +746,13 @@ def test_fulfillment_approve_order_unpaid(
 def test_fulfillment_approve_preorder(
     staff_api_client, fulfillment, permission_group_manage_orders, site_settings
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     site_settings.fulfillment_auto_approve = False
     site_settings.save(update_fields=["fulfillment_auto_approve"])
@@ -494,6 +763,28 @@ def test_fulfillment_approve_preorder(
     variant.save(update_fields=["is_preorder"])
     fulfillment.status = FulfillmentStatus.WAITING_FOR_APPROVAL
     fulfillment.save(update_fields=["status"])
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-PREORDER",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
     query = APPROVE_FULFILLMENT_MUTATION
 
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
@@ -517,10 +808,38 @@ def test_fulfillment_approve_trigger_webhook_event(
     settings,
     subscription_fulfillment_approved_webhook,
 ):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
     # given
     settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-WEBHOOK",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
 
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
@@ -538,3 +857,374 @@ def test_fulfillment_approve_trigger_webhook_event(
         "fulfillment": fulfillment,
         "notify_customer": True,
     }
+
+
+def test_fulfillment_approve_fails_without_pick(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "must have a Pick" in data["errors"][0]["message"]
+
+
+def test_fulfillment_approve_fails_when_pick_not_started(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    assert pick.status == PickStatus.NOT_STARTED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "Pick must be completed" in data["errors"][0]["message"]
+    assert "Not Started" in data["errors"][0]["message"]
+
+
+def test_fulfillment_approve_fails_when_pick_in_progress(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.IN_PROGRESS
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "Pick must be completed" in data["errors"][0]["message"]
+    assert "In Progress" in data["errors"][0]["message"]
+
+
+@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
+def test_fulfillment_approve_succeeds_when_pick_completed(
+    mock_email_fulfillment,
+    mock_fulfillment_approved,
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+    warehouse,
+):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-123",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.COMPLETED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": True}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert not data["errors"]
+    assert data["fulfillment"]["status"] == FulfillmentStatus.FULFILLED.upper()
+    assert data["order"]["status"] == OrderStatus.FULFILLED.upper()
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.FULFILLED
+
+    assert mock_email_fulfillment.call_count == 1
+    events = fulfillment.order.events.all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.type == OrderEvents.FULFILLMENT_FULFILLED_ITEMS
+    assert event.user == staff_api_client.user
+    mock_fulfillment_approved.assert_called_once_with(fulfillment, True)
+
+
+def test_fulfillment_approve_fails_without_shipment(
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.COMPLETED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert data["errors"]
+    assert data["errors"][0]["code"] == OrderErrorCode.INVALID.name
+    assert "must have a Shipment" in data["errors"][0]["message"]
+
+
+@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
+def test_fulfillment_approve_succeeds_with_shipment_and_completed_pick(
+    mock_email_fulfillment,
+    mock_fulfillment_approved,
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+    warehouse,
+):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-COMPLETE",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+    assert pick.status == PickStatus.COMPLETED
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": True}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert not data["errors"]
+    assert data["fulfillment"]["status"] == FulfillmentStatus.FULFILLED.upper()
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.FULFILLED
+    assert fulfillment.shipment == shipment
+
+    mock_fulfillment_approved.assert_called_once_with(fulfillment, True)
+
+
+@patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
+def test_fulfillment_approve_creates_fulfillment_sources_from_allocation_sources(
+    mock_email_fulfillment,
+    staff_api_client,
+    full_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    staff_user,
+    warehouse,
+    shipping_zone,
+    channel_USD,
+):
+    from decimal import Decimal
+
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    from .....inventory import PurchaseOrderItemStatus
+    from .....inventory.models import PurchaseOrder, PurchaseOrderItem
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+    from .....warehouse.models import (
+        Allocation,
+        AllocationSource,
+        FulfillmentSource,
+        Warehouse,
+    )
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    fulfillment = full_fulfillment_awaiting_approval
+
+    warehouse.is_owned = True
+    warehouse.save(update_fields=["is_owned"])
+
+    supplier_warehouse = Warehouse.objects.create(
+        name="Supplier Warehouse",
+        slug="supplier-warehouse",
+        address=warehouse.address,
+        email="supplier@example.com",
+        is_owned=False,
+    )
+    supplier_warehouse.shipping_zones.add(shipping_zone)
+    supplier_warehouse.channels.add(channel_USD)
+
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-SOURCE",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    order = fulfillment.order
+    po = PurchaseOrder.objects.create(
+        source_warehouse=supplier_warehouse,
+        destination_warehouse=warehouse,
+    )
+
+    for fulfillment_line in fulfillment.lines.all():
+        order_line = fulfillment_line.order_line
+        stock = fulfillment_line.stock
+        quantity = fulfillment_line.quantity
+
+        allocation = Allocation.objects.create(
+            order_line=order_line,
+            stock=stock,
+            quantity_allocated=quantity,
+        )
+
+        variant = stock.product_variant
+        poi = PurchaseOrderItem.objects.create(
+            order=po,
+            product_variant=variant,
+            quantity_ordered=quantity,
+            quantity_allocated=quantity,
+            quantity_fulfilled=0,
+            total_price_amount=quantity * 10.00,
+            currency=order.currency,
+            country_of_origin="US",
+            status=PurchaseOrderItemStatus.CONFIRMED,
+            confirmed_at=timezone.now(),
+        )
+
+        AllocationSource.objects.create(
+            allocation=allocation,
+            purchase_order_item=poi,
+            quantity=quantity,
+        )
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user)
+
+    assert FulfillmentSource.objects.count() == 0
+    assert AllocationSource.objects.filter(allocation__order_line__order=order).exists()
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": False}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert not data["errors"]
+    assert data["fulfillment"]["status"] == FulfillmentStatus.FULFILLED.upper()
+
+    fulfillment_sources = FulfillmentSource.objects.filter(
+        fulfillment_line__fulfillment=fulfillment
+    )
+    assert fulfillment_sources.exists()
+
+    total_fulfillment_source_quantity = fulfillment_sources.aggregate(
+        total=Sum("quantity")
+    )["total"]
+    total_fulfillment_line_quantity = sum(
+        line.quantity for line in fulfillment.lines.all()
+    )
+    assert total_fulfillment_source_quantity == total_fulfillment_line_quantity
+
+    assert not AllocationSource.objects.filter(
+        allocation__order_line__order=order
+    ).exists()
+
+    for poi in PurchaseOrderItem.objects.filter(order=po):
+        assert poi.quantity_allocated == 0
+        assert poi.quantity_fulfilled > 0

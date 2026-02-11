@@ -315,6 +315,10 @@ class Warehouse(ModelWithMetadata, ModelWithExternalReference):
                 fields=["click_and_collect_option"],
             ),
         ]
+        permissions = [
+            ("manage_purchase_orders", "Can manage purchase orders"),
+            ("manage_stock", "Can manage stock"),
+        ]
 
     def __str__(self):
         return self.name
@@ -524,6 +528,16 @@ AllocationManager = models.Manager.from_queryset(AllocationQueryset)
 
 
 class Allocation(models.Model):
+    """The OrderConsumption model.
+
+    On order creation an entry is created and Stock quantity_allocated is incremented. We
+    consume Stock by allocating PurchaseOrderItems to Allocations.
+    In order to change
+    Order state from UNCONFIRMED->UNFULFILLED we must have
+    sum(AllocationSource.quantity) = POI.quantity on POI.
+
+    """
+
     order_line = models.ForeignKey(
         OrderLine,
         null=False,
@@ -538,7 +552,11 @@ class Allocation(models.Model):
         on_delete=models.CASCADE,
         related_name="allocations",
     )
+
     quantity_allocated = models.PositiveIntegerField(default=0)
+
+    # make backwards compatible
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     objects = AllocationManager()
 
@@ -547,7 +565,70 @@ class Allocation(models.Model):
         ordering = ("pk",)
 
 
+class AllocationSource(models.Model):
+    """Tracks which PurchaseOrderItem batches fulfill which Allocations.
+
+    One Allocation can span multiple PurchaseOrderItems (batches).
+    This model provides batch traceability for COGS calculation, FIFO fulfillment,
+    expiry tracking, and recalls.
+
+    The sum of quantities in AllocationSources for an Allocation should equal
+    the Allocation.quantity_allocated for an owned warehouse. This can't exist for a
+    nonowend warehouse.
+    """
+
+    allocation = models.ForeignKey(
+        Allocation,
+        on_delete=models.CASCADE,
+        related_name="allocation_sources",
+    )
+    purchase_order_item = models.ForeignKey(
+        "inventory.PurchaseOrderItem",
+        on_delete=models.CASCADE,
+        related_name="allocation_sources",
+    )
+    quantity = models.PositiveIntegerField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [["allocation", "purchase_order_item"]]
+        ordering = ("pk",)
+
+
+class FulfillmentSource(models.Model):
+    """Tracks which PurchaseOrderItem batches fulfilled which orders.
+
+    Created when an AllocationSource is converted to fulfillment. Provides
+    audit trail of which POI batches went into which customer orders for
+    COGS calculation, returns processing, and supplier quality tracking.
+    """
+
+    fulfillment_line = models.ForeignKey(
+        "order.FulfillmentLine",
+        on_delete=models.CASCADE,
+        related_name="fulfillment_sources",
+    )
+    purchase_order_item = models.ForeignKey(
+        "inventory.PurchaseOrderItem",
+        on_delete=models.CASCADE,
+        related_name="fulfillment_sources",
+    )
+    quantity = models.PositiveIntegerField()
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("pk",)
+        indexes = [
+            models.Index(fields=["fulfillment_line", "purchase_order_item"]),
+            models.Index(fields=["purchase_order_item", "-created_at"]),
+        ]
+
+
 class PreorderAllocation(models.Model):
+    """Not used by Dirac."""
+
     order_line = models.ForeignKey(
         OrderLine,
         null=False,
@@ -615,6 +696,12 @@ class PreorderReservation(models.Model):
 
 
 class Reservation(models.Model):
+    """Not used by Dirac.
+
+    Made so that when products are in the basket they can't be bought
+    by someone else.
+    """
+
     checkout_line = models.ForeignKey(
         CheckoutLine,
         null=False,

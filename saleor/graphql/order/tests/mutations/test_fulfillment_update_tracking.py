@@ -14,10 +14,10 @@ FULFILLMENT_UPDATE_TRACKING_QUERY = """
     ) {
         orderFulfillmentUpdateTracking(
             id: $id
-            input: { trackingNumber: $tracking, notifyCustomer: $notifyCustomer }
+            input: { trackingUrl: $tracking, notifyCustomer: $notifyCustomer }
         ) {
             fulfillment {
-                trackingNumber
+                trackingUrl
             }
         }
     }
@@ -39,7 +39,7 @@ def test_fulfillment_update_tracking(
     response = staff_api_client.post_graphql(query, variables)
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentUpdateTracking"]["fulfillment"]
-    assert data["trackingNumber"] == tracking
+    assert data["trackingUrl"] == tracking
     send_fulfillment_update_mock.assert_not_called()
 
 
@@ -88,17 +88,17 @@ def test_fulfillment_update_tracking_by_app(
     # then
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentUpdateTracking"]["fulfillment"]
-    assert data["trackingNumber"] == tracking
+    assert data["trackingUrl"] == tracking
     send_fulfillment_update_mock.assert_not_called()
 
 
-@patch("saleor.plugins.manager.PluginsManager.tracking_number_updated")
+@patch("saleor.plugins.manager.PluginsManager.tracking_url_updated")
 @patch(
     "saleor.graphql.order.mutations.fulfillment_update_tracking.send_fulfillment_update"
 )
 def test_fulfillment_update_tracking_send_notification_true(
     send_fulfillment_update_mock,
-    mocked_tracking_number_updated_event,
+    mocked_tracking_url_updated_event,
     staff_api_client,
     fulfillment,
     permission_group_manage_orders,
@@ -113,18 +113,18 @@ def test_fulfillment_update_tracking_send_notification_true(
     )
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentUpdateTracking"]["fulfillment"]
-    assert data["trackingNumber"] == tracking
+    assert data["trackingUrl"] == tracking
     send_fulfillment_update_mock.assert_called_once_with(
         fulfillment.order, fulfillment, ANY
     )
-    mocked_tracking_number_updated_event.assert_called_once_with(fulfillment)
+    mocked_tracking_url_updated_event.assert_called_once_with(fulfillment)
 
 
-@patch("saleor.plugins.manager.PluginsManager.tracking_number_updated")
+@patch("saleor.plugins.manager.PluginsManager.tracking_url_updated")
 @patch("saleor.order.notifications.send_fulfillment_update")
 def test_fulfillment_update_tracking_send_notification_false(
     send_fulfillment_update_mock,
-    mocked_tracking_number_updated_event,
+    mocked_tracking_url_updated_event,
     staff_api_client,
     fulfillment,
     permission_group_manage_orders,
@@ -139,20 +139,20 @@ def test_fulfillment_update_tracking_send_notification_false(
     )
     content = get_graphql_content(response)
     data = content["data"]["orderFulfillmentUpdateTracking"]["fulfillment"]
-    assert data["trackingNumber"] == tracking
+    assert data["trackingUrl"] == tracking
     send_fulfillment_update_mock.assert_not_called()
-    mocked_tracking_number_updated_event.assert_called_once_with(fulfillment)
+    mocked_tracking_url_updated_event.assert_called_once_with(fulfillment)
 
 
 @pytest.mark.parametrize("notify_customer", [True, False])
 @patch("saleor.plugins.webhook.plugin.trigger_webhooks_async")
-def test_fulfillment_tracking_number_updated_event_triggered(
+def test_fulfillment_tracking_url_updated_event_triggered(
     mocked_webhooks,
     notify_customer,
     permission_group_manage_orders,
     fulfillment,
     settings,
-    subscription_fulfillment_tracking_number_updated,
+    subscription_fulfillment_tracking_url_updated,
     staff_api_client,
 ):
     # given

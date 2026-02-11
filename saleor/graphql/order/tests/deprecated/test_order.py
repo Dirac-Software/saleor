@@ -284,7 +284,7 @@ def test_order_fulfill_old_line_id(
         notify_customer=True,
         allow_stock_to_be_exceeded=False,
         auto_approved=fulfillment_auto_approve,
-        tracking_number="",
+        tracking_url="",
     )
 
 

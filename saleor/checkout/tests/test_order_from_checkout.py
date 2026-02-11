@@ -10,6 +10,7 @@ from prices import Money, TaxedMoney
 from ...channel import MarkAsPaidStrategy
 from ...checkout.models import Checkout, CheckoutLine
 from ...core.exceptions import InsufficientStock
+from ...core.notify import NotifyEventType
 from ...core.prices import quantize_price
 from ...core.taxes import (
     TaxDataError,
@@ -1077,3 +1078,58 @@ def test_created_order_from_checkout_missing_lines(
                 user=None,
                 app=app,
             )
+
+
+@mock.patch("saleor.plugins.manager.PluginsManager.notify")
+def test_create_order_from_checkout_auto_confirm_sends_order_confirmed_email(
+    mock_notify,
+    checkout_with_item,
+    customer_user,
+    address,
+    shipping_method,
+    app,
+    django_capture_on_commit_callbacks,
+):
+    # given
+    checkout = checkout_with_item
+    checkout.shipping_address = address
+    checkout.billing_address = address
+    checkout.shipping_method = shipping_method
+    checkout.save()
+
+    checkout.payment_transactions.create(
+        charged_value=checkout.total.gross.amount,
+        currency=checkout.currency,
+    )
+
+    manager = get_plugins_manager(allow_replica=False)
+    lines, _ = fetch_checkout_lines(checkout)
+    checkout_info = fetch_checkout_info(checkout, lines, manager)
+
+    channel = checkout.channel
+    channel.automatically_confirm_all_new_orders = True
+    channel.allow_unpaid_orders = True
+    channel.save(
+        update_fields=["automatically_confirm_all_new_orders", "allow_unpaid_orders"]
+    )
+
+    # when
+    with django_capture_on_commit_callbacks(execute=True):
+        order = create_order_from_checkout(
+            checkout_info=checkout_info,
+            manager=manager,
+            user=customer_user,
+            app=app,
+        )
+
+    # then
+    order.refresh_from_db()
+    assert order.status == OrderStatus.UNFULFILLED
+
+    notify_calls = list(mock_notify.call_args_list)
+    order_confirmed_calls = [
+        call
+        for call in notify_calls
+        if call.args and call.args[0] == NotifyEventType.ORDER_CONFIRMED
+    ]
+    assert len(order_confirmed_calls) == 1

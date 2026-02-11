@@ -267,6 +267,52 @@ type Query {
   refundSettings: RefundSettings! @doc(category: "Shop")
 
   """
+  Look up a shipment by ID.
+  
+  Requires one of the following permissions: MANAGE_SHIPPING.
+  """
+  shipment(
+    """ID of the shipment."""
+    id: ID!
+  ): Shipment @doc(category: "Shipping")
+
+  """
+  List of inbound/outbound shipments.
+  
+  Requires one of the following permissions: MANAGE_SHIPPING.
+  """
+  shipments(
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): ShipmentCountableConnection @doc(category: "Shipping")
+
+  """
+  List of outbound shipments that haven't departed yet and can accept more fulfillments. Useful for linking fulfillments to existing shipments.
+  
+  Requires one of the following permissions: MANAGE_SHIPPING.
+  """
+  availableShipmentsForFulfillment(
+    """Filter shipments compatible with this fulfillment."""
+    fulfillmentId: ID
+
+    """Filter shipments from this warehouse."""
+    warehouseId: ID
+  ): [Shipment!] @doc(category: "Shipping")
+
+  """
   Look up a shipping zone by ID.
   
   Requires one of the following permissions: MANAGE_SHIPPING.
@@ -919,6 +965,65 @@ type Query {
     token: UUID!
   ): Order @doc(category: "Orders") @deprecated
 
+  """
+  Look up a pick by ID.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pick(
+    """ID of a pick."""
+    id: ID!
+  ): Pick @doc(category: "Orders")
+
+  """
+  List of picks for warehouse picking workflow.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  picks(
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): PickCountableConnection @doc(category: "Orders")
+
+  """
+  List of fulfillments for warehouse and shipping operations.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  fulfillments(
+    """Filtering options for fulfillments."""
+    filter: FulfillmentQueryFilterInput
+
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): FulfillmentCountableConnection @doc(category: "Orders")
+
   """Look up a navigation menu by ID or name."""
   menu(
     """Slug of a channel for which the data should be returned."""
@@ -1002,6 +1107,108 @@ type Query {
     """
     last: Int
   ): MenuItemCountableConnection @doc(category: "Menu")
+
+  """
+  Look up a purchase order by ID.
+  
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+  """
+  purchaseOrder(
+    """ID of the purchase order."""
+    id: ID!
+  ): PurchaseOrder @doc(category: "Products")
+
+  """
+  List of purchase orders.
+  
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+  """
+  purchaseOrders(
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): PurchaseOrderCountableConnection @doc(category: "Products")
+
+  """
+  Look up a receipt by ID.
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  receipt(
+    """ID of the receipt."""
+    id: ID!
+  ): Receipt @doc(category: "Products")
+
+  """
+  List of goods receipts.
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  receipts(
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): ReceiptCountableConnection @doc(category: "Products")
+
+  """
+  List purchase order item adjustments with optional filtering.
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  purchaseOrderItemAdjustments(
+    """Filter by processed status. True=processed, False=pending, null=all."""
+    processed: Boolean
+
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): PurchaseOrderItemAdjustmentCountableConnection @doc(category: "Products")
+
+  """
+  Look up a purchase order item adjustment by ID.
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  purchaseOrderItemAdjustment(
+    """ID of the adjustment."""
+    id: ID!
+  ): PurchaseOrderItemAdjustment @doc(category: "Products")
 
   """
   Look up a gift card by ID.
@@ -2173,6 +2380,8 @@ enum WebhookEventTypeEnum @doc(category: "Webhooks") {
 
   """A warehouse metadata is updated."""
   WAREHOUSE_METADATA_UPDATED
+  PURCHASE_ORDER_CREATED
+  PURCHASE_ORDER_CONFIRMED
 
   """A new voucher created."""
   VOUCHER_CREATED
@@ -2748,6 +2957,8 @@ enum WebhookEventTypeAsyncEnum @doc(category: "Webhooks") {
 
   """A warehouse metadata is updated."""
   WAREHOUSE_METADATA_UPDATED
+  PURCHASE_ORDER_CREATED
+  PURCHASE_ORDER_CONFIRMED
 
   """A new voucher created."""
   VOUCHER_CREATED
@@ -2992,6 +3203,8 @@ enum PermissionEnum @doc(category: "Users") {
   MANAGE_SHIPPING
   MANAGE_SETTINGS
   MANAGE_TRANSLATIONS
+  MANAGE_PURCHASE_ORDERS
+  MANAGE_STOCK
 }
 
 """
@@ -3415,6 +3628,8 @@ enum WebhookSampleEventTypeEnum @doc(category: "Webhooks") {
   WAREHOUSE_UPDATED
   WAREHOUSE_DELETED
   WAREHOUSE_METADATA_UPDATED
+  PURCHASE_ORDER_CREATED
+  PURCHASE_ORDER_CONFIRMED
   VOUCHER_CREATED
   VOUCHER_UPDATED
   VOUCHER_DELETED
@@ -5244,10 +5459,14 @@ type StockSettings @doc(category: "Products") {
 """
 Determine the allocation strategy for the channel.
 
+    Both strategies prioritize owned warehouses (is_owned=True) over non-owned
+    warehouses (suppliers) to ensure proper batch tracking via PurchaseOrderItems.
+
     PRIORITIZE_SORTING_ORDER - allocate stocks according to the warehouses' order
-    within the channel
+    within the channel (owned warehouses first, then non-owned by sorting order)
 
     PRIORITIZE_HIGH_STOCK - allocate stock in a warehouse with the most stock
+    (owned warehouses first sorted by quantity, then non-owned by quantity)
 """
 enum AllocationStrategyEnum @doc(category: "Products") {
   PRIORITIZE_SORTING_ORDER
@@ -11242,6 +11461,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Returns True if order has to be exempt from taxes."""
   taxExemption: Boolean!
 
+  """Returns True if order prices need to be recalculated."""
+  shouldRefreshPrices: Boolean!
+
   """
   List of transactions for the order. Requires one of the following permissions: MANAGE_ORDERS, HANDLE_PAYMENTS.
   """
@@ -11491,8 +11713,8 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Status of fulfillment."""
   status: FulfillmentStatus!
 
-  """Fulfillment tracking number."""
-  trackingNumber: String!
+  """Fulfillment tracking URL."""
+  trackingUrl: String
 
   """Date and time when fulfillment was created."""
   created: DateTime!
@@ -11511,6 +11733,26 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """Total refunded amount assigned to this fulfillment."""
   totalRefundedAmount: Money
+
+  """Order that this fulfillment belongs to."""
+  order: Order!
+
+  """Pick associated with this fulfillment for warehouse picking workflow."""
+  pick: Pick
+
+  """Shipment associated with this fulfillment."""
+  shipment: Shipment
+
+  """When the shipment departed (for outbound fulfillments)."""
+  departedAt: DateTime
+
+  """When the shipment arrived (for inbound fulfillments)."""
+  arrivedAt: DateTime
+
+  """
+  Indicates if all required inventory from purchase orders has been received in the warehouse. True when all allocations have matching allocation sources, meaning the purchased goods have physically arrived.
+  """
+  hasInventoryReceived: Boolean!
 }
 
 enum FulfillmentStatus @doc(category: "Orders") {
@@ -11778,18 +12020,122 @@ enum OrderDiscountType @doc(category: "Discounts") {
   ORDER_PROMOTION
 }
 
-enum OrderAction @doc(category: "Payments") {
-  """Represents the capture action."""
-  CAPTURE
+"""Represents a pick document for order fulfillment."""
+type Pick implements Node @doc(category: "Orders") {
+  """The ID of the object."""
+  id: ID!
 
-  """Represents a mark-as-paid action."""
-  MARK_AS_PAID
+  """The fulfillment being picked."""
+  fulfillment: Fulfillment!
 
-  """Represents a refund action."""
-  REFUND
+  """Current status of the pick."""
+  status: PickStatus!
 
-  """Represents a void action."""
-  VOID
+  """Items to be picked in this pick document."""
+  items: [PickItem!]!
+
+  """When the pick was created."""
+  createdAt: DateTime!
+
+  """When picking was started."""
+  startedAt: DateTime
+
+  """When picking was completed."""
+  completedAt: DateTime
+
+  """User who created the pick."""
+  createdBy: User
+
+  """Warehouse staff who started picking."""
+  startedBy: User
+
+  """Warehouse staff who completed picking."""
+  completedBy: User
+
+  """Notes about this pick."""
+  notes: String
+}
+
+enum PickStatus @doc(category: "Orders") {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+"""Represents a line item in a pick document."""
+type PickItem implements Node @doc(category: "Orders") {
+  """The ID of the object."""
+  id: ID!
+
+  """The order line being picked."""
+  orderLine: OrderLine!
+
+  """Quantity that needs to be picked."""
+  quantityToPick: Int!
+
+  """Quantity physically picked from warehouse."""
+  quantityPicked: Int!
+
+  """Whether this item has been fully picked."""
+  isFullyPicked: Boolean!
+
+  """When this item was marked as fully picked."""
+  pickedAt: DateTime
+
+  """Warehouse staff who picked this item."""
+  pickedBy: User
+
+  """Notes about picking this specific item."""
+  notes: String
+}
+
+"""Represents a shipment of goods from supplier to warehouse."""
+type Shipment implements Node @doc(category: "Shipping") {
+  """The ID of the shipment."""
+  id: ID!
+
+  """Source address (where shipment originates)."""
+  source: Address!
+
+  """Destination address (where shipment is going)."""
+  destination: Address!
+
+  """
+  Shipping cost including VAT (estimated until invoice added, null if not set).
+  """
+  shippingCost: Money
+
+  """Shipping invoice (null if not yet received)."""
+  shippingInvoice: Invoice
+
+  """When shipment arrived (null if still in transit)."""
+  arrivedAt: DateTime
+
+  """When shipment departed (null for inbound shipments)."""
+  departedAt: DateTime
+
+  """Carrier name (e.g., DHL, FedEx)."""
+  carrier: String
+
+  """
+  Tracking URL or number. Can be used to fetch shipment status from carrier APIs.
+  """
+  trackingUrl: String
+
+  """Incoterm defining shipping cost responsibility."""
+  incoTerm: IncoTermEnum
+
+  """Type of shipment: inbound from supplier or outbound to customer."""
+  shipmentType: ShipmentTypeEnum!
+
+  """When shipment was processed/finalized."""
+  shipmentProcessedAt: DateTime
+
+  """Purchase order items in this shipment."""
+  purchaseOrderItems: [PurchaseOrderItem!]!
+
+  """Receipt for this shipment (null if not yet received)."""
+  receipt: Receipt
 }
 
 """Represents an Invoice."""
@@ -11871,6 +12217,145 @@ enum JobStatusEnum {
   SUCCESS
   FAILED
   DELETED
+}
+
+enum IncoTermEnum @doc(category: "Shipping") {
+  EXW
+  FCA
+  CPT
+  CIP
+  DAP
+  DPU
+  DDP
+  FAS
+  FOB
+  CFR
+  CIF
+}
+
+enum ShipmentTypeEnum @doc(category: "Shipping") {
+  INBOUND
+  OUTBOUND
+}
+
+"""Represents a line item in a purchase order."""
+type PurchaseOrderItem implements Node {
+  """The ID of the purchase order item."""
+  id: ID!
+
+  """Parent purchase order."""
+  purchaseOrder: PurchaseOrder!
+
+  """Product variant ordered."""
+  productVariant: ProductVariant!
+
+  """Quantity ordered."""
+  quantityOrdered: Int!
+
+  """Total quantity received across all receipt lines."""
+  quantityReceived: Int!
+
+  """Unit cost (buy price)."""
+  unitPrice: Money!
+
+  """Country of origin (ISO 2-letter code)."""
+  countryOfOrigin: String!
+
+  """Status of this purchase order item."""
+  status: PurchaseOrderItemStatusEnum!
+}
+
+"""Represents a purchase order from a supplier."""
+type PurchaseOrder implements Node {
+  """The ID of the purchase order."""
+  id: ID!
+
+  """Supplier warehouse (non-owned)."""
+  supplierWarehouse: Warehouse!
+
+  """Destination warehouse (owned)."""
+  destinationWarehouse: Warehouse!
+
+  """Items in this purchase order."""
+  items: [PurchaseOrderItem]!
+}
+
+enum PurchaseOrderItemStatusEnum @doc(category: "Products") {
+  DRAFT
+  CONFIRMED
+  RECEIVED
+  CANCELLED
+}
+
+"""Represents a goods receipt for an inbound shipment."""
+type Receipt implements Node @doc(category: "Products") {
+  """The ID of the object."""
+  id: ID!
+
+  """The shipment being received."""
+  shipment: Shipment!
+
+  """Current status of the receipt."""
+  status: ReceiptStatusEnum!
+
+  """Items received in this receipt."""
+  lines: [ReceiptLine!]!
+
+  """When the receipt was started."""
+  createdAt: DateTime!
+
+  """When the receipt was completed."""
+  completedAt: DateTime
+
+  """User who started the receipt."""
+  createdBy: User
+
+  """User who completed the receipt."""
+  completedBy: User
+
+  """Notes about this receipt."""
+  notes: String
+}
+
+enum ReceiptStatusEnum {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+"""Represents a line item in a goods receipt."""
+type ReceiptLine implements Node @doc(category: "Products") {
+  """The ID of the object."""
+  id: ID!
+
+  """The purchase order item being received."""
+  purchaseOrderItem: PurchaseOrderItem!
+
+  """Quantity received in this line."""
+  quantityReceived: Int!
+
+  """When this item was scanned/received."""
+  receivedAt: DateTime!
+
+  """Warehouse staff who scanned this item."""
+  receivedBy: User
+
+  """Notes about this specific receipt line."""
+  notes: String
+}
+
+enum OrderAction @doc(category: "Payments") {
+  """Represents the capture action."""
+  CAPTURE
+
+  """Represents a mark-as-paid action."""
+  MARK_AS_PAID
+
+  """Represents a refund action."""
+  REFUND
+
+  """Represents a void action."""
+  VOID
 }
 
 enum OrderOriginEnum @doc(category: "Orders") {
@@ -12367,6 +12852,7 @@ enum OrderErrorCode @doc(category: "Orders") {
   CANNOT_DISCOUNT
   CANNOT_REFUND
   CANNOT_FULFILL_UNPAID_ORDER
+  CANNOT_FULFILL_UNRECEIVED_STOCK
   CAPTURE_INACTIVE_PAYMENT
   GIFT_CARD_LINE
   NOT_EDITABLE
@@ -12936,6 +13422,23 @@ type RefundSettings @doc(category: "Orders") {
   reasonReferenceType: PageType
 }
 
+type ShipmentCountableConnection @doc(category: "Shipping") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [ShipmentCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type ShipmentCountableEdge @doc(category: "Shipping") {
+  """The item at the end of the edge."""
+  node: Shipment!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
 input ShippingZoneFilterInput @doc(category: "Shipping") {
   search: String
   channels: [ID!]
@@ -13355,6 +13858,8 @@ input OrderFilterInput @doc(category: "Orders") {
   giftCardBought: Boolean
   numbers: [String!]
   checkoutIds: [ID!]
+  inventoryReady: Boolean
+  warehouse: [ID!]
 }
 
 enum OrderStatusFilter @doc(category: "Orders") {
@@ -13467,6 +13972,14 @@ input OrderWhereInput @doc(category: "Orders") {
 
   """Filter by shipping address of the order."""
   shippingAddress: AddressFilterInput
+
+  """
+  Filter by inventory readiness. Returns orders where all inventory has physically arrived in owned warehouses, all shipments have been received (quantity_received > 0), and all adjustments have been processed (processed_at IS NOT NULL).
+  """
+  inventoryReady: Boolean
+
+  """Filter by warehouse containing order allocations."""
+  warehouse: GlobalIDFilterInput
 
   """List of conditions that must be met."""
   AND: [OrderWhereInput!]
@@ -13740,6 +14253,46 @@ input DraftOrderWhereInput @doc(category: "Orders") {
   OR: [DraftOrderWhereInput!]
 }
 
+type PickCountableConnection @doc(category: "Orders") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [PickCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type PickCountableEdge @doc(category: "Orders") {
+  """The item at the end of the edge."""
+  node: Pick!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
+type FulfillmentCountableConnection @doc(category: "Orders") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [FulfillmentCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type FulfillmentCountableEdge @doc(category: "Orders") {
+  """The item at the end of the edge."""
+  node: Fulfillment!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
+input FulfillmentQueryFilterInput @doc(category: "Orders") {
+  status: [FulfillmentStatus!]
+  warehouse: [ID!]
+  metadata: [MetadataFilter!]
+}
+
 type MenuCountableConnection @doc(category: "Menu") {
   """Pagination data for this connection."""
   pageInfo: PageInfo!
@@ -13813,6 +14366,115 @@ enum MenuItemsSortField {
 input MenuItemFilterInput {
   search: String
   metadata: [MetadataFilter!]
+}
+
+type PurchaseOrderCountableConnection @doc(category: "Products") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [PurchaseOrderCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type PurchaseOrderCountableEdge @doc(category: "Products") {
+  """The item at the end of the edge."""
+  node: PurchaseOrder!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
+type ReceiptCountableConnection {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [ReceiptCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type ReceiptCountableEdge {
+  """The item at the end of the edge."""
+  node: Receipt!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
+type PurchaseOrderItemAdjustmentCountableConnection @doc(category: "Products") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [PurchaseOrderItemAdjustmentCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type PurchaseOrderItemAdjustmentCountableEdge @doc(category: "Products") {
+  """The item at the end of the edge."""
+  node: PurchaseOrderItemAdjustment!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
+"""Represents an inventory adjustment to a purchase order item."""
+type PurchaseOrderItemAdjustment implements Node {
+  """The ID of the adjustment."""
+  id: ID!
+
+  """Purchase order item being adjusted."""
+  purchaseOrderItem: PurchaseOrderItem!
+
+  """Change in quantity (negative for losses, positive for gains)."""
+  quantityChange: Int!
+
+  """Reason for the adjustment."""
+  reason: PurchaseOrderItemAdjustmentReasonEnum!
+
+  """
+  Whether supplier credits us for this adjustment. True for invoice variance or delivery shortages. False for losses we absorb (shrinkage, damage).
+  """
+  affectsPayable: Boolean!
+
+  """
+  Financial impact of this adjustment. Negative for losses, positive for gains. Calculated as quantity_change × original_unit_price.
+  """
+  financialImpact: Money!
+
+  """Processing status: PENDING or PROCESSED."""
+  status: PurchaseOrderItemAdjustmentStatusEnum!
+
+  """Purchase order reference number for context."""
+  purchaseOrderNumber: String
+
+  """Additional notes about the adjustment."""
+  notes: String
+
+  """When the adjustment was processed (null if pending)."""
+  processedAt: DateTime
+
+  """When the adjustment was created."""
+  createdAt: DateTime!
+
+  """User who created the adjustment."""
+  createdBy: User
+}
+
+enum PurchaseOrderItemAdjustmentReasonEnum @doc(category: "Products") {
+  SHRINKAGE_THEFT
+  SHRINKAGE_DAMAGE
+  SHRINKAGE_UNKNOWN
+  CYCLE_COUNT_NEG
+  CYCLE_COUNT_POS
+  INVOICE_VARIANCE
+  DELIVERY_SHORT
+}
+
+enum PurchaseOrderItemAdjustmentStatusEnum {
+  PENDING
+  PROCESSED
 }
 
 input GiftCardSortingInput @doc(category: "Gift cards") {
@@ -15486,6 +16148,52 @@ type Mutation {
   Requires one of the following permissions: MANAGE_SETTINGS.
   """
   refundReasonReferenceClear: RefundReasonReferenceTypeClear @doc(category: "Orders")
+
+  """
+  Creates a new shipment for inbound goods from supplier. 
+  
+  Requires one of the following permissions: MANAGE_SHIPPING.
+  """
+  shipmentCreate(
+    """Fields required to create a shipment."""
+    input: ShipmentCreateInput!
+  ): ShipmentCreate @doc(category: "Shipping")
+
+  """
+  Creates a new outbound shipment for order fulfillments. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  outboundShipmentCreate(
+    """Fields required to create an outbound shipment."""
+    input: OutboundShipmentCreateInput!
+  ): OutboundShipmentCreate @doc(category: "Shipping")
+
+  """
+  Marks an outbound shipment as departed. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  shipmentMarkDeparted(
+    """ID of the shipment to mark as departed."""
+    id: ID!
+
+    """Fields to update when marking as departed."""
+    input: ShipmentMarkDepartedInput
+  ): ShipmentMarkDeparted @doc(category: "Shipping")
+
+  """
+  Links a fulfillment to an existing shipment. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  fulfillmentLinkToShipment(
+    """ID of the fulfillment to link."""
+    fulfillmentId: ID!
+
+    """ID of the shipment to link to."""
+    shipmentId: ID!
+  ): FulfillmentLinkToShipment @doc(category: "Orders")
 
   """
   Manage shipping method's availability in channels. 
@@ -17358,6 +18066,19 @@ type Mutation {
   ): OrderUpdateShipping @doc(category: "Orders")
 
   """
+  Manually updates the shipping cost of an order. Provide net cost and VAT percentage (defaults to 20% UK standard rate). Gross cost is auto-calculated. Only works for draft and unconfirmed orders. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderUpdateShippingCost(
+    """ID of the order to update shipping cost."""
+    id: ID!
+
+    """Fields required to update shipping cost."""
+    input: OrderUpdateShippingCostInput!
+  ): OrderUpdateShippingCost @doc(category: "Orders")
+
+  """
   Void an order. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -17394,6 +18115,42 @@ type Mutation {
     """
     stockUpdatePolicy: StockUpdatePolicyEnum
   ): OrderBulkCreate @doc(category: "Orders")
+
+  """
+  Start picking items from warehouse for fulfillment. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pickStart(
+    """ID of the pick to start."""
+    pickId: ID!
+  ): PickStart @doc(category: "Orders")
+
+  """
+  Update quantity picked for a pick item. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pickUpdateItem(
+    """Optional notes about picking this item."""
+    notes: String
+
+    """ID of the pick item to update."""
+    pickItemId: ID!
+
+    """Quantity picked."""
+    quantityPicked: Int!
+  ): PickUpdateItem @doc(category: "Orders")
+
+  """
+  Complete a pick document after all items have been picked. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  pickComplete(
+    """ID of the pick to complete."""
+    pickId: ID!
+  ): PickComplete @doc(category: "Orders")
 
   """
   Delete metadata of an object. To use it, you need to have access to the modified object.
@@ -17680,6 +18437,95 @@ type Mutation {
     """ID of an invoice to be sent."""
     id: ID!
   ): InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_SENT, NOTIFY_USER], syncEvents: [])
+
+  """
+  Creates a new purchase order from a supplier. 
+  
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+  """
+  createPurchaseOrder(
+    """Fields required to create a purchase order."""
+    input: PurchaseOrderCreateInput!
+  ): PurchaseOrderCreate
+
+  """
+  Confirms a purchase order with the supplier. 
+  
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+  """
+  confirmPurchaseOrder(
+    """ID of the purchase order to confirm."""
+    id: ID!
+  ): PurchaseOrderConfirm @doc(category: "Products")
+
+  """
+  Deletes a draft purchase order. 
+  
+  Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+  """
+  deletePurchaseOrder(
+    """ID of the purchase order to delete."""
+    id: ID!
+  ): PurchaseOrderDelete @doc(category: "Products")
+
+  """
+  Start receiving goods from an inbound shipment. 
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  startReceipt(
+    """ID of the shipment to receive."""
+    shipmentId: ID!
+  ): ReceiptStart @doc(category: "Products")
+
+  """
+  Record receiving an item during a receipt. 
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  receiveItem(
+    """Optional notes about this item."""
+    notes: String
+
+    """Quantity received."""
+    quantity: Int!
+
+    """ID of the receipt to add items to."""
+    receiptId: ID!
+
+    """ID of the product variant being received."""
+    variantId: ID!
+  ): ReceiptReceiveItem @doc(category: "Products")
+
+  """
+  Complete a goods receipt. Automatically creates adjustments for discrepancies between ordered and received quantities. 
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  completeReceipt(
+    """ID of the receipt to complete."""
+    receiptId: ID!
+  ): ReceiptComplete @doc(category: "Products")
+
+  """
+  Delete a draft receipt and revert all quantity updates. 
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  deleteReceipt(
+    """ID of the receipt to delete."""
+    receiptId: ID!
+  ): ReceiptDelete @doc(category: "Products")
+
+  """
+  Delete a receipt line and revert the quantity update. Use when an item was scanned by mistake. 
+  
+  Requires one of the following permissions: MANAGE_STOCK.
+  """
+  deleteReceiptLine(
+    """ID of the receipt line to delete."""
+    receiptLineId: ID!
+  ): ReceiptLineDelete @doc(category: "Products")
 
   """
   Activate a gift card. 
@@ -20585,6 +21431,7 @@ enum StockBulkUpdateErrorCode @doc(category: "Products") {
   GRAPHQL_ERROR
   INVALID
   NOT_FOUND
+  OWNED_WAREHOUSE
   REQUIRED
 }
 
@@ -21068,13 +21915,13 @@ type RefundReasonReferenceTypeClearError @doc(category: "Shop") {
 }
 
 """
-Manage shipping method's availability in channels. 
+Creates a new shipment for inbound goods from supplier. 
 
 Requires one of the following permissions: MANAGE_SHIPPING.
 """
-type ShippingMethodChannelListingUpdate @doc(category: "Shipping") {
-  """An updated shipping method instance."""
-  shippingMethod: ShippingMethodType
+type ShipmentCreate @doc(category: "Shipping") {
+  """Created shipment."""
+  shipment: Shipment
   shippingErrors: [ShippingError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [ShippingError!]!
 }
@@ -21107,6 +21954,107 @@ enum ShippingErrorCode @doc(category: "Shipping") {
   REQUIRED
   UNIQUE
   DUPLICATED_INPUT_ITEM
+}
+
+input ShipmentCreateInput @doc(category: "Shipping") {
+  """Source address ID (where shipment originates)."""
+  sourceAddressId: ID!
+
+  """Destination address ID (where shipment is going)."""
+  destinationAddressId: ID!
+
+  """Purchase order items to include in shipment."""
+  purchaseOrderItemIds: [ID!]!
+
+  """Carrier name (e.g., DHL, FedEx)."""
+  carrier: String
+
+  """Tracking URL or number from carrier."""
+  trackingUrl: String
+
+  """Estimated shipping cost including VAT."""
+  shippingCost: PositiveDecimal
+
+  """Currency code (default: GBP)."""
+  currency: String = "GBP"
+
+  """Incoterm defining shipping cost responsibility."""
+  incoTerm: IncoTermEnum
+
+  """When shipment was processed/finalized."""
+  shipmentProcessedAt: DateTime
+}
+
+"""
+Creates a new outbound shipment for order fulfillments. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OutboundShipmentCreate @doc(category: "Shipping") {
+  """Created outbound shipment."""
+  shipment: Shipment
+  shippingErrors: [ShippingError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ShippingError!]!
+}
+
+input OutboundShipmentCreateInput @doc(category: "Shipping") {
+  """Fulfillments to include in this shipment."""
+  fulfillmentIds: [ID!]!
+
+  """Carrier name (e.g., DHL, FedEx)."""
+  carrier: String!
+
+  """Tracking URL or number from carrier."""
+  trackingUrl: String!
+
+  """Shipping cost including VAT."""
+  shippingCost: PositiveDecimal
+
+  """Currency code (default: USD)."""
+  currency: String = "USD"
+}
+
+"""
+Marks an outbound shipment as departed. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type ShipmentMarkDeparted @doc(category: "Shipping") {
+  """Updated shipment."""
+  shipment: Shipment
+  shippingErrors: [ShippingError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ShippingError!]!
+}
+
+input ShipmentMarkDepartedInput @doc(category: "Shipping") {
+  """
+  Timestamp when shipment departed. Defaults to current time if not provided.
+  """
+  departedAt: DateTime
+}
+
+"""
+Links a fulfillment to an existing shipment. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type FulfillmentLinkToShipment @doc(category: "Orders") {
+  """Updated fulfillment linked to shipment."""
+  fulfillment: Fulfillment
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Manage shipping method's availability in channels. 
+
+Requires one of the following permissions: MANAGE_SHIPPING.
+"""
+type ShippingMethodChannelListingUpdate @doc(category: "Shipping") {
+  """An updated shipping method instance."""
+  shippingMethod: ShippingMethodType
+  shippingErrors: [ShippingError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ShippingError!]!
 }
 
 input ShippingMethodChannelListingInput @doc(category: "Shipping") {
@@ -21425,6 +22373,7 @@ enum ProductErrorCode @doc(category: "Products") {
   NOT_PRODUCTS_IMAGE
   NOT_PRODUCTS_VARIANT
   NOT_FOUND
+  OWNED_WAREHOUSE
   REQUIRED
   UNIQUE
   VARIANT_NO_DIGITAL_CONTENT
@@ -23311,6 +24260,7 @@ enum StockErrorCode @doc(category: "Products") {
   GRAPHQL_ERROR
   INVALID
   NOT_FOUND
+  OWNED_WAREHOUSE
   REQUIRED
   UNIQUE
 }
@@ -24896,6 +25846,17 @@ input OrderLineCreateInput @doc(category: "Orders") {
   """Number of variant items ordered."""
   quantity: Int!
 
+  """
+  Custom price of the item.When the line with the same variant will be provided multiple times, the last price will be used.
+  """
+  price: PositiveDecimal
+
+  """Custom net price of the item. Only works for draft orders."""
+  priceNet: PositiveDecimal
+
+  """Custom gross price of the item. Only works for draft orders."""
+  priceGross: PositiveDecimal
+
   """Product variant ID."""
   variantId: ID!
 
@@ -24903,11 +25864,6 @@ input OrderLineCreateInput @doc(category: "Orders") {
   Flag that allow force splitting the same variant into multiple lines by skipping the matching logic.
   """
   forceNewLine: Boolean = false
-
-  """
-  Custom price of the item.When the line with the same variant will be provided multiple times, the last price will be used.
-  """
-  price: PositiveDecimal
 }
 
 """
@@ -25126,8 +26082,8 @@ input OrderFulfillInput @doc(category: "Orders") {
   """If true, then allow proceed fulfillment when stock is exceeded."""
   allowStockToBeExceeded: Boolean = false
 
-  """Fulfillment tracking number."""
-  trackingNumber: String
+  """Fulfillment tracking URL."""
+  trackingUrl: String
 }
 
 input OrderFulfillLineInput @doc(category: "Orders") {
@@ -25205,8 +26161,8 @@ type FulfillmentUpdateTracking @doc(category: "Orders") @webhookEventsInfo(async
 }
 
 input FulfillmentUpdateTrackingInput @doc(category: "Orders") {
-  """Fulfillment tracking number."""
-  trackingNumber: String
+  """Fulfillment tracking URL."""
+  trackingUrl: String
 
   """If true, send an email notification to the customer."""
   notifyCustomer: Boolean = false
@@ -25581,6 +26537,15 @@ type OrderLineUpdate @doc(category: "Orders") {
 input OrderLineInput @doc(category: "Orders") {
   """Number of variant items ordered."""
   quantity: Int!
+
+  """Custom price of the item. Only works for draft orders."""
+  price: PositiveDecimal
+
+  """Custom net price of the item. Only works for draft orders."""
+  priceNet: PositiveDecimal
+
+  """Custom gross price of the item. Only works for draft orders."""
+  priceGross: PositiveDecimal
 }
 
 """
@@ -25821,6 +26786,33 @@ input OrderUpdateShippingInput @doc(category: "Orders") {
   ID of the selected shipping method, pass null to remove currently assigned shipping method.
   """
   shippingMethod: ID
+}
+
+"""
+Manually updates the shipping cost of an order. Provide net cost and VAT percentage (defaults to 20% UK standard rate). Gross cost is auto-calculated. Only works for draft and unconfirmed orders. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderUpdateShippingCost @doc(category: "Orders") {
+  """Order with updated shipping cost."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+input OrderUpdateShippingCostInput @doc(category: "Orders") {
+  """Net shipping cost amount (excluding VAT)."""
+  shippingCostNet: PositiveDecimal!
+
+  """
+  VAT percentage to apply to shipping cost. Defaults to 20% (UK standard rate). Common UK rates: 20% (standard), 5% (reduced), 0% (zero-rated).
+  """
+  vatPercentage: PositiveDecimal
+
+  """
+  Incoterm (International Commercial Terms) defining shipping responsibility. Default is 'DDP' (Delivered Duty Paid) - seller pays all shipping costs. Use 'EXW' (Ex Works) to allow $0 shipping cost when buyer pays shipping. Other options: FOB, DAP, CIF, etc.
+  """
+  incoTerm: String
 }
 
 """
@@ -26246,6 +27238,42 @@ enum StockUpdatePolicyEnum {
   SKIP
   UPDATE
   FORCE
+}
+
+"""
+Start picking items from warehouse for fulfillment. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type PickStart @doc(category: "Orders") {
+  """The started pick."""
+  pick: Pick
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Update quantity picked for a pick item. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type PickUpdateItem @doc(category: "Orders") {
+  """The updated pick item."""
+  pickItem: PickItem
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Complete a pick document after all items have been picked. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type PickComplete @doc(category: "Orders") {
+  """The completed pick."""
+  pick: Pick
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
 }
 
 """
@@ -26710,6 +27738,201 @@ type InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEv
   invoiceErrors: [InvoiceError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [InvoiceError!]!
   invoice: Invoice
+}
+
+"""
+Creates a new purchase order from a supplier. 
+
+Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+"""
+type PurchaseOrderCreate {
+  purchaseOrderErrors: [PurchaseOrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [PurchaseOrderError!]!
+  purchaseOrder: PurchaseOrder
+}
+
+type PurchaseOrderError @doc(category: "Products") {
+  """
+  Name of a field that caused the error. A value of `null` indicates that the error isn't associated with a particular field.
+  """
+  field: String
+
+  """The error message."""
+  message: String
+
+  """The error code."""
+  code: PurchaseOrderErrorCode!
+
+  """List of warehouse IDs which cause the error."""
+  warehouses: [ID!]
+
+  """List of variant IDs which cause the error."""
+  variants: [ID!]
+}
+
+"""Error codes for purchase order operations."""
+enum PurchaseOrderErrorCode @doc(category: "Products") {
+  INVALID_WAREHOUSE
+  WAREHOUSE_NOT_OWNED
+  WAREHOUSE_IS_OWNED
+  INVALID_VARIANT
+  INVALID_QUANTITY
+  INVALID_PRICE
+  INVALID_CURRENCY
+  INVALID_COUNTRY
+  REQUIRED
+  INVALID
+  NOT_FOUND
+  GRAPHQL_ERROR
+}
+
+input PurchaseOrderCreateInput @doc(category: "Products") {
+  """Supplier warehouse (must be non-owned warehouse)."""
+  sourceWarehouseId: ID!
+
+  """Destination warehouse (must be owned warehouse)."""
+  destinationWarehouseId: ID!
+
+  """Line items to order."""
+  items: [PurchaseOrderItemInput!]!
+
+  """Public metadata (e.g., supplier PO number)."""
+  metadata: [MetadataInput!]
+
+  """Private metadata (e.g., invoice parsing data for future automation)."""
+  privateMetadata: [MetadataInput!]
+}
+
+input PurchaseOrderItemInput @doc(category: "Products") {
+  """Product variant to order."""
+  variantId: ID!
+
+  """Quantity to order from supplier."""
+  quantityOrdered: Int!
+
+  """Unit cost (buy price)."""
+  unitPriceAmount: PositiveDecimal!
+
+  """Currency code (e.g., GBP, USD)."""
+  currency: String!
+
+  """ISO 2-letter country code for customs/duties."""
+  countryOfOrigin: String!
+}
+
+"""
+Confirms a purchase order with the supplier. 
+
+Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+"""
+type PurchaseOrderConfirm @doc(category: "Products") {
+  """The confirmed purchase order."""
+  purchaseOrder: PurchaseOrder
+  purchaseOrderErrors: [PurchaseOrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [PurchaseOrderError!]!
+}
+
+"""
+Deletes a draft purchase order. 
+
+Requires one of the following permissions: MANAGE_PURCHASE_ORDERS.
+"""
+type PurchaseOrderDelete @doc(category: "Products") {
+  purchaseOrderErrors: [PurchaseOrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [PurchaseOrderError!]!
+  purchaseOrder: PurchaseOrder
+}
+
+"""
+Start receiving goods from an inbound shipment. 
+
+Requires one of the following permissions: MANAGE_STOCK.
+"""
+type ReceiptStart @doc(category: "Products") {
+  """The created receipt."""
+  receipt: Receipt
+  receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ReceiptError!]!
+}
+
+type ReceiptError @doc(category: "Products") {
+  """
+  Name of a field that caused the error. A value of `null` indicates that the error isn't associated with a particular field.
+  """
+  field: String
+
+  """The error message."""
+  message: String
+
+  """The error code."""
+  code: ReceiptErrorCode!
+
+  """List of warehouse IDs which cause the error."""
+  warehouses: [ID!]
+
+  """List of variant IDs which cause the error."""
+  variants: [ID!]
+}
+
+"""Error codes for receipt operations."""
+enum ReceiptErrorCode @doc(category: "Products") {
+  GRAPHQL_ERROR
+  INVALID
+  NOT_FOUND
+  REQUIRED
+}
+
+"""
+Record receiving an item during a receipt. 
+
+Requires one of the following permissions: MANAGE_STOCK.
+"""
+type ReceiptReceiveItem @doc(category: "Products") {
+  """The created receipt line."""
+  receiptLine: ReceiptLine
+  receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ReceiptError!]!
+}
+
+"""
+Complete a goods receipt. Automatically creates adjustments for discrepancies between ordered and received quantities. 
+
+Requires one of the following permissions: MANAGE_STOCK.
+"""
+type ReceiptComplete @doc(category: "Products") {
+  """The completed receipt."""
+  receipt: Receipt
+
+  """Adjustments that were automatically processed."""
+  adjustmentsCreated: [PurchaseOrderItemAdjustment!]!
+
+  """Adjustments requiring manual review."""
+  adjustmentsPending: [PurchaseOrderItemAdjustment!]!
+
+  """Number of items with discrepancies."""
+  discrepancies: Int!
+  receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ReceiptError!]!
+}
+
+"""
+Delete a draft receipt and revert all quantity updates. 
+
+Requires one of the following permissions: MANAGE_STOCK.
+"""
+type ReceiptDelete @doc(category: "Products") {
+  receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ReceiptError!]!
+}
+
+"""
+Delete a receipt line and revert the quantity update. Use when an item was scanned by mistake. 
+
+Requires one of the following permissions: MANAGE_STOCK.
+"""
+type ReceiptLineDelete @doc(category: "Products") {
+  receiptErrors: [ReceiptError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ReceiptError!]!
 }
 
 """

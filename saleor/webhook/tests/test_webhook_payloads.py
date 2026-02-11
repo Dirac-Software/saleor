@@ -274,7 +274,7 @@ def test_generate_order_payload(
                 "id": graphene.Node.to_global_id("Fulfillment", fulfillment.pk),
                 "type": "Fulfillment",
                 "status": fulfillment.status,
-                "tracking_number": fulfillment.tracking_number,
+                "tracking_url": fulfillment.tracking_url,
                 "created": parse_django_datetime(fulfillment.created_at),
                 "shipping_refund_amount": "0.00",
                 "total_refund_amount": "0.00",
@@ -537,7 +537,7 @@ def test_generate_order_payload_no_user_email_but_user_set(
 
 
 def test_generate_fulfillment_lines_payload(order_with_lines):
-    fulfillment = order_with_lines.fulfillments.create(tracking_number="123")
+    fulfillment = order_with_lines.fulfillments.create(tracking_url="123")
     line = order_with_lines.lines.first()
     line.sale_id = graphene.Node.to_global_id("Sale", 1)
     line.voucher_code = "code"
@@ -590,7 +590,7 @@ def test_generate_fulfillment_lines_payload(order_with_lines):
 
 def test_generate_fulfillment_lines_payload_deleted_variant(order_with_lines):
     # given
-    fulfillment = order_with_lines.fulfillments.create(tracking_number="123")
+    fulfillment = order_with_lines.fulfillments.create(tracking_url="123")
     line = order_with_lines.lines.first()
     stock = line.allocations.get().stock
     warehouse_pk = stock.warehouse.pk
@@ -614,7 +614,7 @@ def test_generate_fulfillment_metadata_updated_payload(
     order_with_lines,
     customer_user,
 ):
-    fulfillment = order_with_lines.fulfillments.create(tracking_number="123")
+    fulfillment = order_with_lines.fulfillments.create(tracking_url="123")
 
     # when
     payload = json.loads(generate_metadata_updated_payload(fulfillment, customer_user))[

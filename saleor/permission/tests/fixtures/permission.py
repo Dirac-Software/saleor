@@ -126,3 +126,13 @@ def permission_manage_channels():
 @pytest.fixture
 def permission_manage_payments():
     return Permission.objects.get(codename="handle_payments")
+
+
+@pytest.fixture
+def permission_manage_purchase_orders():
+    return Permission.objects.get(codename="manage_purchase_orders")
+
+
+@pytest.fixture
+def permission_manage_stock():
+    return Permission.objects.get(codename="manage_stock")

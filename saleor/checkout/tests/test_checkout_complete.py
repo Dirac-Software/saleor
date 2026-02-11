@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 from unittest import mock
 
+import graphene
 import pytest
 from django.core.exceptions import ValidationError
 from django.test import override_settings
@@ -139,6 +140,12 @@ def test_create_order_captured_payment_creates_expected_events(
     expected_order_payload = {
         "order": get_default_order_payload(order, checkout.redirect_url),
         "recipient_email": order.get_customer_email(),
+        "requester_user_id": (
+            graphene.Node.to_global_id("User", checkout_user.id)
+            if checkout_user
+            else None
+        ),
+        "requester_app_id": None,
         **get_site_context_payload(site_settings.site),
     }
 
@@ -169,17 +176,17 @@ def test_create_order_captured_payment_creates_expected_events(
 
     assert mock_notify.call_count == 2
 
-    order_confirmation_call = [
+    order_confirmed_call = [
         call
         for call in mock_notify.call_args_list
-        if call.args[0] == NotifyEventType.ORDER_CONFIRMATION
+        if call.args[0] == NotifyEventType.ORDER_CONFIRMED
     ][0]
-    order_confirmation_called_args = order_confirmation_call.args
-    order_confirmation_called_kwargs = order_confirmation_call.kwargs
-    assert order_confirmation_called_args[0] == NotifyEventType.ORDER_CONFIRMATION
-    assert len(order_confirmation_called_kwargs) == 2
-    assert order_confirmation_called_kwargs["payload_func"]() == expected_order_payload
-    assert order_confirmation_called_kwargs["channel_slug"] == channel_USD.slug
+    order_confirmed_called_args = order_confirmed_call.args
+    order_confirmed_called_kwargs = order_confirmed_call.kwargs
+    assert order_confirmed_called_args[0] == NotifyEventType.ORDER_CONFIRMED
+    assert len(order_confirmed_called_kwargs) == 2
+    assert order_confirmed_called_kwargs["payload_func"]() == expected_order_payload
+    assert order_confirmed_called_kwargs["channel_slug"] == channel_USD.slug
 
     payment_confirmation_call = [
         call
@@ -302,6 +309,12 @@ def test_create_order_captured_payment_creates_expected_events_anonymous_user(
     expected_order_payload = {
         "order": get_default_order_payload(order, checkout.redirect_url),
         "recipient_email": order.get_customer_email(),
+        "requester_user_id": (
+            graphene.Node.to_global_id("User", checkout_user.id)
+            if checkout_user
+            else None
+        ),
+        "requester_app_id": None,
         **get_site_context_payload(site_settings.site),
     }
 
@@ -333,17 +346,17 @@ def test_create_order_captured_payment_creates_expected_events_anonymous_user(
 
     assert mock_notify.call_count == 2
 
-    order_confirmation_call = [
+    order_confirmed_call = [
         call
         for call in mock_notify.call_args_list
-        if call.args[0] == NotifyEventType.ORDER_CONFIRMATION
+        if call.args[0] == NotifyEventType.ORDER_CONFIRMED
     ][0]
-    order_confirmation_called_args = order_confirmation_call.args
-    order_confirmation_called_kwargs = order_confirmation_call.kwargs
-    assert order_confirmation_called_args[0] == NotifyEventType.ORDER_CONFIRMATION
-    assert len(order_confirmation_called_kwargs) == 2
-    assert order_confirmation_called_kwargs["payload_func"]() == expected_order_payload
-    assert order_confirmation_called_kwargs["channel_slug"] == channel_USD.slug
+    order_confirmed_called_args = order_confirmed_call.args
+    order_confirmed_called_kwargs = order_confirmed_call.kwargs
+    assert order_confirmed_called_args[0] == NotifyEventType.ORDER_CONFIRMED
+    assert len(order_confirmed_called_kwargs) == 2
+    assert order_confirmed_called_kwargs["payload_func"]() == expected_order_payload
+    assert order_confirmed_called_kwargs["channel_slug"] == channel_USD.slug
 
     payment_confirmation_call = [
         call
@@ -447,6 +460,8 @@ def test_create_order_preauth_payment_creates_expected_events(
     expected_payload = {
         "order": get_default_order_payload(order, checkout.redirect_url),
         "recipient_email": order.get_customer_email(),
+        "requester_user_id": graphene.Node.to_global_id("User", checkout_user.id),
+        "requester_app_id": None,
         **get_site_context_payload(site_settings.site),
     }
 
@@ -466,7 +481,7 @@ def test_create_order_preauth_payment_creates_expected_events(
     call_args = mock_notify.call_args_list[0]
     called_args = call_args.args
     called_kwargs = call_args.kwargs
-    assert called_args[0] == NotifyEventType.ORDER_CONFIRMATION
+    assert called_args[0] == NotifyEventType.ORDER_CONFIRMED
     assert len(called_kwargs) == 2
     assert called_kwargs["payload_func"]() == expected_payload
     assert called_kwargs["channel_slug"] == channel_USD.slug
@@ -562,6 +577,8 @@ def test_create_order_preauth_payment_creates_expected_events_anonymous_user(
     expected_payload = {
         "order": get_default_order_payload(order, checkout.redirect_url),
         "recipient_email": order.get_customer_email(),
+        "requester_user_id": None,
+        "requester_app_id": None,
         **get_site_context_payload(site_settings.site),
     }
     # Ensure the correct order confirmed event was created
@@ -580,7 +597,7 @@ def test_create_order_preauth_payment_creates_expected_events_anonymous_user(
     call_args = mock_notify.call_args_list[0]
     called_args = call_args.args
     called_kwargs = call_args.kwargs
-    assert called_args[0] == NotifyEventType.ORDER_CONFIRMATION
+    assert called_args[0] == NotifyEventType.ORDER_CONFIRMED
     assert len(called_kwargs) == 2
     assert called_kwargs["payload_func"]() == expected_payload
     assert called_kwargs["channel_slug"] == channel_USD.slug
@@ -1267,7 +1284,13 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
 
     channel = checkout.channel
     channel.order_mark_as_paid_strategy = MarkAsPaidStrategy.PAYMENT_FLOW
-    channel.save(update_fields=["order_mark_as_paid_strategy"])
+    channel.automatically_confirm_all_new_orders = False
+    channel.save(
+        update_fields=[
+            "order_mark_as_paid_strategy",
+            "automatically_confirm_all_new_orders",
+        ]
+    )
 
     # Ensure not events are existing prior
     assert not OrderEvent.objects.exists()
@@ -1300,7 +1323,6 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
     (
         order_placed_event,
         order_fully_paid,
-        order_confirmed_event,
     ) = order.events.all()  # type: OrderEvent
 
     # Ensure the correct order event was created
@@ -1329,18 +1351,6 @@ def test_complete_checkout_0_total_captured_payment_creates_expected_events(
 
     assert order_fully_paid.type == OrderEvents.ORDER_FULLY_PAID
     assert order_fully_paid.user == checkout_user
-
-    # Ensure the correct order confirmed event was created
-    # should be order confirmed event
-    assert order_confirmed_event.type == OrderEvents.CONFIRMED
-    # ensure the user is checkout user
-    assert order_confirmed_event.user == checkout_user
-    # ensure the order confirmed event is related to order
-    assert order_confirmed_event.order is order
-    # ensure a date was set
-    assert order_confirmed_event.date
-    # ensure the event parameters are empty
-    assert order_confirmed_event.parameters == {}
 
     assert mock_notify.call_count == 2
 
@@ -2839,3 +2849,63 @@ def test_checkout_complete_with_voucher_0_total(
     assert (
         discount.amount_value == (order.undiscounted_total - order.total).gross.amount
     )
+
+
+@mock.patch("saleor.plugins.manager.PluginsManager.notify")
+def test_complete_checkout_auto_confirm_sends_order_confirmed_email(
+    mock_notify,
+    checkout_with_item,
+    customer_user,
+    address,
+    checkout_delivery,
+    django_capture_on_commit_callbacks,
+):
+    # given
+    checkout = checkout_with_item
+    checkout.shipping_address = address
+    checkout.billing_address = address
+    checkout.assigned_delivery = checkout_delivery(checkout)
+    checkout.save()
+
+    checkout.payment_transactions.create(
+        charged_value=checkout.total.gross.amount,
+        currency=checkout.currency,
+    )
+
+    manager = get_plugins_manager(allow_replica=False)
+    lines, _ = fetch_checkout_lines(checkout)
+    checkout_info = fetch_checkout_info(checkout, lines, manager)
+    checkout_info, lines = calculations.fetch_checkout_data(
+        checkout_info, manager, lines, force_status_update=True
+    )
+
+    channel = checkout.channel
+    channel.automatically_confirm_all_new_orders = True
+    channel.allow_unpaid_orders = True
+    channel.save(
+        update_fields=["automatically_confirm_all_new_orders", "allow_unpaid_orders"]
+    )
+
+    # when
+    with django_capture_on_commit_callbacks(execute=True):
+        order, _, _ = complete_checkout(
+            checkout_info=checkout_info,
+            manager=manager,
+            lines=lines,
+            payment_data={},
+            store_source=False,
+            user=customer_user,
+            app=None,
+        )
+
+    # then
+    order.refresh_from_db()
+    assert order.status == OrderStatus.UNFULFILLED
+
+    notify_calls = list(mock_notify.call_args_list)
+    order_confirmed_calls = [
+        call
+        for call in notify_calls
+        if call.args and call.args[0] == NotifyEventType.ORDER_CONFIRMED
+    ]
+    assert len(order_confirmed_calls) == 1

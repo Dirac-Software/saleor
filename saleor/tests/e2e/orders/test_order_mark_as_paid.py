@@ -90,7 +90,7 @@ def test_order_mark_as_paid_CORE_0208(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
 
     # Step 5 - Mark order as paid
     order_paid_data = mark_order_paid(
@@ -99,4 +99,4 @@ def test_order_mark_as_paid_CORE_0208(
     )
     assert order_paid_data["order"]["isPaid"] is True
     assert order_paid_data["order"]["paymentStatus"] == "FULLY_CHARGED"
-    assert order_paid_data["order"]["status"] == "UNFULFILLED"
+    assert order_paid_data["order"]["status"] == "UNCONFIRMED"

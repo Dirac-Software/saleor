@@ -5,6 +5,7 @@ from ....core.tracing import traced_atomic_transaction
 from ....permission.enums import ProductPermissions
 from ....product import models
 from ....warehouse import models as warehouse_models
+from ....warehouse.error_codes import StockErrorCode
 from ....warehouse.management import delete_stocks
 from ....webhook.event_types import WebhookEventAsyncType
 from ....webhook.utils import get_webhooks_for_event
@@ -72,7 +73,24 @@ class ProductVariantStocksDelete(BaseMutation):
         )
         stocks_to_delete = warehouse_models.Stock.objects.filter(
             product_variant=variant, warehouse__pk__in=warehouses_pks
-        )
+        ).select_related("warehouse")
+
+        # Check for owned warehouses - fail entire operation if any are owned
+        owned_warehouse_stocks = [
+            stock for stock in stocks_to_delete if stock.warehouse.is_owned
+        ]
+        if owned_warehouse_stocks:
+            error_msg = (
+                "Cannot delete stock for owned warehouse. Stocks for owned "
+                "warehouses are managed through the inventory system."
+            )
+            raise ValidationError(
+                {
+                    "warehouse_ids": ValidationError(
+                        error_msg, code=StockErrorCode.OWNED_WAREHOUSE
+                    )
+                }
+            )
 
         webhooks = get_webhooks_for_event(
             WebhookEventAsyncType.PRODUCT_VARIANT_OUT_OF_STOCK

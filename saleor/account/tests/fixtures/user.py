@@ -4,8 +4,8 @@ from ....account.models import User
 
 
 @pytest.fixture
-def customer_user(address):  # pylint: disable=W0613
-    default_address = address.get_copy()
+def customer_user(address_with_vat):  # pylint: disable=W0613
+    default_address = address_with_vat.get_copy()
     user = User.objects.create_user(
         "test@example.com",
         "password",
@@ -23,8 +23,8 @@ def customer_user(address):  # pylint: disable=W0613
 
 
 @pytest.fixture
-def customer_user2(address):
-    default_address = address.get_copy()
+def customer_user2(address_with_vat):
+    default_address = address_with_vat.get_copy()
     user = User.objects.create_user(
         "test2@example.com",
         "password",
@@ -40,8 +40,8 @@ def customer_user2(address):
 
 
 @pytest.fixture
-def customer_users(address, customer_user, customer_user2):
-    default_address = address.get_copy()
+def customer_users(address_with_vat, customer_user, customer_user2):
+    default_address = address_with_vat.get_copy()
     customer_user3 = User.objects.create_user(
         "test3@example.com",
         "password",

@@ -27,7 +27,10 @@ from ....order.utils import (
     update_order_display_gross_prices,
 )
 from ....permission.enums import OrderPermissions
-from ....warehouse.management import allocate_preorders, allocate_stocks
+from ....warehouse.management import (
+    allocate_preorders,
+    allocate_stocks,
+)
 from ....warehouse.reservations import is_reservation_enabled
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
@@ -137,11 +140,9 @@ class DraftOrderComplete(BaseMutation):
             update_user_fields = cls.update_user_fields(order)
             update_fields.extend(update_user_fields)
             channel = order.channel
-            order.status = (
-                OrderStatus.UNFULFILLED
-                if channel.automatically_confirm_all_new_orders
-                else OrderStatus.UNCONFIRMED
-            )
+
+            # Start with UNCONFIRMED status - will check if can confirm after allocations
+            order.status = OrderStatus.UNCONFIRMED
 
             if not order.is_shipping_required():
                 order.shipping_method_name = None
@@ -212,6 +213,9 @@ class DraftOrderComplete(BaseMutation):
                 # clear draft base price expiration time
                 line.draft_base_price_expire_at = None
                 OrderLine.objects.bulk_update(lines, ["draft_base_price_expire_at"])
+
+            # Refresh order status - allocate_stocks may have auto-confirmed it
+            order.refresh_from_db()
 
             order_info = OrderInfo(
                 order=order,

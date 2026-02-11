@@ -60,7 +60,7 @@ def orders_with_fulfillments(
         order_list, statuses, metadata_values, strict=True
     ):
         fulfillment = order.fulfillments.create(
-            tracking_number="123", status=status, metadata=metadata
+            tracking_url="123", status=status, metadata=metadata
         )
         line_1, line_2 = order_lines_generator(
             order,
@@ -1527,7 +1527,7 @@ def test_orders_filter_by_has_fulfillments_true(
 ):
     # given
     for order in order_list[1:]:
-        order.fulfillments.create(tracking_number="123")
+        order.fulfillments.create(tracking_url="123")
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     variables = {"where": {"hasFulfillments": True}}
@@ -1550,7 +1550,7 @@ def test_orders_filter_by_has_fulfillments_false(
 ):
     # given
     for order in order_list[1:]:
-        order.fulfillments.create(tracking_number="123")
+        order.fulfillments.create(tracking_url="123")
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     variables = {"where": {"hasFulfillments": False}}
@@ -1573,7 +1573,7 @@ def test_orders_filter_by_has_fulfillments_none(
 ):
     # given
     for order in order_list[1:]:
-        order.fulfillments.create(tracking_number="123")
+        order.fulfillments.create(tracking_url="123")
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     variables = {"where": {"hasFulfillments": None}}
@@ -1640,7 +1640,7 @@ def test_orders_filter_by_fulfillment_status(
         FulfillmentStatus.RETURNED,
     ]
     for order, status in zip(order_list, statuses, strict=True):
-        order.fulfillments.create(tracking_number="123", status=status)
+        order.fulfillments.create(tracking_url="123", status=status)
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     variables = {"where": {"fulfillments": where}}
@@ -1718,7 +1718,7 @@ def test_orders_filter_by_fulfillment_metadata(
         {},
     ]
     for order, metadata_value in zip(order_list, metadata_values, strict=True):
-        order.fulfillments.create(tracking_number="123", metadata=metadata_value)
+        order.fulfillments.create(tracking_url="123", metadata=metadata_value)
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     variables = {"where": {"fulfillments": where}}

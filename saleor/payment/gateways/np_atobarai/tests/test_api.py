@@ -172,8 +172,8 @@ def test_refund_payment_partial_refund_reregister_transaction(
     fulfillment,
 ):
     # given
-    fulfillment.tracking_number = "123123"
-    fulfillment.save(update_fields=["tracking_number"])
+    fulfillment.tracking_url = "123123"
+    fulfillment.save(update_fields=["tracking_url"])
     plugin = np_atobarai_plugin()
     payment_data = np_payment_data
     payment_dummy.captured_amount = payment_data.amount + Decimal("3.00")
@@ -276,14 +276,14 @@ def test_report_fulfillment_no_psp_reference(
 
 
 @patch("saleor.payment.gateways.np_atobarai.api_helpers.requests.request")
-def test_report_fulfillment_no_tracking_number(
+def test_report_fulfillment_no_tracking_url(
     _mocked_request, config, fulfillment, payment_dummy
 ):
     # given
     psp_reference = "18121200001"
     payment_dummy.psp_reference = psp_reference
     payment_dummy.save(update_fields=["psp_reference"])
-    fulfillment.tracking_number = ""
+    fulfillment.tracking_url = ""
 
     # when
     errors, already_captured = api.report_fulfillment(
@@ -380,7 +380,7 @@ def payment_np(payment_dummy):
 
 @patch("saleor.payment.gateways.np_atobarai.notify_dashboard")
 @patch("saleor.payment.gateways.np_atobarai.api.report_fulfillment")
-def test_tracking_number_updated(
+def test_tracking_url_updated(
     mocked_report_fulfillment,
     mocked_notify_dashboard,
     np_atobarai_plugin,
@@ -396,7 +396,7 @@ def test_tracking_number_updated(
     order.payments.add(payment_np)
 
     # when
-    plugin.tracking_number_updated(fulfillment, None)
+    plugin.tracking_url_updated(fulfillment, None)
 
     # then
     payment_graphql_id = Node.to_global_id("Payment", payment_np.id)
@@ -408,7 +408,7 @@ def test_tracking_number_updated(
 
 @patch("saleor.payment.gateways.np_atobarai.notify_dashboard")
 @patch("saleor.payment.gateways.np_atobarai.api.report_fulfillment")
-def test_tracking_number_updated_errors(
+def test_tracking_url_updated_errors(
     mocked_report_fulfillment,
     mocked_notify_dashboard,
     np_atobarai_plugin,
@@ -425,7 +425,7 @@ def test_tracking_number_updated_errors(
     order.payments.add(payment_np)
 
     # when
-    plugin.tracking_number_updated(fulfillment, None)
+    plugin.tracking_url_updated(fulfillment, None)
 
     # then
     payment_graphql_id = Node.to_global_id("Payment", payment_np.id)
@@ -443,7 +443,7 @@ def test_tracking_number_updated_errors(
 
 @patch("saleor.payment.gateways.np_atobarai.notify_dashboard")
 @patch("saleor.payment.gateways.np_atobarai.api.report_fulfillment")
-def test_tracking_number_updated_already_captured(
+def test_tracking_url_updated_already_captured(
     mocked_report_fulfillment,
     mocked_notify_dashboard,
     np_atobarai_plugin,
@@ -459,7 +459,7 @@ def test_tracking_number_updated_already_captured(
     order.payments.add(payment_np)
 
     # when
-    plugin.tracking_number_updated(fulfillment, None)
+    plugin.tracking_url_updated(fulfillment, None)
 
     # then
     payment_graphql_id = Node.to_global_id("Payment", payment_np.id)
@@ -477,7 +477,7 @@ def test_tracking_number_updated_already_captured(
 
 @patch("saleor.payment.gateways.np_atobarai.notify_dashboard")
 @patch("saleor.payment.gateways.np_atobarai.api.report_fulfillment")
-def test_tracking_number_updated_no_payments(
+def test_tracking_url_updated_no_payments(
     _mocked_report_fulfillment,
     mocked_notify_dashboard,
     np_atobarai_plugin,
@@ -489,7 +489,7 @@ def test_tracking_number_updated_no_payments(
     order = fulfillment.order
 
     # when
-    plugin.tracking_number_updated(fulfillment, None)
+    plugin.tracking_url_updated(fulfillment, None)
 
     # then
     mocked_notify_dashboard.assert_called_once_with(
@@ -627,7 +627,7 @@ def test_reregister_transaction_success(
     np_payment_data,
 ):
     # given
-    tracking_number = "123"
+    tracking_url = "123"
     shipping_company_code = "50000"
     payment_dummy.psp_reference = "123"
     new_psp_reference = "234"
@@ -664,7 +664,7 @@ def test_reregister_transaction_success(
         payment_dummy,
         np_payment_data,
         shipping_company_code,
-        tracking_number,
+        tracking_url,
         goods,
         billed_amount,
     )
@@ -678,7 +678,7 @@ def test_reregister_transaction_success(
         goods,
     )
     mocked_report.assert_called_once_with(
-        config, shipping_company_code, new_psp_reference, tracking_number
+        config, shipping_company_code, new_psp_reference, tracking_url
     )
     assert payment_response.status == PaymentStatus.SUCCESS
     assert payment_response.psp_reference == new_psp_reference
@@ -735,7 +735,7 @@ def test_reregister_transaction_report_error(
     np_payment_data,
 ):
     # given
-    tracking_number = "123"
+    tracking_url = "123"
     shipping_company_code = "50000"
     payment_dummy.psp_reference = "123"
     new_psp_reference = "234"
@@ -758,7 +758,7 @@ def test_reregister_transaction_report_error(
         payment_dummy,
         np_payment_data,
         shipping_company_code,
-        tracking_number,
+        tracking_url,
         Mock(),
         Decimal("12.34"),
     )

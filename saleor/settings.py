@@ -316,6 +316,7 @@ INSTALLED_APPS = [
     "saleor.menu",
     "saleor.order",
     "saleor.invoice",
+    "saleor.inventory",
     "saleor.seo",
     "saleor.shipping",
     "saleor.site",

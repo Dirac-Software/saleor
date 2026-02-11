@@ -142,7 +142,7 @@ def test_order_products_on_percentage_sale_CORE_1003(
         e2e_staff_api_client,
         order_id,
     )
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     total = order["order"]["total"]["gross"]["amount"]
     assert total == round(float(shipping_price + unit_price), 2)
 

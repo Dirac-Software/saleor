@@ -876,7 +876,7 @@ def test_order_query_payment_status_with_total_fulfillment_refund_equal_to_order
 ):
     # given
     fulfilled_order.fulfillments.create(
-        tracking_number="123", total_refund_amount=fulfilled_order.total.gross.amount
+        tracking_url="123", total_refund_amount=fulfilled_order.total.gross.amount
     )
 
     permission_group_manage_orders.user_set.add(staff_api_client.user)

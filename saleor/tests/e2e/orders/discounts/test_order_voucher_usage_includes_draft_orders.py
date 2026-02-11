@@ -142,7 +142,7 @@ def test_order_voucher_usage_includes_draft_orders_CORE_0913(
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     order_total = order["order"]["total"]["gross"]["amount"]
     assert order["order"]["voucher"]["id"] == voucher_id
     assert order_total == total

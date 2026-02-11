@@ -104,7 +104,7 @@ def test_allow_save_shipping_and_not_save_billing_in_user_address_book_CORE_0253
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     order_billing_address = order["order"]["billingAddress"]
     order_shipping_address = order["order"]["shippingAddress"]
     assert_address_data(order_billing_address, billing_address)
@@ -216,7 +216,7 @@ def test_allow_not_save_shipping_and_save_billing_in_user_address_book_CORE_0254
     assert order_complete_id == order_id
     order_line = order["order"]["lines"][0]
     assert order_line["productVariantId"] == product_variant_id
-    assert order["order"]["status"] == "UNFULFILLED"
+    assert order["order"]["status"] == "UNCONFIRMED"
     order_billing_address = order["order"]["billingAddress"]
     order_shipping_address = order["order"]["shippingAddress"]
     assert_address_data(order_billing_address, billing_address)

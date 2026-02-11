@@ -231,7 +231,7 @@ ORDER_BULK_CREATE = """
                                 id
                             }
                         }
-                        trackingNumber
+                        trackingUrl
                         fulfillmentOrder
                         status
                     }
@@ -881,12 +881,12 @@ def test_order_bulk_create(
     assert db_order.events.first() == db_event
 
     fulfillment = order["fulfillments"][0]
-    assert fulfillment["trackingNumber"] == "abc-123"
+    assert fulfillment["trackingUrl"] == "abc-123"
     assert fulfillment["fulfillmentOrder"] == 1
     assert fulfillment["status"] == FulfillmentStatus.FULFILLED.upper()
     db_fulfillment = Fulfillment.objects.get()
     assert db_fulfillment.order_id == db_order.id
-    assert db_fulfillment.tracking_number == "abc-123"
+    assert db_fulfillment.tracking_url == "abc-123"
     assert db_fulfillment.fulfillment_order == 1
     assert db_fulfillment.status == FulfillmentStatus.FULFILLED
 
@@ -1357,12 +1357,12 @@ def test_order_bulk_create_multiple_fulfillments(
     db_order_line_1, db_order_line_2, db_order_line_3 = OrderLine.objects.all()
 
     fulfillment_1, fulfillment_2 = order["fulfillments"]
-    assert fulfillment_1["trackingNumber"] == "abc-1"
+    assert fulfillment_1["trackingUrl"] == "abc-1"
     assert fulfillment_1["fulfillmentOrder"] == 1
     assert fulfillment_1["status"] == FulfillmentStatus.FULFILLED.upper()
     db_fulfillment_1, db_fulfillment_2 = Fulfillment.objects.all()
     assert db_fulfillment_1.order_id == db_order.id
-    assert db_fulfillment_1.tracking_number == "abc-1"
+    assert db_fulfillment_1.tracking_url == "abc-1"
     assert db_fulfillment_1.fulfillment_order == 1
     assert db_fulfillment_1.status == FulfillmentStatus.FULFILLED
 
@@ -1381,11 +1381,11 @@ def test_order_bulk_create_multiple_fulfillments(
     assert db_fulfillment_1_line_1.fulfillment_id == db_fulfillment_1.id
     assert db_fulfillment_1.lines.all()[0].id == db_fulfillment_1_line_1.id
 
-    assert fulfillment_2["trackingNumber"] == "abc-2"
+    assert fulfillment_2["trackingUrl"] == "abc-2"
     assert fulfillment_2["fulfillmentOrder"] == 2
     assert fulfillment_2["status"] == FulfillmentStatus.FULFILLED.upper()
     assert db_fulfillment_2.order_id == db_order.id
-    assert db_fulfillment_2.tracking_number == "abc-2"
+    assert db_fulfillment_2.tracking_url == "abc-2"
     assert db_fulfillment_2.fulfillment_order == 2
     assert db_fulfillment_2.status == FulfillmentStatus.FULFILLED
 

@@ -586,6 +586,10 @@ def order_with_lines_and_catalogue_promotion(
     line.base_unit_price_amount = (
         line.undiscounted_base_unit_price_amount - reward_value
     )
+    unit_net = quantize_price(line.base_unit_price_amount, currency)
+    unit_gross = quantize_price(unit_net * Decimal("1.23"), currency)
+    line.unit_price_net_amount = unit_net
+    line.unit_price_gross_amount = unit_gross
     total = quantize_price(line.base_unit_price_amount * line.quantity, currency)
     line.total_price_net_amount = total
     line.total_price_gross_amount = quantize_price(total * Decimal("1.23"), currency)
@@ -593,6 +597,8 @@ def order_with_lines_and_catalogue_promotion(
     line.save(
         update_fields=[
             "base_unit_price_amount",
+            "unit_price_net_amount",
+            "unit_price_gross_amount",
             "total_price_net_amount",
             "total_price_gross_amount",
             "unit_discount_amount",
@@ -996,7 +1002,7 @@ def fulfilled_order(order_with_lines):
         created_at=datetime.datetime.now(tz=datetime.UTC),
         status=JobStatus.SUCCESS,
     )
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     line_1 = order.lines.first()
     stock_1 = line_1.allocations.get().stock
     warehouse_1_pk = stock_1.warehouse.pk
@@ -1034,7 +1040,7 @@ def fulfilled_order_without_inventory_tracking(
     order_with_line_without_inventory_tracking,
 ):
     order = order_with_line_without_inventory_tracking
-    fulfillment = order.fulfillments.create(tracking_number="123")
+    fulfillment = order.fulfillments.create(tracking_url="123")
     line = order.lines.first()
     stock = line.variant.stocks.get()
     warehouse_pk = stock.warehouse.pk
@@ -1159,3 +1165,231 @@ def preorders(orders, product):
     OrderLine.objects.bulk_create(lines)
     preorders = orders[: len(variants) - 1]
     return preorders
+
+
+@pytest.fixture
+def order_with_allocations_single_warehouse(
+    customer_user,
+    owned_warehouse,
+    nonowned_warehouse,
+    product_variant_list,
+    channel_USD,
+):
+    address = customer_user.default_billing_address.get_copy()
+    order = Order.objects.create(
+        billing_address=address,
+        channel=channel_USD,
+        currency=channel_USD.currency_code,
+        shipping_address=address,
+        user_email=customer_user.email,
+        user=customer_user,
+        origin=OrderOrigin.CHECKOUT,
+        status=OrderStatus.UNFULFILLED,
+        lines_count=0,
+    )
+
+    owned_warehouse.is_owned = True
+    owned_warehouse.save()
+    nonowned_warehouse.is_owned = False
+    nonowned_warehouse.save()
+
+    from ....inventory.models import PurchaseOrder, PurchaseOrderItem
+    from ....warehouse.models import AllocationSource
+
+    po = PurchaseOrder.objects.create(
+        source_warehouse=nonowned_warehouse,
+        destination_warehouse=owned_warehouse,
+    )
+
+    variant = product_variant_list[0]
+    line = order.lines.create(
+        product_name=variant.product.name,
+        variant_name=variant.name,
+        product_sku=variant.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=5,
+        variant=variant,
+        unit_price_net_amount=10,
+        unit_price_gross_amount=10,
+        total_price_net_amount=50,
+        total_price_gross_amount=50,
+        undiscounted_unit_price_net_amount=10,
+        undiscounted_unit_price_gross_amount=10,
+        undiscounted_total_price_net_amount=50,
+        undiscounted_total_price_gross_amount=50,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    stock, _ = variant.stocks.get_or_create(
+        warehouse=owned_warehouse,
+        defaults={"quantity": 5, "quantity_allocated": 0},
+    )
+
+    allocation = Allocation.objects.create(
+        order_line=line,
+        stock=stock,
+        quantity_allocated=5,
+    )
+
+    stock.quantity_allocated = 5
+    stock.save()
+
+    poi = PurchaseOrderItem.objects.create(
+        order=po,
+        product_variant=variant,
+        quantity_ordered=5,
+        total_price_amount=50.0,
+    )
+
+    AllocationSource.objects.create(
+        allocation=allocation,
+        purchase_order_item=poi,
+        quantity=5,
+    )
+
+    order.lines_count = order.lines.count()
+    order.save()
+
+    return order
+
+
+@pytest.fixture
+def order_with_allocations_multiple_warehouses(
+    customer_user,
+    owned_warehouse,
+    warehouse_JPY,
+    nonowned_warehouse,
+    product_variant_list,
+    channel_USD,
+):
+    address = customer_user.default_billing_address.get_copy()
+    order = Order.objects.create(
+        billing_address=address,
+        channel=channel_USD,
+        currency=channel_USD.currency_code,
+        shipping_address=address,
+        user_email=customer_user.email,
+        user=customer_user,
+        origin=OrderOrigin.CHECKOUT,
+        status=OrderStatus.UNFULFILLED,
+        lines_count=0,
+    )
+
+    owned_warehouse.is_owned = True
+    owned_warehouse.save()
+    warehouse_JPY.is_owned = True
+    warehouse_JPY.channels.add(channel_USD)
+    warehouse_JPY.save()
+    nonowned_warehouse.is_owned = False
+    nonowned_warehouse.save()
+
+    from ....inventory.models import PurchaseOrder, PurchaseOrderItem
+    from ....warehouse.models import AllocationSource
+
+    po1 = PurchaseOrder.objects.create(
+        source_warehouse=nonowned_warehouse,
+        destination_warehouse=owned_warehouse,
+    )
+    po2 = PurchaseOrder.objects.create(
+        source_warehouse=nonowned_warehouse,
+        destination_warehouse=warehouse_JPY,
+    )
+
+    variant1 = product_variant_list[0]
+    variant2 = product_variant_list[1]
+
+    line1 = order.lines.create(
+        product_name=variant1.product.name,
+        variant_name=variant1.name,
+        product_sku=variant1.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=3,
+        variant=variant1,
+        unit_price_net_amount=10,
+        unit_price_gross_amount=10,
+        total_price_net_amount=30,
+        total_price_gross_amount=30,
+        undiscounted_unit_price_net_amount=10,
+        undiscounted_unit_price_gross_amount=10,
+        undiscounted_total_price_net_amount=30,
+        undiscounted_total_price_gross_amount=30,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    line2 = order.lines.create(
+        product_name=variant2.product.name,
+        variant_name=variant2.name,
+        product_sku=variant2.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=2,
+        variant=variant2,
+        unit_price_net_amount=20,
+        unit_price_gross_amount=20,
+        total_price_net_amount=40,
+        total_price_gross_amount=40,
+        undiscounted_unit_price_net_amount=20,
+        undiscounted_unit_price_gross_amount=20,
+        undiscounted_total_price_net_amount=40,
+        undiscounted_total_price_gross_amount=40,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    stock1, _ = variant1.stocks.get_or_create(
+        warehouse=owned_warehouse,
+        defaults={"quantity": 3, "quantity_allocated": 0},
+    )
+    stock2, _ = variant2.stocks.get_or_create(
+        warehouse=warehouse_JPY,
+        defaults={"quantity": 2, "quantity_allocated": 0},
+    )
+
+    allocation1 = Allocation.objects.create(
+        order_line=line1,
+        stock=stock1,
+        quantity_allocated=3,
+    )
+    allocation2 = Allocation.objects.create(
+        order_line=line2,
+        stock=stock2,
+        quantity_allocated=2,
+    )
+
+    stock1.quantity_allocated = 3
+    stock1.save()
+    stock2.quantity_allocated = 2
+    stock2.save()
+
+    poi1 = PurchaseOrderItem.objects.create(
+        order=po1,
+        product_variant=variant1,
+        quantity_ordered=3,
+        total_price_amount=30.0,
+    )
+    poi2 = PurchaseOrderItem.objects.create(
+        order=po2,
+        product_variant=variant2,
+        quantity_ordered=2,
+        total_price_amount=40.0,
+    )
+
+    AllocationSource.objects.create(
+        allocation=allocation1,
+        purchase_order_item=poi1,
+        quantity=3,
+    )
+    AllocationSource.objects.create(
+        allocation=allocation2,
+        purchase_order_item=poi2,
+        quantity=2,
+    )
+
+    order.lines_count = order.lines.count()
+    order.save()
+
+    return order

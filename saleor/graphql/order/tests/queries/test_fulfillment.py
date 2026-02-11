@@ -12,7 +12,7 @@ QUERY_FULFILLMENT = """
                 id
                 fulfillmentOrder
                 status
-                trackingNumber
+                trackingUrl
                 warehouse {
                     id
                 }
@@ -62,7 +62,7 @@ def test_fulfillment_query(
 
     assert fulfillment_data["fulfillmentOrder"] == 1
     assert fulfillment_data["status"] == FulfillmentStatus.FULFILLED.upper()
-    assert fulfillment_data["trackingNumber"] == "123"
+    assert fulfillment_data["trackingUrl"] == "123"
     assert fulfillment_data["warehouse"]["id"] == warehose_id
     assert len(fulfillment_data["lines"]) == 2
     assert {

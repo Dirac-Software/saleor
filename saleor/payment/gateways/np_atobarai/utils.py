@@ -42,7 +42,7 @@ def get_shipping_company_code(
 
 def get_fulfillment_for_order(order: Order) -> Fulfillment:
     fulfillments = order.fulfillments.exclude(
-        Q(tracking_number="") | Q(status__in=STATUSES_NOT_ALLOWED_TO_REFUND)
+        Q(tracking_url="") | Q(status__in=STATUSES_NOT_ALLOWED_TO_REFUND)
     )
 
     if fulfillments.count() == 0:

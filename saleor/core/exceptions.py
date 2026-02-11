@@ -56,6 +56,17 @@ class AllocationError(Exception):
         self.order_lines = order_lines
 
 
+class AllocationQuantityError(Exception):
+    def __init__(self, order_line, requested_quantity, line_quantity):
+        super().__init__(
+            f"Cannot allocate {requested_quantity} units when order line only has "
+            f"{line_quantity} units (order line {order_line.pk})"
+        )
+        self.order_line = order_line
+        self.requested_quantity = requested_quantity
+        self.line_quantity = line_quantity
+
+
 class PreorderAllocationError(Exception):
     def __init__(self, order_line):
         super().__init__(f"Unable to allocate in stock for line {str(order_line)}.")

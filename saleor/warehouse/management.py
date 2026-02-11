@@ -13,6 +13,7 @@ from ..channel import AllocationStrategy
 from ..checkout.models import CheckoutLine
 from ..core.exceptions import (
     AllocationError,
+    AllocationQuantityError,
     InsufficientStock,
     InsufficientStockData,
     PreorderAllocationError,
@@ -30,6 +31,7 @@ from .lock_objects import (
 )
 from .models import (
     Allocation,
+    AllocationSource,
     ChannelWarehouse,
     PreorderAllocation,
     PreorderReservation,
@@ -40,6 +42,7 @@ from .models import (
 
 if TYPE_CHECKING:
     from ..channel.models import Channel
+    from ..order.models import Order
 
 
 class StockData(NamedTuple):
@@ -69,12 +72,178 @@ def stock_bulk_update(stocks: list[Stock], fields_to_update: list[str]):
 
 def delete_allocations(allocation_pks_to_delete: list[int]):
     with transaction.atomic():
-        return Allocation.objects.filter(
-            id__in=Allocation.objects.order_by("stock_id")
-            .select_for_update(of=["self"])
-            .values_list("pk", flat=True)
-            .filter(id__in=allocation_pks_to_delete)
-        ).delete()
+        allocations = list(
+            Allocation.objects.filter(
+                id__in=Allocation.objects.order_by("stock_id")
+                .select_for_update(of=["self"])
+                .values_list("pk", flat=True)
+                .filter(id__in=allocation_pks_to_delete)
+            ).select_related("stock__warehouse")
+        )
+
+        # Deallocate sources for owned warehouses
+        for allocation in allocations:
+            if allocation.stock.warehouse.is_owned:
+                deallocate_sources(allocation, allocation.quantity_allocated)
+
+        # Delete allocations
+        return Allocation.objects.filter(id__in=[a.id for a in allocations]).delete()
+
+
+def can_confirm_order(order: "Order") -> bool:
+    """Check if order can transition from UNCONFIRMED to UNFULFILLED.
+
+    Validates that all allocations meet the requirements:
+    1. Must be in owned warehouses
+    2. Must have AllocationSources assigned
+    3. AllocationSources must sum to quantity_allocated
+
+    Returns False if order isn't ready (normal state), not an error.
+
+    Returns:
+        bool: True if order can be confirmed, False otherwise
+
+    """
+    from django.db.models import Q, Sum
+
+    # Check for any violations in a single query
+    violations = (
+        Allocation.objects.filter(order_line__order=order)
+        .annotate(total_sourced=Sum("allocation_sources__quantity"))
+        .filter(
+            Q(stock__warehouse__is_owned=False)  # Non-owned warehouse
+            | Q(total_sourced__isnull=True)  # No sources
+            | ~Q(total_sourced=F("quantity_allocated"))  # Mismatch
+        )
+        .exists()
+    )
+
+    has_allocations = Allocation.objects.filter(order_line__order=order).exists()
+
+    return has_allocations and not violations
+
+
+def _allocate_sources_incremental(allocation: Allocation, quantity: int):
+    """Allocate sources for an incremental quantity added to existing allocation.
+
+    Required to confirm a purchase order.
+
+    Similar to allocate_sources() but only allocates the specified quantity,
+    not the full allocation.quantity_allocated.
+
+
+    Args:
+        allocation: The existing Allocation to add sources to.
+        quantity: The incremental quantity to allocate.
+
+    Raises:
+        InsufficientStock: If there are not enough POI batches. This should
+        never happen - it means our invariant on Stock.quantity matching sum of
+        available POI is broken.
+
+    """
+    from ..inventory import PurchaseOrderItemStatus
+    from ..inventory.models import PurchaseOrderItem
+
+    # Get active POIs for this stock in FIFO order (by confirmation date)
+    # Only CONFIRMED or RECEIVED - exclude DRAFT and CANCELLED
+    # NOTE: Cannot use annotate_available_quantity() with select_for_update()
+    # because PostgreSQL doesn't allow FOR UPDATE with GROUP BY clause
+    pois = (
+        PurchaseOrderItem.objects.filter(
+            order__destination_warehouse=allocation.stock.warehouse,
+            product_variant=allocation.stock.product_variant,
+            status__in=PurchaseOrderItemStatus.ACTIVE_STATUSES,
+            quantity_ordered__gt=F("quantity_allocated"),
+        )
+        .select_for_update()
+        .order_by("confirmed_at", "created_at")
+    )
+
+    remaining = quantity
+    sources_to_update = {}  # POI ID -> AllocationSource
+    pois_to_update = []
+
+    # Get existing sources for this allocation to update them instead of creating duplicates
+    existing_sources = {
+        source.purchase_order_item_id: source
+        for source in allocation.allocation_sources.select_for_update()
+    }
+
+    for poi in pois:
+        available = poi.available_quantity
+        assert available > 0, (
+            "Despite checking available quantity > 0 in query poi has <0 available quantity"
+        )
+
+        consume = min(remaining, available)
+
+        # Check if we already have a source for this POI - update it instead of creating new
+        if poi.id in existing_sources:
+            source = existing_sources[poi.id]
+            source.quantity = F("quantity") + consume
+            sources_to_update[poi.id] = source
+        else:
+            # Create new source
+            source = AllocationSource(
+                allocation=allocation,
+                purchase_order_item=poi,
+                quantity=consume,
+            )
+            sources_to_update[poi.id] = source
+
+        # Update POI quantity_allocated
+        poi.quantity_allocated = F("quantity_allocated") + consume
+        pois_to_update.append(poi)
+        remaining -= consume
+
+        if remaining == 0:
+            break
+
+    if remaining > 0:
+        raise InsufficientStock(
+            [
+                InsufficientStockData(
+                    variant=allocation.stock.product_variant,
+                    order_line=allocation.order_line,
+                    available_quantity=quantity - remaining,
+                )
+            ]
+        )
+
+    # Save all sources (both new and updated)
+    sources_to_create = []
+    sources_to_save = []
+    for _poi_id, source in sources_to_update.items():
+        if source.pk:  # Existing source - update
+            sources_to_save.append(source)
+        else:  # New source - create
+            sources_to_create.append(source)
+
+    if sources_to_create:
+        AllocationSource.objects.bulk_create(sources_to_create)
+    if sources_to_save:
+        AllocationSource.objects.bulk_update(sources_to_save, ["quantity"])
+    if pois_to_update:
+        PurchaseOrderItem.objects.bulk_update(pois_to_update, ["quantity_allocated"])
+
+
+def allocate_sources(allocation: Allocation):
+    """Create AllocationSources for the full allocation amount.
+
+    Wrapper around _allocate_sources_incremental that allocates sources for
+    the entire allocation.quantity_allocated using FIFO ordering of POIs.
+
+    Args:
+        allocation: The Allocation to create sources for (must be owned warehouse).
+
+    Raises:
+        InsufficientStock: If there are not enough POI batches.
+
+    """
+    return _allocate_sources_incremental(
+        allocation=allocation, quantity=allocation.quantity_allocated
+    )
 
 
 @traced_atomic_transaction()
@@ -96,12 +265,20 @@ def allocate_stocks(
     Iterate by stocks and allocate as many items as needed or available in stock
     for order line, until allocated all required quantity for the order line.
     If there is less quantity in stocks then rise InsufficientStock exception.
+
     """
     # allocation only applied to order lines with variants with track inventory
     # set to True
     order_lines_info = get_order_lines_with_track_inventory(order_lines_info)
     if not order_lines_info:
         return
+
+    # Validate that we don't allocate more than what was ordered
+    for line_info in order_lines_info:
+        if line_info.quantity > line_info.line.quantity:
+            raise AllocationQuantityError(
+                line_info.line, line_info.quantity, line_info.line.quantity
+            )
 
     channel_slug = channel.slug
 
@@ -122,7 +299,14 @@ def allocate_stocks(
     stocks = list(
         stock_select_for_update_for_existing_qs(stocks)
         .filter(**filter_lookup)
-        .values("id", "product_variant", "pk", "quantity", "warehouse_id")
+        .values(
+            "id",
+            "product_variant",
+            "pk",
+            "quantity",
+            "warehouse_id",
+            "warehouse__is_owned",
+        )
     )
     stocks_id = (stock.pop("id") for stock in stocks)
 
@@ -176,6 +360,47 @@ def allocate_stocks(
 
     if allocations:
         Allocation.objects.bulk_create(allocations)
+
+        # Fetch the allocations with their related stock objects
+        # This is necessary because bulk_create doesn't populate relations
+        stock_ids = {alloc.stock_id for alloc in allocations}
+        order_line_ids = {alloc.order_line_id for alloc in allocations}
+        allocations = list(
+            Allocation.objects.filter(
+                order_line_id__in=order_line_ids, stock_id__in=stock_ids
+            ).select_related(
+                "stock", "stock__warehouse", "stock__product_variant", "order_line"
+            )
+        )
+
+        # Create AllocationSources for owned warehouses (batch tracking)
+        # Get warehouse ownership info efficiently
+        owned_stock_ids = set(
+            Stock.objects.filter(
+                id__in=stock_ids, warehouse__is_owned=True
+            ).values_list("id", flat=True)
+        )
+
+        # Track orders to check for auto-confirmation
+        orders_to_check = set()
+
+        for allocation in allocations:
+            if allocation.stock_id in owned_stock_ids:
+                allocate_sources(allocation)
+                # Check if order can be auto-confirmed after adding sources
+                from ..order import OrderStatus
+
+                if allocation.order_line.order.status == OrderStatus.UNCONFIRMED:
+                    orders_to_check.add(allocation.order_line.order)
+
+        # Auto-confirm orders that now have all allocations with sources
+        # Only auto-confirm if channel setting allows it
+        for order in orders_to_check:
+            if channel.automatically_confirm_all_new_orders and can_confirm_order(
+                order
+            ):
+                order.status = OrderStatus.UNFULFILLED
+                order.save(update_fields=["status", "updated_at"])
 
         stocks_to_update_map = {alloc.stock_id: alloc.stock for alloc in allocations}
         quantity_from_allocations: dict[int, int] = defaultdict(int)
@@ -234,32 +459,72 @@ def sort_stocks(
     quantity_allocation_for_stocks: dict[int, int],
     collection_point_pk: UUID | None = None,
 ):
+    """Sort stocks for allocation according to the specified strategy.
+
+    IMPORTANT: Both strategies prioritize owned warehouses (is_owned=True) over
+    non-owned warehouses. This ensures allocations use owned warehouse stock first,
+    enabling proper batch tracking via PurchaseOrderItems and AllocationSources.
+
+    Args:
+        allocation_strategy: Either PRIORITIZE_HIGH_STOCK or PRIORITIZE_SORTING_ORDER
+        stocks: List of stock dictionaries with warehouse__is_owned field
+        channel: Channel with allocation strategy configuration
+        quantity_allocation_for_stocks: Map of stock PK to allocated quantity
+        collection_point_pk: Optional collection point warehouse (always prioritized)
+
+    Returns:
+        Sorted list of stocks (owned first, then strategy-specific sorting)
+
+    """
     warehouse_ids = [stock_data["warehouse_id"] for stock_data in stocks]
     channel_warehouse_ids = ChannelWarehouse.objects.filter(
         channel_id=channel.id, warehouse_id__in=warehouse_ids
     ).values_list("warehouse_id", flat=True)
 
     def sort_stocks_by_highest_stocks(stock_data):
-        """Sort the stocks by the highest quantity available."""
-        # in case of click and collect order we should allocate stocks from
-        # collection point warehouse at the first place
-        if stock_data.pop("warehouse_id") == collection_point_pk:
-            return math.inf
-        return stock_data["quantity"] - quantity_allocation_for_stocks.get(
-            stock_data["pk"], 0
-        )
+        """Sort the stocks by the highest quantity available.
+
+        Priority (with reverse=True, highest first):
+        1. Collection point (priority=2)
+        2. Owned warehouses (priority=1, sorted by quantity desc)
+        3. Non-owned warehouses (priority=0, sorted by quantity desc)
+        """
+        warehouse_id = stock_data.pop("warehouse_id")
+        is_owned = stock_data.pop("warehouse__is_owned")
+
+        available_quantity = stock_data[
+            "quantity"
+        ] - quantity_allocation_for_stocks.get(stock_data["pk"], 0)
+
+        # Collection point gets highest priority
+        if warehouse_id == collection_point_pk:
+            return (2, math.inf)
+
+        # Return tuple: (priority, quantity) for sorting with reverse=True
+        # Owned=1, Non-owned=0, so owned comes first
+        priority = 1 if is_owned else 0
+        return (priority, available_quantity)
 
     def sort_stocks_by_warehouse_sorting_order(stock_data):
-        """Sort the stocks based on the warehouse within channel order."""
-        # get the sort order for stocks warehouses within the channel
-        sorted_warehouse_list = list(channel_warehouse_ids)
+        """Sort the stocks based on the warehouse within channel order.
 
+        Priority (with reverse=False, lowest first):
+        1. Collection point (priority=-1)
+        2. Owned warehouses (priority=0, sorted by channel order asc)
+        3. Non-owned warehouses (priority=1, sorted by channel order asc)
+        """
+        sorted_warehouse_list = list(channel_warehouse_ids)
         warehouse_id = stock_data.pop("warehouse_id")
-        # in case of click and collect order we should allocate stocks from
-        # collection point warehouse at the first place
+        is_owned = stock_data.pop("warehouse__is_owned")
+
+        # Collection point gets highest priority (lowest value)
         if warehouse_id == collection_point_pk:
-            return -math.inf
-        return sorted_warehouse_list.index(warehouse_id)
+            return (-1, 0)
+
+        # Return tuple: (priority, index) for sorting with reverse=False
+        # Owned=0, Non-owned=1, so owned comes first
+        priority = 0 if is_owned else 1
+        return (priority, sorted_warehouse_list.index(warehouse_id))
 
     allocation_strategy_to_sort_method_and_reverse_option = {
         AllocationStrategy.PRIORITIZE_HIGH_STOCK: (sort_stocks_by_highest_stocks, True),
@@ -318,7 +583,115 @@ def _create_allocations(
     return [], allocations
 
 
-def deallocate_stock(order_lines_data: list["OrderLineInfo"], manager: PluginsManager):
+def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None):
+    """Remove AllocationSources for an allocation and restore POI quantity_allocated.
+
+    Args:
+        allocation: The Allocation to deallocate sources from.
+        quantity_to_deallocate: How much to deallocate (can be partial or full).
+        fulfillment_line: Optional FulfillmentLine. If provided, creates FulfillmentSource
+            records and increments POI.quantity_fulfilled. If None, this is a cancellation.
+
+    Raises:
+        ValueError: If order has items that have been shipped/fulfilled.
+
+    """
+    from ..inventory.models import PurchaseOrderItem
+    from ..order import ORDER_ITEMS_SHIPPED_STATUS
+    from .models import FulfillmentSource
+
+    # SAFETY: Only allow deallocation for cancellations if items haven't left the warehouse
+    # During fulfillment (when fulfillment_line is provided), deallocation is part of the
+    # normal fulfillment flow, so we skip this check
+    if fulfillment_line is None:
+        order = allocation.order_line.order
+        if order.status in ORDER_ITEMS_SHIPPED_STATUS:
+            raise ValueError(
+                f"Cannot deallocate from order {order.number} with status {order.status}. "
+                f"Order has items that have been shipped/fulfilled."
+            )
+
+    # Get allocation sources in LIFO order (reverse of allocation - newest first)
+    sources = allocation.allocation_sources.select_for_update().order_by("-pk")
+
+    remaining = quantity_to_deallocate
+    sources_to_delete = []
+    sources_to_update = []
+    pois_to_update_map = {}
+    poi_deallocate_amounts = {}  # Track accumulated deallocation per POI
+    poi_fulfill_amounts = {}  # Track accumulated fulfillment per POI
+    fulfillment_sources_to_create = []
+
+    for source in sources:
+        if remaining <= 0:
+            break
+
+        deallocate_from_source = min(source.quantity, remaining)
+
+        # Track POI updates - accumulate amounts for the same POI
+        poi_id = source.purchase_order_item_id
+        if poi_id not in pois_to_update_map:
+            pois_to_update_map[poi_id] = source.purchase_order_item
+            poi_deallocate_amounts[poi_id] = deallocate_from_source
+            if fulfillment_line:
+                poi_fulfill_amounts[poi_id] = deallocate_from_source
+        else:
+            # Same POI appears multiple times - accumulate the amounts
+            poi_deallocate_amounts[poi_id] += deallocate_from_source
+            if fulfillment_line:
+                poi_fulfill_amounts[poi_id] += deallocate_from_source
+
+        # Create FulfillmentSource if fulfilling (not cancelling)
+        if fulfillment_line:
+            fulfillment_sources_to_create.append(
+                FulfillmentSource(
+                    fulfillment_line=fulfillment_line,
+                    purchase_order_item=source.purchase_order_item,
+                    quantity=deallocate_from_source,
+                )
+            )
+
+        if deallocate_from_source == source.quantity:
+            # Fully deallocate this source
+            sources_to_delete.append(source.id)
+        else:
+            # Partially deallocate
+            source.quantity = F("quantity") - deallocate_from_source
+            sources_to_update.append(source)
+
+        remaining -= deallocate_from_source
+
+    # Apply changes
+    if fulfillment_sources_to_create:
+        FulfillmentSource.objects.bulk_create(fulfillment_sources_to_create)
+    if sources_to_delete:
+        AllocationSource.objects.filter(id__in=sources_to_delete).delete()
+    if sources_to_update:
+        AllocationSource.objects.bulk_update(sources_to_update, ["quantity"])
+    if pois_to_update_map:
+        # Apply accumulated amounts to each POI using F() expressions
+        for poi_id, poi in pois_to_update_map.items():
+            poi.quantity_allocated = (
+                F("quantity_allocated") - poi_deallocate_amounts[poi_id]
+            )
+            if fulfillment_line:
+                poi.quantity_fulfilled = (
+                    F("quantity_fulfilled") + poi_fulfill_amounts[poi_id]
+                )
+
+        update_fields = ["quantity_allocated"]
+        if fulfillment_line:
+            update_fields.append("quantity_fulfilled")
+        PurchaseOrderItem.objects.bulk_update(
+            pois_to_update_map.values(), update_fields
+        )
+
+
+def deallocate_stock(
+    order_lines_data: list["OrderLineInfo"],
+    manager: PluginsManager,
+    fulfillment_line_map: dict | None = None,
+):
     """Deallocate stocks for given `order_lines`.
 
     Function lock for update stocks and allocations related to given `order_lines`.
@@ -326,6 +699,14 @@ def deallocate_stock(order_lines_data: list["OrderLineInfo"], manager: PluginsMa
     as needed of available in stock for order line, until deallocated all required
     quantity for the order line. If there is less quantity in stocks then
     raise an exception.
+
+    Args:
+        order_lines_data: List of OrderLineInfo objects containing order lines
+            and related information for deallocation.
+        manager: PluginsManager instance for handling plugin hooks.
+        fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
+            FulfillmentLine. When provided, creates FulfillmentSource audit trail.
+
     """
     lines = [line_info.line for line_info in order_lines_data]
     lines_allocations = allocation_with_stock_qs_select_for_update().filter(
@@ -349,6 +730,18 @@ def deallocate_stock(order_lines_data: list["OrderLineInfo"], manager: PluginsMa
                 (quantity - quantity_dealocated), allocation.quantity_allocated
             )
             if quantity_to_deallocate > 0:
+                # Deallocate sources for owned warehouses (batch tracking)
+                if allocation.stock.warehouse.is_owned:
+                    # Look up FulfillmentLine if this is a fulfillment (not cancellation)
+                    fulfillment_line = None
+                    if fulfillment_line_map:
+                        fulfillment_line = fulfillment_line_map.get(
+                            (allocation.order_line_id, allocation.stock.warehouse_id)
+                        )
+                    deallocate_sources(
+                        allocation, quantity_to_deallocate, fulfillment_line
+                    )
+
                 allocation.quantity_allocated = (
                     allocation.quantity_allocated - quantity_to_deallocate
                 )
@@ -424,12 +817,23 @@ def increase_stock(
     if allocate:
         allocation = order_line.allocations.filter(stock=stock).first()
         if allocation:
+            # Increase existing allocation
             allocation.quantity_allocated = F("quantity_allocated") + quantity
             allocation.save(update_fields=["quantity_allocated"])
+            # Allocate sources for the increased quantity (owned warehouses only)
+            if stock.warehouse.is_owned:
+                allocation.refresh_from_db()
+                # Allocate sources for just the incremental quantity
+                _allocate_sources_incremental(allocation, quantity)
         else:
-            Allocation.objects.create(
+            # Create new allocation
+            allocation = Allocation.objects.create(
                 order_line=order_line, stock=stock, quantity_allocated=quantity
             )
+            # Allocate sources for owned warehouses
+            if stock.warehouse.is_owned:
+                allocate_sources(allocation)
+
         stock.quantity_allocated = F("quantity_allocated") + quantity
         stock.save(update_fields=["quantity_allocated"])
 
@@ -499,17 +903,37 @@ def increase_allocations(
     )
 
 
-def decrease_allocations(lines_info: list["OrderLineInfo"], manager):
+def decrease_allocations(
+    lines_info: list["OrderLineInfo"], manager, fulfillment_line_map: dict | None = None
+):
     """Decrease allocations for provided order lines."""
     lines_to_deallocate = get_order_lines_to_deallocate(lines_info)
     if not lines_to_deallocate:
         return
     try:
-        deallocate_stock(lines_info, manager)
+        deallocate_stock(lines_info, manager, fulfillment_line_map)
     except AllocationError as exc:
-        Allocation.objects.order_by("stock_id").filter(
-            order_line__in=exc.order_lines
-        ).update(quantity_allocated=0)
+        # Deallocate sources before zeroing allocations
+        allocations = list(
+            Allocation.objects.order_by("stock_id")
+            .select_related("stock__warehouse")
+            .filter(order_line__in=exc.order_lines)
+        )
+        for allocation in allocations:
+            if allocation.stock.warehouse.is_owned:
+                # Look up FulfillmentLine if this is a fulfillment (not cancellation)
+                fulfillment_line = None
+                if fulfillment_line_map:
+                    fulfillment_line = fulfillment_line_map.get(
+                        (allocation.order_line_id, allocation.stock.warehouse_id)
+                    )
+                deallocate_sources(
+                    allocation, allocation.quantity_allocated, fulfillment_line
+                )
+
+        Allocation.objects.filter(id__in=[a.id for a in allocations]).update(
+            quantity_allocated=0
+        )
 
 
 @traced_atomic_transaction()
@@ -517,6 +941,7 @@ def decrease_stock(
     order_lines_info: list["OrderLineInfo"],
     manager,
     allow_stock_to_be_exceeded: bool = False,
+    fulfillment_line_map: dict | None = None,
 ):
     """Decrease stocks quantities for given `order_lines` in given warehouses.
 
@@ -526,8 +951,17 @@ def decrease_stock(
     the function raise InsufficientStock exception. When the stock has enough quantity
     function decrease it by given value.
     If allow_stock_to_be_exceeded flag is True then quantity could be < 0.
+
+    Args:
+        order_lines_info: List of OrderLineInfo objects containing order lines
+            and warehouse information for stock decrease.
+        manager: PluginsManager instance for handling plugin hooks.
+        allow_stock_to_be_exceeded: If True, allows stock quantity to go below zero.
+        fulfillment_line_map: Optional dict mapping (order_line_id, warehouse_id) to
+            FulfillmentLine. When provided, creates FulfillmentSource audit trail.
+
     """
-    decrease_allocations(order_lines_info, manager)
+    decrease_allocations(order_lines_info, manager, fulfillment_line_map)
 
     order_lines_info = get_order_lines_with_track_inventory(order_lines_info)
     if not order_lines_info:
@@ -643,7 +1077,6 @@ def get_order_lines_with_track_inventory(
     order_lines_info: list["OrderLineInfo"],
 ) -> list["OrderLineInfo"]:
     """Return order lines with variants with track inventory set to True."""
-
     lines_to_return = []
     for line_info in order_lines_info:
         variant = _get_variant_for_order_line_info(line_info)
@@ -667,7 +1100,6 @@ def get_order_lines_to_deallocate(
     inventory was turned off but for some reason the allocations are present.
     Case like turning on & off the track-inventory.
     """
-
     order_lines_info_map = {
         line_info.line.id: line_info for line_info in order_lines_info
     }
@@ -690,9 +1122,19 @@ def get_order_lines_to_deallocate(
 def deallocate_stock_for_orders(orders_ids: list[UUID], manager: PluginsManager):
     """Remove all allocations for given orders."""
     lines = OrderLine.objects.filter(order_id__in=orders_ids)
-    allocations = allocation_with_stock_qs_select_for_update().filter(
-        Exists(lines.filter(id=OuterRef("order_line_id"))), quantity_allocated__gt=0
+    allocations = list(
+        allocation_with_stock_qs_select_for_update()
+        .select_related("stock__warehouse")
+        .filter(
+            Exists(lines.filter(id=OuterRef("order_line_id"))),
+            quantity_allocated__gt=0,
+        )
     )
+
+    # Deallocate sources for owned warehouses
+    for allocation in allocations:
+        if allocation.stock.warehouse.is_owned:
+            deallocate_sources(allocation, allocation.quantity_allocated)
 
     stocks_to_update = _reduce_quantity_allocated_for_stocks(allocations)
 
@@ -705,7 +1147,9 @@ def deallocate_stock_for_orders(orders_ids: list[UUID], manager: PluginsManager)
                 lambda: manager.product_variant_back_in_stock(allocation.stock)
             )
 
-    allocations.update(quantity_allocated=0)
+    Allocation.objects.filter(id__in=[a.id for a in allocations]).update(
+        quantity_allocated=0
+    )
     Stock.objects.bulk_update(stocks_to_update, ["quantity_allocated"])
 
 
@@ -918,6 +1362,11 @@ def deactivate_preorder_for_variant(product_variant: ProductVariant):
 
     if allocations_to_create:
         Allocation.objects.bulk_create(allocations_to_create)
+
+        # Create AllocationSources for owned warehouses
+        for allocation in allocations_to_create:
+            if allocation.stock.warehouse.is_owned:
+                allocate_sources(allocation)
 
     if preorder_allocations:
         preorder_allocations.delete()
