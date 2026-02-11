@@ -206,16 +206,12 @@ def confirm_purchase_order_item(
             manager = get_plugins_manager(allow_replica=False)
 
             # Send order confirmed email
-            def send_order_confirmation():
-                order_confirmed(
-                    order,
-                    user,
-                    app,
-                    manager,
-                    send_confirmation_email=True,
+            # Use lambda with default args to capture loop variables by value
+            transaction.on_commit(
+                lambda o=order, u=user, a=app, m=manager: order_confirmed(  # type: ignore[misc]
+                    o, u, a, m, send_confirmation_email=True
                 )
-
-            transaction.on_commit(send_order_confirmation)
+            )
 
             # Get allocations and group by warehouse
             allocations = Allocation.objects.filter(
