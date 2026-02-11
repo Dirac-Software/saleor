@@ -147,7 +147,9 @@ def test_draft_order_complete_auto_confirms_with_owned_warehouse(
     purchase_order_item.quantity_ordered = order_line.quantity * 2  # Buffer
     purchase_order_item.status = PurchaseOrderItemStatus.CONFIRMED
     purchase_order_item.confirmed_at = timezone.now()
-    purchase_order_item.save(update_fields=["product_variant", "quantity_ordered", "status", "confirmed_at"])
+    purchase_order_item.save(
+        update_fields=["product_variant", "quantity_ordered", "status", "confirmed_at"]
+    )
 
     # Create stock in OWNED warehouse
     Stock.objects.get_or_create(

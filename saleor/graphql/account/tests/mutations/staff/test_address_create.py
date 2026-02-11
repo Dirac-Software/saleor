@@ -40,7 +40,10 @@ ADDRESS_CREATE_MUTATION = """
 
 
 def test_create_address_mutation(
-    staff_api_client, customer_user, permission_manage_users, graphql_address_data_with_vat
+    staff_api_client,
+    customer_user,
+    permission_manage_users,
+    graphql_address_data_with_vat,
 ):
     # given
     query = ADDRESS_CREATE_MUTATION

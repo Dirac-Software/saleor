@@ -735,9 +735,7 @@ def test_confirm_poi_auto_confirm_sends_order_confirmed_email(
         is_gift_card=False,
     )
 
-    Allocation.objects.create(
-        order_line=order_line, stock=source, quantity_allocated=5
-    )
+    Allocation.objects.create(order_line=order_line, stock=source, quantity_allocated=5)
 
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
@@ -771,7 +769,7 @@ def test_confirm_poi_auto_confirm_sends_order_confirmed_email(
         order.refresh_from_db()
         assert order.status == OrderStatus.UNFULFILLED
 
-        notify_calls = [call for call in mock_notify.call_args_list]
+        notify_calls = list(mock_notify.call_args_list)
         order_confirmed_calls = [
             call
             for call in notify_calls

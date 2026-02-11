@@ -107,7 +107,9 @@ def test_customer_create_address_trigger_webhook(
     )
 
 
-def test_account_address_create_return_user(user_api_client, graphql_address_data_with_vat):
+def test_account_address_create_return_user(
+    user_api_client, graphql_address_data_with_vat
+):
     user = user_api_client.user
     variables = {"addressInput": graphql_address_data_with_vat}
     response = user_api_client.post_graphql(ACCOUNT_ADDRESS_CREATE_MUTATION, variables)

@@ -271,10 +271,12 @@ def test_draft_order_update_with_voucher_entire_order(
     stored_metadata = {"public": "public_value", "vat_number": "PL1234567890"}
 
     assert (
-        data["order"]["billingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+        data["order"]["billingAddress"]["metadata"]
+        == graphql_address_data_with_vat["metadata"]
     )
     assert (
-        data["order"]["shippingAddress"]["metadata"] == graphql_address_data_with_vat["metadata"]
+        data["order"]["shippingAddress"]["metadata"]
+        == graphql_address_data_with_vat["metadata"]
     )
     assert data["order"]["undiscountedTotal"]["net"]["amount"] == order_total
     assert (

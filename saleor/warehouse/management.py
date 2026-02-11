@@ -671,13 +671,13 @@ def deallocate_sources(allocation, quantity_to_deallocate, fulfillment_line=None
     if pois_to_update_map:
         # Apply accumulated amounts to each POI using F() expressions
         for poi_id, poi in pois_to_update_map.items():
-            poi.quantity_allocated = F("quantity_allocated") - poi_deallocate_amounts[
-                poi_id
-            ]
+            poi.quantity_allocated = (
+                F("quantity_allocated") - poi_deallocate_amounts[poi_id]
+            )
             if fulfillment_line:
-                poi.quantity_fulfilled = F("quantity_fulfilled") + poi_fulfill_amounts[
-                    poi_id
-                ]
+                poi.quantity_fulfilled = (
+                    F("quantity_fulfilled") + poi_fulfill_amounts[poi_id]
+                )
 
         update_fields = ["quantity_allocated"]
         if fulfillment_line:

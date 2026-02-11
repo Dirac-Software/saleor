@@ -1126,7 +1126,7 @@ def test_create_order_from_checkout_auto_confirm_sends_order_confirmed_email(
     order.refresh_from_db()
     assert order.status == OrderStatus.UNFULFILLED
 
-    notify_calls = [call for call in mock_notify.call_args_list]
+    notify_calls = list(mock_notify.call_args_list)
     order_confirmed_calls = [
         call
         for call in notify_calls

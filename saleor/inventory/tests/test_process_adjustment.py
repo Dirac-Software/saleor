@@ -1,7 +1,6 @@
 """Tests for process_adjustment - handling inventory discrepancies."""
 
 import pytest
-from django.utils import timezone
 
 from ...order import OrderStatus
 from ...warehouse.models import Allocation, AllocationSource, Stock
@@ -136,10 +135,9 @@ def test_negative_adjustment_with_single_allocation(
 def test_negative_adjustment_with_multiple_allocations_distributes_loss(
     confirmed_poi_with_stock, owned_warehouse, channel_USD, variant, staff_user
 ):
-    """
-    CRITICAL TEST: Negative adjustment with MULTIPLE allocations from same POI
-    should distribute the loss across allocations, not apply it to each one.
+    """CRITICAL TEST: Negative adjustment with MULTIPLE allocations from same POI.
 
+    Should distribute the loss across allocations, not apply it to each one.
     This is the bug scenario that was fixed.
     """
     # given

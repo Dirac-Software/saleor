@@ -437,7 +437,10 @@ def order_created(
         )
 
     channel = order_info.channel
-    if channel.automatically_confirm_all_new_orders and order.status != OrderStatus.UNCONFIRMED:
+    if (
+        channel.automatically_confirm_all_new_orders
+        and order.status != OrderStatus.UNCONFIRMED
+    ):
         order_confirmed(
             order,
             user,

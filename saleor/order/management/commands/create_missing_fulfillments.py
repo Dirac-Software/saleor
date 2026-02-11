@@ -1,11 +1,12 @@
 from collections import defaultdict
+from uuid import UUID
 
 from django.contrib.sites.models import Site
 from django.core.management.base import BaseCommand
 from django.db.models import Count
 
 from ....order import OrderStatus
-from ....order.actions import create_fulfillments
+from ....order.actions import OrderFulfillmentLineInfo, create_fulfillments
 from ....order.models import Order
 from ....plugins.manager import get_plugins_manager
 from ....warehouse.management import can_confirm_order
@@ -91,15 +92,17 @@ class Command(BaseCommand):
                         warehouse_groups[warehouse_pk].append(allocation)
 
                     # Build fulfillment_lines_for_warehouses dict
-                    fulfillment_lines_for_warehouses = {}
+                    fulfillment_lines_for_warehouses: dict[
+                        UUID, list[OrderFulfillmentLineInfo]
+                    ] = {}
                     for warehouse_pk, allocations_list in warehouse_groups.items():
-                        lines = []
+                        lines: list[OrderFulfillmentLineInfo] = []
                         for allocation in allocations_list:
                             lines.append(
-                                {
-                                    "order_line": allocation.order_line,
-                                    "quantity": allocation.quantity_allocated,
-                                }
+                                OrderFulfillmentLineInfo(
+                                    order_line=allocation.order_line,
+                                    quantity=allocation.quantity_allocated,
+                                )
                             )
                         fulfillment_lines_for_warehouses[warehouse_pk] = lines
 
