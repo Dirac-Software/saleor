@@ -1,0 +1,45 @@
+name: Spike / Investigation
+description: Technical exploration or research task
+labels: ["spike"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Type
+        Spike
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Explain the business motivation and impact with respect to current Dirac bottlenecks
+    validations:
+      required: true
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What question(s) are we trying to answer? What do we need to learn?
+    validations:
+      required: true
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: Success Criteria
+      description: What does "done" look like for this investigation?
+    validations:
+      required: true

@@ -1,0 +1,37 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Type
+        Feature
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Explain the business motivation and impact with respect to current Dirac bottlenecks
+    validations:
+      required: true
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What feature are you proposing? What problem does it solve?
+    validations:
+      required: true
