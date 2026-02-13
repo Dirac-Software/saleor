@@ -151,4 +151,4 @@ def clean_text_data_block(text: str) -> str:
     if end_of_match:
         new_text += text[end_of_match:]
 
-    return new_text if new_text else text
+    return new_text or text

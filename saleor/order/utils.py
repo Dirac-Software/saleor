@@ -542,11 +542,7 @@ def set_gift_card_user(
     used_by_email: str,
 ):
     """Set the user, each time a giftcard is used."""
-    gift_card.used_by = (
-        used_by_user
-        if used_by_user
-        else User.objects.filter(email=used_by_email).first()
-    )
+    gift_card.used_by = used_by_user or User.objects.filter(email=used_by_email).first()
     gift_card.used_by_email = used_by_email
     mark_gift_cards_search_index_as_dirty([gift_card])
 

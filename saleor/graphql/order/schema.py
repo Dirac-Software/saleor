@@ -48,9 +48,11 @@ from .mutations.draft_order_delete import DraftOrderDelete
 from .mutations.draft_order_update import DraftOrderUpdate
 from .mutations.fulfillment_approve import FulfillmentApprove
 from .mutations.fulfillment_cancel import FulfillmentCancel
+from .mutations.fulfillment_mark_proforma_paid import FulfillmentMarkProformaInvoicePaid
 from .mutations.fulfillment_refund_products import FulfillmentRefundProducts
 from .mutations.fulfillment_return_products import FulfillmentReturnProducts
 from .mutations.fulfillment_update_tracking import FulfillmentUpdateTracking
+from .mutations.order_add_xero_payment import OrderAddXeroPayment
 from .mutations.order_cancel import OrderCancel
 from .mutations.order_capture import OrderCapture
 from .mutations.order_confirm import OrderConfirm
@@ -69,6 +71,7 @@ from .mutations.order_mark_as_paid import OrderMarkAsPaid
 from .mutations.order_note_add import OrderAddNote, OrderNoteAdd
 from .mutations.order_note_update import OrderNoteUpdate
 from .mutations.order_refund import OrderRefund
+from .mutations.order_set_deposit_required import OrderSetDepositRequired
 from .mutations.order_update import OrderUpdate
 from .mutations.order_update_shipping import OrderUpdateShipping
 from .mutations.order_update_shipping_cost import OrderUpdateShippingCost
@@ -383,6 +386,7 @@ class OrderMutations(graphene.ObjectType):
     order_fulfillment_update_tracking = FulfillmentUpdateTracking.Field()
     order_fulfillment_refund_products = FulfillmentRefundProducts.Field()
     order_fulfillment_return_products = FulfillmentReturnProducts.Field()
+    order_fulfillment_mark_proforma_paid = FulfillmentMarkProformaInvoicePaid.Field()
 
     order_grant_refund_create = OrderGrantRefundCreate.Field()
     order_grant_refund_update = OrderGrantRefundUpdate.Field()
@@ -403,6 +407,8 @@ class OrderMutations(graphene.ObjectType):
 
     order_mark_as_paid = OrderMarkAsPaid.Field()
     order_refund = OrderRefund.Field()
+    order_set_deposit_required = OrderSetDepositRequired.Field()
+    order_add_xero_payment = OrderAddXeroPayment.Field()
     order_update = OrderUpdate.Field()
     order_update_shipping = OrderUpdateShipping.Field()
     order_update_shipping_cost = OrderUpdateShippingCost.Field()

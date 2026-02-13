@@ -214,7 +214,7 @@ def _assert_fields(
     assert transaction.gift_card == gift_card
     assert transaction.app_identifier == app_identifier
 
-    available_actions = available_actions if available_actions else []
+    available_actions = available_actions or []
     assert transaction.available_actions == available_actions
 
 

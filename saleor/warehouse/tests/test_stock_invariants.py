@@ -166,7 +166,7 @@ def assert_stock_poi_invariant(warehouse, variant):
         f"  Expected (sum POI.ordered/received): {expected_total}\n"
         f"  Difference: {actual_quantity - expected_total}\n"
         f"  Stock.quantity_allocated: {actual_allocated}\n"
-        f"  POIs:\n" + "\n".join(poi_debug if poi_debug else ["    None"])
+        f"  POIs:\n" + "\n".join(poi_debug or ["    None"])
     )
 
     # Check INVARIANT 2: Allocations tracked via POIs
@@ -176,7 +176,7 @@ def assert_stock_poi_invariant(warehouse, variant):
         f"  Expected (sum POI.quantity_allocated): {expected_poi_allocated}\n"
         f"  Difference: {actual_allocated - expected_poi_allocated}\n"
         f"  This means AllocationSources are not properly tracking allocations to POIs!\n"
-        f"  POIs:\n" + "\n".join(poi_debug if poi_debug else ["    None"])
+        f"  POIs:\n" + "\n".join(poi_debug or ["    None"])
     )
 
     # Check DERIVED relationship: Available stock matches
@@ -189,7 +189,7 @@ def assert_stock_poi_invariant(warehouse, variant):
         f"  Breakdown:\n"
         f"    Stock.quantity: {actual_quantity}\n"
         f"    Stock.quantity_allocated: {actual_allocated}\n"
-        f"  POIs:\n" + "\n".join(poi_debug if poi_debug else ["    None"])
+        f"  POIs:\n" + "\n".join(poi_debug or ["    None"])
     )
 
     # Check INVARIANT 3: FulfillmentSource audit trail matches POI.quantity_fulfilled

@@ -75,9 +75,7 @@ def get_attribute_value(attribute, value_instance):
     elif attribute.input_type == AttributeInputType.RICH_TEXT:
         value = clean_editor_js(value_instance.rich_text, to_string=True)
     elif attribute.input_type == AttributeInputType.SWATCH:
-        value = (
-            value_instance.file_url if value_instance.file_url else value_instance.value
-        )
+        value = value_instance.file_url or value_instance.value
     elif attribute.input_type == AttributeInputType.BOOLEAN:
         value = str(value_instance.boolean)
     elif attribute.input_type == AttributeInputType.DATE:

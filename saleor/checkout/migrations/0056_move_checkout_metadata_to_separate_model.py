@@ -44,10 +44,8 @@ def move_all_checkout_metadata(apps, schema_editor):
         CheckoutMetadata.objects.bulk_create(
             CheckoutMetadata(
                 checkout=checkout,
-                metadata=checkout.metadata if checkout.metadata else {},
-                private_metadata=checkout.private_metadata
-                if checkout.private_metadata
-                else {},
+                metadata=checkout.metadata or {},
+                private_metadata=checkout.private_metadata or {},
             )
             for checkout in checkouts
         )

@@ -95,3 +95,38 @@ def order_fulfill_data(order_with_lines, warehouse, checkout):
     }
 
     return FulfillmentData(order, variables, warehouse)
+
+
+@pytest.fixture
+def fulfillment_proforma_awaiting_payment(fulfillment):
+    from ....invoice import InvoiceType
+    from ....invoice.models import Invoice
+
+    Invoice.objects.create(
+        order=fulfillment.order,
+        number="PROFORMA-001",
+        type=InvoiceType.PROFORMA,
+        fulfillment=fulfillment,
+    )
+
+    fulfillment.proforma_invoice_paid = False
+    fulfillment.proforma_invoice_paid_at = None
+    fulfillment.save(
+        update_fields=["proforma_invoice_paid", "proforma_invoice_paid_at"]
+    )
+
+    return fulfillment
+
+
+@pytest.fixture
+def fulfillment_proforma_paid(fulfillment_proforma_awaiting_payment):
+    from django.utils import timezone
+
+    fulfillment = fulfillment_proforma_awaiting_payment
+    fulfillment.proforma_invoice_paid = True
+    fulfillment.proforma_invoice_paid_at = timezone.now()
+    fulfillment.save(
+        update_fields=["proforma_invoice_paid", "proforma_invoice_paid_at"]
+    )
+
+    return fulfillment

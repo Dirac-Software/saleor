@@ -90,7 +90,7 @@ def clean_text_data(text: str):
     if end_of_match:
         new_text += text[end_of_match:]
 
-    return new_text if new_text else text
+    return new_text or text
 
 
 # End copy of /saleor/core/utils/editorjs.py

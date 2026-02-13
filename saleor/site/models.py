@@ -71,6 +71,17 @@ class SiteSettings(ModelWithMetadata):
     fulfillment_auto_approve = models.BooleanField(default=True)
     fulfillment_allow_unpaid = models.BooleanField(default=True)
 
+    # Invoice settings
+    invoice_product_code_attribute = models.CharField(
+        max_length=255,
+        default="product-code",
+        blank=True,
+        help_text=(
+            "Product attribute slug to use as product code in invoice webhooks. "
+            "Examples: 'product-code', 'supplier-code', 'vendor-code'"
+        ),
+    )
+
     # Duration in minutes
     reserve_stock_duration_anonymous_user = models.IntegerField(blank=True, null=True)
     reserve_stock_duration_authenticated_user = models.IntegerField(

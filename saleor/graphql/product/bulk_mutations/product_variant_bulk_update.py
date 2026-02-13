@@ -477,7 +477,7 @@ class ProductVariantBulkUpdate(BaseMutation):
         if base_fields_errors_count > 0 or attributes_errors_count > 0:
             return None
 
-        return cleaned_input if cleaned_input else None
+        return cleaned_input or None
 
     @classmethod
     def _get_input_warehouses_ids(cls, variants_data):

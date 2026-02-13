@@ -1790,7 +1790,7 @@ def get_transaction_item_params(
         "app_identifier": app.identifier if app else None,
         "user": user,
         "psp_reference": psp_reference,
-        "available_actions": available_actions if available_actions else [],
+        "available_actions": available_actions or [],
     }
 
 

@@ -1168,6 +1168,16 @@ class PluginsManager(PaymentInterface):
             channel_slug=channel_slug,
         )
 
+    def validate_deposit_payment(self, payment_id: str, order: "Order"):
+        default_value = {"valid": False, "error": "No accounting plugin configured"}
+        return self.__run_method_on_plugins(
+            "validate_deposit_payment",
+            default_value,
+            payment_id,
+            order,
+            channel_slug=order.channel.slug,
+        )
+
     # Note: this method is deprecated and will be removed in a future release.
     # Webhook-related functionality will be moved from plugin to core modules.
     def order_fully_paid(self, order: "Order", webhooks=None):
@@ -1329,6 +1339,15 @@ class PluginsManager(PaymentInterface):
         default_value = None
         return self.__run_method_on_plugins(
             "fulfillment_metadata_updated",
+            default_value,
+            fulfillment,
+            channel_slug=fulfillment.order.channel.slug,
+        )
+
+    def fulfillment_proforma_invoice_generated(self, fulfillment: "Fulfillment"):
+        default_value = None
+        return self.__run_method_on_plugins(
+            "fulfillment_proforma_invoice_generated",
             default_value,
             fulfillment,
             channel_slug=fulfillment.order.channel.slug,
@@ -2616,7 +2635,7 @@ class PluginsManager(PaymentInterface):
         channel_slug: str | None = None,
         active_only: bool = True,
     ) -> list["ShippingMethodData"]:
-        channel_slug = channel_slug if channel_slug else checkout.channel.slug
+        channel_slug = channel_slug or checkout.channel.slug
         plugins = self.get_plugins(channel_slug=channel_slug, active_only=active_only)
         shipping_plugins = [
             plugin

@@ -102,7 +102,7 @@ class CategoryTranslation(SeoModelTranslationWithSlug):
         unique_together = (("language_code", "category"),)
 
     def __str__(self) -> str:
-        return self.name if self.name else str(self.pk)
+        return self.name or str(self.pk)
 
     def __repr__(self) -> str:
         class_ = type(self)
@@ -278,7 +278,7 @@ class ProductTranslation(SeoModelTranslationWithSlug):
         unique_together = (("language_code", "product"),)
 
     def __str__(self) -> str:
-        return self.name if self.name else str(self.pk)
+        return self.name or str(self.pk)
 
     def __repr__(self) -> str:
         class_ = type(self)
@@ -770,7 +770,7 @@ class CollectionTranslation(SeoModelTranslationWithSlug):
         return f"{class_.__name__}(pk={self.pk!r}, name={self.name!r}, collection_pk={self.collection_id!r})"
 
     def __str__(self) -> str:
-        return self.name if self.name else str(self.pk)
+        return self.name or str(self.pk)
 
     def get_translated_object_id(self):
         return "Collection", self.collection_id

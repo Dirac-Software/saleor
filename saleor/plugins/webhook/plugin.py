@@ -1639,6 +1639,31 @@ class WebhookPlugin(BasePlugin):
         )
         return previous_value
 
+    def fulfillment_proforma_invoice_generated(
+        self, fulfillment: "Fulfillment", previous_value: None = None
+    ) -> None:
+        if not self.active:
+            return previous_value
+        event_type = WebhookEventAsyncType.FULFILLMENT_PROFORMA_INVOICE_GENERATED
+        if webhooks := get_webhooks_for_event(event_type):
+            from ...webhook.payloads import generate_proforma_invoice_payload
+
+            invoice_data_generator = partial(
+                generate_proforma_invoice_payload, fulfillment, self.requestor
+            )
+            self.trigger_webhooks_async(
+                None,
+                event_type,
+                webhooks,
+                {
+                    "fulfillment": fulfillment,
+                    "invoice": fulfillment.proforma_invoice,
+                },
+                self.requestor,
+                legacy_data_generator=invoice_data_generator,
+            )
+        return previous_value
+
     def tracking_url_updated(
         self, fulfillment: "Fulfillment", previous_value: None
     ) -> None:

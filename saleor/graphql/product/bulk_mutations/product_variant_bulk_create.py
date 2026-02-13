@@ -800,7 +800,7 @@ class ProductVariantBulkCreate(BaseMutation):
         if base_fields_errors_count > 0 or attributes_errors_count > 0:
             return None
 
-        return cleaned_input if cleaned_input else None
+        return cleaned_input or None
 
     @classmethod
     def clean_variants(cls, info, variants, product, errors, index_error_map):

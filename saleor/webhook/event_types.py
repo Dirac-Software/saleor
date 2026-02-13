@@ -90,6 +90,7 @@ class WebhookEventAsyncType:
     FULFILLMENT_APPROVED = "fulfillment_approved"
     FULFILLMENT_METADATA_UPDATED = "fulfillment_metadata_updated"
     FULFILLMENT_TRACKING_NUMBER_UPDATED = "fulfillment_tracking_number_updated"
+    FULFILLMENT_PROFORMA_INVOICE_GENERATED = "fulfillment_proforma_invoice_generated"
 
     DRAFT_ORDER_CREATED = "draft_order_created"
     DRAFT_ORDER_UPDATED = "draft_order_updated"
