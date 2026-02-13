@@ -11415,6 +11415,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """List of order lines."""
   lines: [OrderLine!]!
 
+  """Order lines that have stock available to fulfill."""
+  fulfillableLines: [OrderLine!]!
+
   """
   List of actions that can be performed in the current state of an order.
   """
@@ -11457,6 +11460,21 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """The charge status of the order."""
   chargeStatus: OrderChargeStatusEnum!
+
+  """Whether a deposit is required before fulfillment."""
+  depositRequired: Boolean!
+
+  """Percentage of total required as deposit."""
+  depositPercentage: Decimal
+
+  """External payment ID for the deposit (e.g., from Xero)."""
+  depositPaymentId: String
+
+  """Amount paid as deposit."""
+  depositAmount: Money
+
+  """Date and time when deposit was validated."""
+  depositPaidAt: DateTime
 
   """Returns True if order has to be exempt from taxes."""
   taxExemption: Boolean!
@@ -11832,6 +11850,14 @@ type OrderLine implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """Number of variant items fulfilled."""
   quantityFulfilled: Int!
+
+  """Quantity of received stock available for this order line."""
+  warehouseStock: Int!
+
+  """
+  Maximum quantity that can be fulfilled now (min of ordered vs available minus already fulfilled).
+  """
+  canFulfillQuantity: Int!
 
   """Rate of tax applied on product variant."""
   taxRate: Float!
@@ -18035,6 +18061,45 @@ type Mutation {
     """ID of the order to refund."""
     id: ID!
   ): OrderRefund @doc(category: "Orders")
+
+  """
+  Set whether an order requires a deposit before fulfillment. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderSetDepositRequired(
+    """ID of the order."""
+    id: ID!
+
+    """Percentage of total required as deposit (0-100)."""
+    percentage: Decimal
+
+    """Whether deposit is required."""
+    required: Boolean!
+  ): OrderSetDepositRequired @doc(category: "Orders")
+
+  """
+  Attach an external payment ID as deposit for an order. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderAttachDepositPayment(
+    """ID of the order."""
+    id: ID!
+
+    """External payment ID (e.g., from Xero)."""
+    paymentId: String!
+  ): OrderAttachDepositPayment @doc(category: "Orders")
+
+  """
+  Validate deposit payment via accounting system and cache amount on order. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderValidateDeposit(
+    """ID of the order."""
+    id: ID!
+  ): OrderValidateDeposit @doc(category: "Orders")
 
   """
   Updates an order. 
@@ -26714,6 +26779,42 @@ Requires one of the following permissions: MANAGE_ORDERS.
 """
 type OrderRefund @doc(category: "Orders") {
   """A refunded order."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Set whether an order requires a deposit before fulfillment. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderSetDepositRequired @doc(category: "Orders") {
+  """Order with updated deposit settings."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Attach an external payment ID as deposit for an order. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderAttachDepositPayment @doc(category: "Orders") {
+  """Order with attached deposit payment."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Validate deposit payment via accounting system and cache amount on order. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderValidateDeposit @doc(category: "Orders") {
+  """Order with validated deposit."""
   order: Order
   orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [OrderError!]!

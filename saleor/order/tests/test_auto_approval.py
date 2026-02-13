@@ -154,3 +154,109 @@ def test_no_auto_approve_when_already_fulfilled(
 
     fulfillment.refresh_from_db()
     assert fulfillment.status == FulfillmentStatus.FULFILLED
+
+
+def test_no_auto_approve_when_proforma_not_paid(
+    full_fulfillment_awaiting_approval,
+    shipment_for_fulfillment,
+    staff_user,
+):
+    from ...invoice import InvoiceType
+    from ...invoice.models import Invoice
+
+    fulfillment = full_fulfillment_awaiting_approval
+
+    Invoice.objects.create(
+        order=fulfillment.order,
+        number="PROFORMA-TEST",
+        type=InvoiceType.PROFORMA,
+        fulfillment=fulfillment,
+    )
+
+    fulfillment.proforma_invoice_paid = False
+    fulfillment.save(update_fields=["proforma_invoice_paid"])
+
+    fulfillment.shipment = shipment_for_fulfillment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user, auto_approve=True)
+
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
+
+
+def test_no_auto_approve_when_deposit_not_allocated(
+    full_fulfillment_awaiting_approval,
+    shipment_for_fulfillment,
+    staff_user,
+):
+    fulfillment = full_fulfillment_awaiting_approval
+    order = fulfillment.order
+
+    order.deposit_required = True
+    order.save(update_fields=["deposit_required"])
+
+    fulfillment.deposit_allocated_amount = Decimal(0)
+    fulfillment.save(update_fields=["deposit_allocated_amount"])
+
+    fulfillment.shipment = shipment_for_fulfillment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user, auto_approve=True)
+
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
+
+
+def test_auto_approve_when_all_conditions_met_with_proforma_and_deposit(
+    full_fulfillment_awaiting_approval,
+    shipment_for_fulfillment,
+    staff_user,
+):
+    from ...invoice import InvoiceType
+    from ...invoice.models import Invoice
+
+    fulfillment = full_fulfillment_awaiting_approval
+    order = fulfillment.order
+
+    Invoice.objects.create(
+        order=order,
+        number="PROFORMA-TEST",
+        type=InvoiceType.PROFORMA,
+        fulfillment=fulfillment,
+    )
+
+    order.deposit_required = True
+    order.save(update_fields=["deposit_required"])
+
+    fulfillment.proforma_invoice_paid = True
+    fulfillment.deposit_allocated_amount = Decimal("100.00")
+    fulfillment.save(
+        update_fields=["proforma_invoice_paid", "deposit_allocated_amount"]
+    )
+
+    fulfillment.shipment = shipment_for_fulfillment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user, auto_approve=True)
+
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.FULFILLED

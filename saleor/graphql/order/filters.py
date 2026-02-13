@@ -429,10 +429,18 @@ class OrderFilter(DraftOrderFilter):
     checkout_ids = GlobalIDMultipleChoiceFilter(method=filter_checkouts)
     inventory_ready = django_filters.BooleanFilter(method=filter_inventory_ready)
     warehouse = GlobalIDMultipleChoiceFilter(method=filter_warehouse)
+    deposit_required = django_filters.BooleanFilter()
 
     class Meta:
         model = Order
-        fields = ["payment_status", "status", "customer", "created", "search"]
+        fields = [
+            "payment_status",
+            "status",
+            "customer",
+            "created",
+            "search",
+            "deposit_required",
+        ]
 
     def is_valid(self):
         if "ids" in self.data and "numbers" in self.data:
@@ -463,10 +471,19 @@ class FulfillmentFilter(MetadataFilterBase):
         input_class=FulfillmentStatusEnum, method=filter_fulfillment_status
     )
     warehouse = GlobalIDMultipleChoiceFilter(method=filter_fulfillment_warehouse)
+    proforma_invoice_paid = django_filters.BooleanFilter()
+    deposit_allocated = django_filters.BooleanFilter(method="filter_deposit_allocated")
 
     class Meta:
         model = Fulfillment
-        fields = ["status", "warehouse"]
+        fields = ["status", "warehouse", "proforma_invoice_paid"]
+
+    def filter_deposit_allocated(self, queryset, name, value):
+        if value is True:
+            return queryset.filter(deposit_allocated_amount__gt=0)
+        if value is False:
+            return queryset.filter(deposit_allocated_amount=0)
+        return queryset
 
 
 class OrderStatusEnumFilterInput(BaseInputObjectType):
@@ -559,6 +576,14 @@ class FulfillmentFilterInput(BaseInputObjectType):
     metadata = MetadataFilterInput(description="Filter by metadata fields.")
     warehouse = FulfillmentWarehouseFilterInput(
         description="Filter by fulfillment warehouse.",
+        required=False,
+    )
+    proforma_invoice_paid = graphene.Boolean(
+        description="Filter by whether proforma invoice has been paid.",
+        required=False,
+    )
+    deposit_allocated = graphene.Boolean(
+        description="Filter by whether deposit has been allocated.",
         required=False,
     )
 

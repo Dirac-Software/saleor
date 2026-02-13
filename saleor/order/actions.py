@@ -597,7 +597,7 @@ def order_refunded(
         webhook_events.append(WebhookEventAsyncType.ORDER_UPDATED)
 
     total_refunded = Decimal(0)
-    last_payment = payment if payment else order.get_last_payment()
+    last_payment = payment or order.get_last_payment()
     if last_payment and last_payment.charge_status in [
         ChargeStatus.PARTIALLY_REFUNDED,
         ChargeStatus.FULLY_REFUNDED,
@@ -1486,6 +1486,7 @@ def create_fulfillments(
         if unsaved_fulfillment_lines:
             FulfillmentLine.objects.bulk_create(unsaved_fulfillment_lines)
         order.refresh_from_db()
+
         if auto_approved:
             order_fulfilled(
                 fulfillments,
@@ -1499,7 +1500,10 @@ def create_fulfillments(
                 auto,
             )
         else:
+            from .proforma import generate_proforma_invoice
+
             for fulfillment in fulfillments:
+                generate_proforma_invoice(fulfillment, manager)
                 auto_create_pick_for_fulfillment(fulfillment, user)
             order_awaits_fulfillment_approval(
                 fulfillments,
@@ -2345,7 +2349,13 @@ def assign_shipment_to_fulfillment(fulfillment, shipment, user=None, auto_approv
 
 
 def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
-    """Automatically approve fulfillment if pick is completed and shipment exists.
+    """Automatically approve fulfillment if all conditions are met.
+
+    Checks 4 conditions before auto-approval:
+    1. Pick is completed (implies inventory is received)
+    2. Shipment exists
+    3. Proforma invoice is paid (if proforma invoice exists)
+    4. Deposit is allocated (if order requires deposit)
 
     Args:
         fulfillment: Fulfillment to check
@@ -2373,6 +2383,14 @@ def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
 
     if not fulfillment.shipment:
         return False
+
+    if hasattr(fulfillment, "proforma_invoice"):
+        if not fulfillment.proforma_invoice_paid:
+            return False
+
+    if fulfillment.order.deposit_required:
+        if not fulfillment.deposit_allocated:
+            return False
 
     from ..plugins.manager import get_plugins_manager
     from ..site.models import Site

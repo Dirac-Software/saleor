@@ -1025,6 +1025,130 @@ def generate_fulfillment_payload(
 
 @allow_writer()
 @traced_payload_generator
+def generate_proforma_invoice_payload(
+    fulfillment: Fulfillment, requestor: Optional["RequestorOrLazyObject"] = None
+):
+    """Generate payload for proforma invoice generation webhook.
+
+    Includes fulfillment, order, invoice, and calculated amounts.
+    """
+    from decimal import Decimal
+
+    serializer = PayloadSerializer()
+    invoice = fulfillment.proforma_invoice
+    order = fulfillment.order
+
+    # Calculate totals
+    fulfillment_total = Decimal(0)
+    lines_data = []
+    for line in fulfillment.lines.all():
+        order_line = line.order_line
+        variant = order_line.variant
+        unit_price = order_line.unit_price_gross_amount
+        unit_price_net = order_line.unit_price_net_amount
+        line_total = unit_price * line.quantity
+        line_total_net = unit_price_net * line.quantity
+        fulfillment_total += line_total
+
+        # Get both internal SKU and product code attribute
+        sku = variant.sku if variant else None
+        product_code = None
+
+        if variant and variant.product:
+            # Look for product code attribute using site settings
+            from ...site.models import Site
+
+            site = Site.objects.get_current()
+            code_attribute_slug = (
+                site.settings.invoice_product_code_attribute or "product-code"
+            )
+
+            for attr in variant.product.attributes.all():
+                if attr.attribute.slug == code_attribute_slug:
+                    product_code = (
+                        attr.values.first().name if attr.values.exists() else None
+                    )
+                    break
+
+        lines_data.append(
+            {
+                "id": str(line.id),
+                "sku": sku or "",  # Internal SKU
+                "product_code": product_code or "",  # Product Code attribute
+                "quantity": line.quantity,
+                "product_name": order_line.product_name,
+                "variant_name": order_line.variant_name,
+                "unit_price": {
+                    "gross": {
+                        "amount": str(unit_price),
+                        "currency": order.currency,
+                    },
+                    "net": {
+                        "amount": str(unit_price_net),
+                        "currency": order.currency,
+                    },
+                },
+                "total_price": {
+                    "gross": {
+                        "amount": str(line_total),
+                        "currency": order.currency,
+                    },
+                    "net": {
+                        "amount": str(line_total_net),
+                        "currency": order.currency,
+                    },
+                },
+                "tax_rate": str(order_line.tax_rate or Decimal(0)),
+            }
+        )
+
+    deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
+    proforma_amount = fulfillment_total - deposit_credit
+
+    # Build payload
+    invoice_data = serializer.serialize(
+        [invoice],
+        fields=("id", "type", "number", "created", "external_url"),
+    )
+
+    order_data = json.loads(generate_order_payload(order, with_meta=False))[0]
+
+    payload_data = {
+        "invoice": json.loads(invoice_data)[0] if invoice_data else None,
+        "fulfillment": {
+            "id": str(fulfillment.id),
+            "fulfillment_order": fulfillment.fulfillment_order,
+            "status": fulfillment.status,
+            "tracking_url": fulfillment.tracking_url,
+            "deposit_allocated": {
+                "amount": str(deposit_credit),
+                "currency": order.currency,
+            },
+            "lines": lines_data,
+        },
+        "order": order_data,
+        "calculated_amounts": {
+            "fulfillment_total": {
+                "amount": str(fulfillment_total),
+                "currency": order.currency,
+            },
+            "deposit_credit": {
+                "amount": str(deposit_credit),
+                "currency": order.currency,
+            },
+            "proforma_amount": {
+                "amount": str(proforma_amount),
+                "currency": order.currency,
+            },
+        },
+        "meta": generate_meta(requestor_data=generate_requestor(requestor)),
+    }
+
+    return json.dumps(payload_data)
+
+
+@allow_writer()
+@traced_payload_generator
 def generate_page_payload(
     page: Page, requestor: Optional["RequestorOrLazyObject"] = None
 ):

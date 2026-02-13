@@ -195,50 +195,20 @@ class OrderFulfill(BaseMutation):
         If going to WAITING_FOR_APPROVAL, we allow creating the fulfillment.
         """
         if not auto_approved:
-            # Allow creating fulfillment in WAITING_FOR_APPROVAL state
             return
-        from django.db.models import Sum
 
-        from ....warehouse.models import Allocation, AllocationSource
+        from ....warehouse.stock_utils import get_received_quantity_for_order_line
 
         for warehouse_pk, lines_data in lines_for_warehouses.items():
             for line_info in lines_data:
                 order_line = line_info["order_line"]
                 quantity_to_fulfill = line_info["quantity"]
 
-                # Get allocation for this line in this warehouse
-                allocation = Allocation.objects.filter(
-                    order_line=order_line,
-                    stock__warehouse_id=warehouse_pk,
-                ).first()
-
-                if not allocation:
-                    continue
-
-                # Get all allocation sources with their received quantities
-                allocation_sources = AllocationSource.objects.filter(
-                    allocation=allocation
-                ).annotate(
-                    poi_received=Sum(
-                        "purchase_order_item__receipt_lines__quantity_received"
-                    )
+                total_received = get_received_quantity_for_order_line(
+                    order_line, warehouse_id=warehouse_pk
                 )
 
-                # Receipt validation only applies to owned warehouses (with AllocationSources)
-                if not allocation_sources.exists():
-                    continue
-
-                total_received = 0
-                has_unreceived_sources = False
-
-                for source in allocation_sources:
-                    if source.poi_received is None or source.poi_received <= 0:
-                        has_unreceived_sources = True
-                        break
-                    total_received += source.poi_received
-
-                # If there are sources with NO receipts at all, it's an unreceived stock error
-                if has_unreceived_sources:
+                if total_received == 0:
                     order_line_global_id = graphene.Node.to_global_id(
                         "OrderLine", order_line.pk
                     )
@@ -253,7 +223,6 @@ class OrderFulfill(BaseMutation):
                         }
                     )
 
-                # If total received is insufficient, it's a normal insufficient stock error
                 if total_received < quantity_to_fulfill:
                     order_line_global_id = graphene.Node.to_global_id(
                         "OrderLine", order_line.pk
@@ -287,6 +256,18 @@ class OrderFulfill(BaseMutation):
                     )
                 }
             )
+
+        if order.deposit_required:
+            if not order.deposit_threshold_met:
+                raise ValidationError(
+                    {
+                        "order": ValidationError(
+                            "Cannot fulfill order: deposit threshold not met. "
+                            f"Required: {order.deposit_percentage}% of order total.",
+                            code=OrderErrorCode.INVALID.value,
+                        )
+                    }
+                )
 
         lines = data["lines"]
 

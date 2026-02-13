@@ -887,6 +887,8 @@ class BasePlugin:
     # Webhook-related functionality will be moved from the plugin to core modules.
     invoice_sent: Callable[["Invoice", str, Any], Any]
 
+    validate_deposit_payment: Callable[[str, "Order"], dict[str, Any]]
+
     list_payment_sources: Callable[[str, Any], list["CustomerSource"]]
 
     # Note: This method is deprecated and will be removed in a future release.

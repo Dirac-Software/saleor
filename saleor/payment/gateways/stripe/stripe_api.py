@@ -140,7 +140,7 @@ def create_payment_intent(
     if payment_method_id and customer:
         additional_params["payment_method"] = payment_method_id
 
-        additional_params["off_session"] = off_session if off_session else False
+        additional_params["off_session"] = off_session or False
         if off_session:
             additional_params["confirm"] = True
 
