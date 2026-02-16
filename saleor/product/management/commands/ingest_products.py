@@ -19,6 +19,7 @@ from saleor.product.ingestion import (
     IngestConfig,
     IngestionResult,
     MinimumOrderQuantityRequired,
+    OwnedWarehouseIngestionError,
     PriceInterpretationConfirmationRequired,
     SpreadsheetColumnMapping,
     StockUpdateModeRequired,
@@ -143,6 +144,10 @@ class Command(BaseCommand):
                 # Success! Display results and exit
                 self._display_results(result)
                 break
+
+            except OwnedWarehouseIngestionError as e:
+                # Cannot ingest to owned warehouses - raise immediately
+                raise CommandError(str(e)) from e
 
             except MinimumOrderQuantityRequired as e:
                 # Prompt for MOQ
