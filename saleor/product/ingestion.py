@@ -76,6 +76,10 @@ class MissingRequiredFields(SheetIntegrityError):
     """One or more rows have missing required fields."""
 
 
+class OwnedWarehouseIngestionError(SheetIntegrityError):
+    """Attempting to ingest products to an owned warehouse."""
+
+
 class InteractiveDecisionRequired(Exception):
     """Base exception for decisions that can be made interactively or via config.
 
@@ -313,7 +317,7 @@ def parse_sizes_and_qty(
     """Parse sizes and quantities from strings.
 
     Uses regex to find all size[qty] patterns, regardless of separator.
-    Supports: "6.5[1], 7[1]" or "S[5] M[10] L[3]" or any mix of separators.
+    Supports: "6.5[1], 7[1]" or "S[5] M[10] L[3]" or "5 [2], 4 [10]" (with spaces).
 
     Args:
         sizes_str: String containing sizes and quantities
@@ -329,16 +333,16 @@ def parse_sizes_and_qty(
     if not sizes_str:
         return (), ()
 
-    # Find all patterns of: anything[digits]
-    # Matches "8[5]", "S[10]", "6.5[3]", etc.
-    pattern = r"([^\[\],\s]+)\[(\d+)\]"
+    # Find all patterns of: anything[digits] with optional whitespace before bracket
+    # Matches "8[5]", "S[10]", "6.5[3]", "5 [2]", etc.
+    pattern = r"([^\[\],]+?)\s*\[(\d+)\]"
     matches = re.findall(pattern, sizes_str)
 
     if not matches:
         error_msg = (
             f"No valid size[qty] patterns found in: '{sizes_str}'"
             + (f" in product {product_code}" if product_code else "")
-            + ". Expected format: 'size[quantity]' (e.g., '8[5], 9[3]' or 'S[5] M[10]')"
+            + ". Expected format: 'size[quantity]' (e.g., '8[5], 9[3]' or 'S[5] M[10]' or '5 [2], 4 [10]')"
         )
         raise SizeQtyUnparseable(error_msg)
 
@@ -521,6 +525,32 @@ def get_products_by_code_and_brand(
     return code_brand_to_product
 
 
+def validate_warehouse_for_ingestion(warehouse: Warehouse) -> None:
+    """Validate that warehouse can accept product ingestion.
+
+    Product ingestion is only allowed for non-owned warehouses (is_owned=False).
+    Owned warehouses (is_owned=True) have inventory tracked at the unit level
+    and must use purchase orders for stock management.
+
+    Args:
+        warehouse: Warehouse to validate
+
+    Raises:
+        OwnedWarehouseIngestionError: If warehouse is owned (is_owned=True)
+
+    """
+    if warehouse.is_owned:
+        raise OwnedWarehouseIngestionError(
+            f"Cannot ingest products to owned warehouse '{warehouse.name}'. "
+            f"Owned warehouses track inventory at the unit level and must use "
+            f"purchase orders for stock management. Only non-owned warehouses "
+            f"(is_owned=False) can accept product ingestion via this command."
+        )
+    logger.info(
+        "Warehouse '%s' validated for ingestion (is_owned=False)", warehouse.name
+    )
+
+
 def create_warehouse_with_address(
     warehouse_name: str, address_string: str, country_code: str
 ) -> Warehouse:
@@ -556,11 +586,12 @@ def create_warehouse_with_address(
         country=country_code,
     )
 
-    # Create warehouse
+    # Create warehouse (default is_owned=False for new warehouses)
     warehouse = Warehouse.objects.create(
         name=warehouse_name,
         slug=warehouse_slug,
         address=address,
+        is_owned=False,
     )
 
     logger.info("Created warehouse: %s (slug: %s)", warehouse_name, warehouse_slug)
@@ -1701,11 +1732,11 @@ def create_product_media(product: "Product", image_url: str) -> "ProductMedia | 
         response.raise_for_status()
         image_data = response.content
 
-        # Create ContentFile from image bytes
-        image_file = ContentFile(image_data)
-
         # Extract filename from URL or use product slug
         filename = image_url.split("/")[-1] or f"{product.slug}.jpg"
+
+        # Create ContentFile with name (required by Django)
+        image_file = ContentFile(image_data, name=filename)
 
         # Create ProductMedia
         media = ProductMedia.objects.create(
@@ -1713,9 +1744,6 @@ def create_product_media(product: "Product", image_url: str) -> "ProductMedia | 
             image=image_file,
             alt=product.name,
         )
-
-        # Save the file with proper filename
-        media.image.save(filename, image_file, save=True)
 
         logger.info("Created product media for %s from %s", product.name, image_url)
         return media
@@ -2302,6 +2330,9 @@ def ingest_products_from_excel(
     try:
         warehouse = Warehouse.objects.get(slug=warehouse_slug)
         logger.info("Using existing warehouse '%s'", warehouse.name)
+
+        # Validate warehouse for ingestion (raises exception if owned)
+        validate_warehouse_for_ingestion(warehouse)
     except Warehouse.DoesNotExist:
         # Create address first (required for warehouse)
         from saleor.account.models import Address
@@ -2312,12 +2343,16 @@ def ingest_products_from_excel(
             country=config.warehouse_country,
         )
 
-        # Now create warehouse with address
+        # Now create warehouse with address (default is_owned=False)
         warehouse = Warehouse.objects.create(
             slug=warehouse_slug,
             name=config.warehouse_name,
             address=address,
+            is_owned=False,
         )
+
+        # Validate warehouse for ingestion (raises exception if owned)
+        validate_warehouse_for_ingestion(warehouse)
 
         # Assign to all channels
         channel_count = assign_warehouse_to_all_channels(warehouse)
