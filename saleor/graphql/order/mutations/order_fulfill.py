@@ -191,15 +191,20 @@ class OrderFulfill(BaseMutation):
     def check_unreceived_stock(cls, lines_for_warehouses: dict, auto_approved: bool):
         """Check if all stock for fulfillment has been physically received.
 
-        Only enforced when auto_approved=True (FULFILLED status).
-        If going to WAITING_FOR_APPROVAL, we allow creating the fulfillment.
+        Only enforced for OWNED warehouses when auto_approved=True (FULFILLED status).
+        Non-owned warehouses are exempt from this validation.
         """
         if not auto_approved:
             return
 
+        from ....warehouse.models import Warehouse
         from ....warehouse.stock_utils import get_received_quantity_for_order_line
 
         for warehouse_pk, lines_data in lines_for_warehouses.items():
+            warehouse = Warehouse.objects.get(pk=warehouse_pk)
+            if not warehouse.is_owned:
+                continue  # Skip validation for non-owned warehouses
+
             for line_info in lines_data:
                 order_line = line_info["order_line"]
                 quantity_to_fulfill = line_info["quantity"]
@@ -311,7 +316,7 @@ class OrderFulfill(BaseMutation):
                         {"order_line": order_line, "quantity": stock["quantity"]}
                     )
 
-        # Check if all stock has been physically received (only for auto-approved fulfillments)
+        # Check if all stock has been physically received (only for owned warehouses)
         auto_approved = site.settings.fulfillment_auto_approve
         cls.check_unreceived_stock(lines_for_warehouses, auto_approved)
 

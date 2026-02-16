@@ -1063,11 +1063,9 @@ def generate_proforma_invoice_payload(
                 site.settings.invoice_product_code_attribute or "product-code"
             )
 
-            for attr in variant.product.attributes.all():
-                if attr.attribute.slug == code_attribute_slug:
-                    product_code = (
-                        attr.values.first().name if attr.values.exists() else None
-                    )
+            for attr in variant.product.attributevalues.all():
+                if attr.value.attribute.slug == code_attribute_slug:
+                    product_code = attr.value.name if attr.value else None
                     break
 
         lines_data.append(

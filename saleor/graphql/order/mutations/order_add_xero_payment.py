@@ -94,7 +94,7 @@ class OrderAddXeroPayment(BaseMutation):
             )
 
     @classmethod
-    def perform_mutation(
+    def perform_mutation(  # type: ignore[override]
         cls,
         _root,
         info: ResolveInfo,

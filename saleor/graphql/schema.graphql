@@ -11467,13 +11467,23 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Percentage of total required as deposit."""
   depositPercentage: Decimal
 
-  """External payment ID for the deposit (e.g., from Xero)."""
-  depositPaymentId: String
+  """Deprecated: Use payments with gateway='xero' instead."""
+  depositPaymentId: String @deprecated(reason: "Use payments field filtered by gateway='xero' and metadata.is_deposit=true.")
 
-  """Amount paid as deposit."""
-  depositAmount: Money
+  """Deprecated: Use totalDepositPaid instead."""
+  depositAmount: Money @deprecated(reason: "Use totalDepositPaid field to get total from Xero deposit payments.")
 
-  """Date and time when deposit was validated."""
+  """
+  Total amount paid from all Xero deposit payments (gateway='xero', metadata.is_deposit=true).
+  """
+  totalDepositPaid: Decimal!
+
+  """
+  Whether the deposit threshold has been met (totalDepositPaid >= depositPercentage * total).
+  """
+  depositThresholdMet: Boolean!
+
+  """Date and time when deposit threshold was met."""
   depositPaidAt: DateTime
 
   """Returns True if order has to be exempt from taxes."""
@@ -11771,6 +11781,23 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
   Indicates if all required inventory from purchase orders has been received in the warehouse. True when all allocations have matching allocation sources, meaning the purchased goods have physically arrived.
   """
   hasInventoryReceived: Boolean!
+
+  """Proforma invoice associated with this fulfillment."""
+  proformaInvoice: Invoice
+
+  """Indicates if the proforma invoice has been paid."""
+  proformaInvoicePaid: Boolean!
+
+  """Date and time when proforma invoice was marked as paid."""
+  proformaInvoicePaidAt: DateTime
+
+  """Indicates if order deposits have been allocated to this fulfillment."""
+  depositAllocated: Boolean!
+
+  """
+  Indicates if this fulfillment can automatically transition to FULFILLED status. True when proforma invoice is paid, deposit is allocated, and inventory is received.
+  """
+  canTransitionToFulfilled: Boolean!
 }
 
 enum FulfillmentStatus @doc(category: "Orders") {
@@ -13871,6 +13898,7 @@ input OrderFilterInput @doc(category: "Orders") {
   customer: String
   created: DateRangeInput
   search: String
+  depositRequired: Boolean
   metadata: [MetadataFilter!]
   channels: [ID!]
   authorizeStatus: [OrderAuthorizeStatusEnum!]
@@ -14078,6 +14106,12 @@ input FulfillmentFilterInput @doc(category: "Orders") {
 
   """Filter by fulfillment warehouse."""
   warehouse: FulfillmentWarehouseFilterInput
+
+  """Filter by whether proforma invoice has been paid."""
+  proformaInvoicePaid: Boolean
+
+  """Filter by whether deposit has been allocated."""
+  depositAllocated: Boolean
 }
 
 """Filter by fulfillment status."""
@@ -14316,7 +14350,9 @@ type FulfillmentCountableEdge @doc(category: "Orders") {
 input FulfillmentQueryFilterInput @doc(category: "Orders") {
   status: [FulfillmentStatus!]
   warehouse: [ID!]
+  proformaInvoicePaid: Boolean
   metadata: [MetadataFilter!]
+  depositAllocated: Boolean
 }
 
 type MenuCountableConnection @doc(category: "Menu") {
@@ -17890,6 +17926,19 @@ type Mutation {
   ): FulfillmentReturnProducts @doc(category: "Orders")
 
   """
+  Mark a fulfillment's proforma invoice as paid. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderFulfillmentMarkProformaPaid(
+    """ID of the fulfillment to mark proforma invoice as paid."""
+    id: ID!
+
+    """Timestamp when proforma invoice was paid. Defaults to now."""
+    paidAt: DateTime
+  ): FulfillmentMarkProformaInvoicePaid @doc(category: "Orders")
+
+  """
   Adds granted refund to the order. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -18079,27 +18128,26 @@ type Mutation {
   ): OrderSetDepositRequired @doc(category: "Orders")
 
   """
-  Attach an external payment ID as deposit for an order. 
+  Add a Xero payment to an order. Replaces manual 'mark as paid' functionality. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
   """
-  orderAttachDepositPayment(
-    """ID of the order."""
-    id: ID!
+  orderAddXeroPayment(
+    """Amount of this payment."""
+    amount: Decimal!
 
-    """External payment ID (e.g., from Xero)."""
-    paymentId: String!
-  ): OrderAttachDepositPayment @doc(category: "Orders")
+    """Whether this is a deposit payment."""
+    isDeposit: Boolean = false
 
-  """
-  Validate deposit payment via accounting system and cache amount on order. 
-  
-  Requires one of the following permissions: MANAGE_ORDERS.
-  """
-  orderValidateDeposit(
     """ID of the order."""
-    id: ID!
-  ): OrderValidateDeposit @doc(category: "Orders")
+    orderId: ID!
+
+    """Timestamp when payment was made. Defaults to now."""
+    paidAt: DateTime
+
+    """Xero payment ID (Invoice.PaymentID)."""
+    xeroPaymentId: String!
+  ): OrderAddXeroPayment @doc(category: "Orders")
 
   """
   Updates an order. 
@@ -26343,6 +26391,18 @@ input OrderReturnFulfillmentLineInput @doc(category: "Orders") {
 }
 
 """
+Mark a fulfillment's proforma invoice as paid. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type FulfillmentMarkProformaInvoicePaid @doc(category: "Orders") {
+  """Updated fulfillment."""
+  fulfillment: Fulfillment
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
 Adds granted refund to the order. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
@@ -26797,24 +26857,15 @@ type OrderSetDepositRequired @doc(category: "Orders") {
 }
 
 """
-Attach an external payment ID as deposit for an order. 
+Add a Xero payment to an order. Replaces manual 'mark as paid' functionality. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
 """
-type OrderAttachDepositPayment @doc(category: "Orders") {
-  """Order with attached deposit payment."""
-  order: Order
-  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [OrderError!]!
-}
+type OrderAddXeroPayment @doc(category: "Orders") {
+  """Created Xero payment."""
+  payment: Payment
 
-"""
-Validate deposit payment via accounting system and cache amount on order. 
-
-Requires one of the following permissions: MANAGE_ORDERS.
-"""
-type OrderValidateDeposit @doc(category: "Orders") {
-  """Order with validated deposit."""
+  """Order with added payment."""
   order: Order
   orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [OrderError!]!

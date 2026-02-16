@@ -48,7 +48,7 @@ class OrderSetDepositRequired(BaseMutation):
                 )
 
     @classmethod
-    def perform_mutation(
+    def perform_mutation(  # type: ignore[override]
         cls, _root, info: ResolveInfo, /, *, id, required, percentage=None
     ):
         order = cls.get_node_or_error(info, id, only_type=Order)
