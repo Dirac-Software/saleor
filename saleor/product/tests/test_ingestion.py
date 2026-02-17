@@ -258,6 +258,23 @@ def test_get_products_by_code_and_brand_no_attribute(simple_product):
         get_products_by_code_and_brand(["TEST-001"])
 
 
+def test_get_products_by_code_and_brand_no_brand_attribute(
+    simple_product, product_code_attribute
+):
+    Attribute.objects.filter(name="Brand").delete()
+
+    with pytest.raises(MissingDatabaseSetup, match="Brand attribute not found"):
+        get_products_by_code_and_brand(["TEST-001"])
+
+
+def test_get_products_by_code_and_brand_no_match(
+    simple_product, product_code_attribute, brand_attribute
+):
+    result = get_products_by_code_and_brand(["DOES-NOT-EXIST"])
+
+    assert result == {}
+
+
 @pytest.fixture
 def size_attribute():
     """Create Size attribute fixture."""
@@ -773,3 +790,78 @@ def test_ingest_products_sets_search_index_dirty(db, non_owned_warehouse, channe
 
         if os.path.exists(excel_path):
             os.unlink(excel_path)
+
+
+def test_create_product_slug_includes_product_code(db):
+    from django.utils.text import slugify
+
+    from saleor.product.ingestion import ProductData, create_product
+    from saleor.product.models import Category, ProductType
+
+    product_type = ProductType.objects.create(
+        name="Apparel", slug="apparel-type", has_variants=True
+    )
+    category = Category.objects.create(name="Apparel", slug="apparel")
+
+    data = ProductData(
+        product_code="HY4520",
+        description="aSMC TST LS HO",
+        category="Apparel",
+        sizes=("S",),
+        qty=(10,),
+        brand="Adidas",
+        rrp=None,
+        price=23.69,
+        currency="GBP",
+        weight_kg=None,
+        image_url=None,
+    )
+
+    product = create_product(data, product_type, category)
+
+    assert product.slug == slugify("asmc-tst-ls-ho-hy4520")
+
+
+def test_create_product_same_description_different_codes_no_slug_collision(db):
+    from saleor.product.ingestion import ProductData, create_product
+    from saleor.product.models import Category, Product, ProductType
+
+    product_type = ProductType.objects.create(
+        name="Apparel", slug="apparel-type", has_variants=True
+    )
+    category = Category.objects.create(name="Apparel", slug="apparel")
+
+    shared_description = "aSMC TST LS HO"
+
+    data_a = ProductData(
+        product_code="HY4520",
+        description=shared_description,
+        category="Apparel",
+        sizes=("S",),
+        qty=(10,),
+        brand="Adidas",
+        rrp=None,
+        price=23.69,
+        currency="GBP",
+        weight_kg=None,
+        image_url=None,
+    )
+    data_b = ProductData(
+        product_code="HY1129",
+        description=shared_description,
+        category="Apparel",
+        sizes=("M",),
+        qty=(20,),
+        brand="Adidas",
+        rrp=None,
+        price=23.59,
+        currency="GBP",
+        weight_kg=None,
+        image_url=None,
+    )
+
+    product_a = create_product(data_a, product_type, category)
+    product_b = create_product(data_b, product_type, category)
+
+    assert product_a.slug != product_b.slug
+    assert Product.objects.count() == 2

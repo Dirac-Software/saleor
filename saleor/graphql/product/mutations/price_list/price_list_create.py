@@ -58,8 +58,14 @@ class PriceListCreateInput(BaseInputObjectType):
         required=True,
         description="Warehouse this price list belongs to.",
     )
+    name = graphene.String(
+        description="Human-readable name for the price list.",
+    )
+    channel_ids = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="Channels this price list should be active in. At least one required.",
+    )
     file = Upload(
-        required=True,
         description="Excel file (.xlsx or .xls) containing the price list.",
     )
     sheet_name = graphene.String(
@@ -111,32 +117,58 @@ class PriceListCreate(BaseMutation):
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
         inp = data["input"]
 
-        warehouse = cls.get_node_or_error(
-            info, inp["warehouse_id"], field="warehouse_id", only_type="Warehouse"
-        )
+        errors = {}
 
-        file_ref = inp["file"]
+        channel_ids = inp.get("channel_ids") or []
+        if not channel_ids:
+            errors["channel_ids"] = ValidationError(
+                "At least one channel is required.",
+                code=ProductErrorCode.REQUIRED.value,
+            )
+
+        default_currency = inp.get("default_currency") or ""
+        if not default_currency:
+            errors["default_currency"] = ValidationError(
+                "Currency is required.",
+                code=ProductErrorCode.REQUIRED.value,
+            )
+
+        channels = []
+        if channel_ids and default_currency and "channel_ids" not in errors:
+            channels = [
+                cls.get_node_or_error(info, cid, field="channel_ids", only_type="Channel")
+                for cid in channel_ids
+            ]
+            mismatched_channels = [
+                ch for ch in channels if ch.currency_code != default_currency
+            ]
+            if mismatched_channels:
+                errors["channel_ids"] = ValidationError(
+                    f"All channels must use the price list currency ({default_currency}).",
+                    code=ProductErrorCode.INVALID.value,
+                )
+
+        file_ref = inp.get("file")
         file = (
             info.context.FILES.get(file_ref) if isinstance(file_ref, str) else file_ref
         )
         if not file:
-            raise ValidationError(
-                {
-                    "file": ValidationError(
-                        "No file provided.",
-                        code=ProductErrorCode.REQUIRED.value,
-                    )
-                }
+            errors["file"] = ValidationError(
+                "No file provided.",
+                code=ProductErrorCode.REQUIRED.value,
             )
-        if not file.name.lower().endswith((".xlsx", ".xls")):
-            raise ValidationError(
-                {
-                    "file": ValidationError(
-                        "File must be an Excel file (.xlsx or .xls).",
-                        code=ProductErrorCode.INVALID.value,
-                    )
-                }
+        elif not file.name.lower().endswith((".xlsx", ".xls")):
+            errors["file"] = ValidationError(
+                "File must be an Excel file (.xlsx or .xls).",
+                code=ProductErrorCode.INVALID.value,
             )
+
+        if errors:
+            raise ValidationError(errors)
+
+        warehouse = cls.get_node_or_error(
+            info, inp["warehouse_id"], field="warehouse_id", only_type="Warehouse"
+        )
 
         column_map_input = inp.get("column_map") or {}
         column_map = {
@@ -147,16 +179,18 @@ class PriceListCreate(BaseMutation):
 
         price_list = PriceList.objects.create(
             warehouse=warehouse,
+            name=inp.get("name") or "",
             excel_file=file,
             google_drive_url=inp.get("google_drive_url") or "",
             config={
                 "sheet_name": inp.get("sheet_name", "Sheet1"),
                 "header_row": inp.get("header_row", 0),
                 "column_map": column_map,
-                "default_currency": inp["default_currency"],
+                "default_currency": default_currency,
             },
         )
 
+        price_list.channels.set(channels)
         price_list.process()
 
         return PriceListCreate(price_list=price_list)

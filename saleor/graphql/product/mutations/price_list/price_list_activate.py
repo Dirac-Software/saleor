@@ -1,8 +1,10 @@
 """PriceList activate mutation."""
 
 import graphene
+from django.core.exceptions import ValidationError
 
 from .....permission.enums import ProductPermissions
+from .....product.error_codes import ProductErrorCode
 from ....core import ResolveInfo
 from ....core.doc_category import DOC_CATEGORY_PRODUCTS
 from ....core.mutations import BaseMutation
@@ -34,5 +36,26 @@ class PriceListActivate(BaseMutation):
         price_list = cls.get_node_or_error(
             info, data["id"], field="id", only_type="PriceList"
         )
+
+        if not price_list.processing_completed_at:
+            raise ValidationError(
+                {
+                    "id": ValidationError(
+                        "Price list has not completed processing.",
+                        code=ProductErrorCode.INVALID.value,
+                    )
+                }
+            )
+
+        if price_list.warehouse.is_owned:
+            raise ValidationError(
+                {
+                    "id": ValidationError(
+                        "Cannot activate a price list for an owned warehouse.",
+                        code=ProductErrorCode.OWNED_WAREHOUSE.value,
+                    )
+                }
+            )
+
         price_list.activate()
         return PriceListActivate(price_list=price_list)

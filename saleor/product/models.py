@@ -792,6 +792,12 @@ class PriceList(models.Model):
         on_delete=models.PROTECT,
         related_name="price_lists",
     )
+    name = models.CharField(max_length=255, blank=True, default="")
+    channels = models.ManyToManyField(
+        "channel.Channel",
+        blank=True,
+        related_name="price_lists",
+    )
     excel_file = models.FileField(upload_to="price_lists/")
     google_drive_url = models.URLField(blank=True, default="")
     config = models.JSONField(default=dict)
