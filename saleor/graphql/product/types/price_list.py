@@ -1,12 +1,21 @@
 import graphene
+from django.core.signing import TimestampSigner
+from django.urls import reverse
 from graphene import relay
+from graphql import ResolveInfo
 
 from ....product import models
 from ...core.connection import CountableConnection, create_connection_slice
+from ...core.context import ChannelContext, get_database_connection_name
 from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.fields import ConnectionField, JSONString
 from ...core.scalars import DateTime
 from ...core.types import ModelObjectType
+from saleor.core.utils import build_absolute_uri
+
+
+class PriceListItemFilterInput(graphene.InputObjectType):
+    is_valid = graphene.Boolean(description="Filter items by validation status.")
 
 
 class PriceListItem(ModelObjectType[models.PriceListItem]):
@@ -38,6 +47,13 @@ class PriceListItem(ModelObjectType[models.PriceListItem]):
         description="Matched Saleor product, if resolved.",
     )
 
+    @staticmethod
+    def resolve_product(root: models.PriceListItem, info):
+        if root.product_id is None:
+            return None
+        product = root.product
+        return ChannelContext(node=product, channel_slug=None)
+
     class Meta:
         description = "A single row parsed from a price list Excel file."
         interfaces = [relay.Node]
@@ -52,6 +68,7 @@ class PriceListItemCountableConnection(CountableConnection):
 
 class PriceList(ModelObjectType[models.PriceList]):
     id = graphene.GlobalID(required=True, description="The ID of the price list.")
+    name = graphene.String(required=True, description="Human-readable name of the price list.")
     status = graphene.String(
         required=True, description="Current status: ACTIVE or INACTIVE."
     )
@@ -75,9 +92,21 @@ class PriceList(ModelObjectType[models.PriceList]):
         lambda: PriceList,
         description="The price list that replaced this one, if any.",
     )
+    channels = graphene.List(
+        graphene.NonNull("saleor.graphql.channel.types.Channel"),
+        required=True,
+        description="Channels this price list is active in.",
+    )
+    excel_file_url = graphene.String(
+        description="URL to download the original Excel file."
+    )
     items = ConnectionField(
         PriceListItemCountableConnection,
-        description="All items in this price list.",
+        filter=graphene.Argument(
+            PriceListItemFilterInput,
+            description="Filter items by validation status.",
+        ),
+        description="Items in this price list.",
     )
     item_count = graphene.Int(
         required=True, description="Total number of items in this price list."
@@ -94,8 +123,29 @@ class PriceList(ModelObjectType[models.PriceList]):
         model = models.PriceList
 
     @staticmethod
+    def resolve_status(root: models.PriceList, info):
+        return root.status.upper()
+
+    @staticmethod
+    def resolve_excel_file_url(root: models.PriceList, _info: ResolveInfo):
+        if not root.excel_file:
+            return None
+        signed_id = TimestampSigner().sign(str(root.pk))
+        path = reverse("serve-price-list", kwargs={"pk": root.pk, "signed_id": signed_id})
+        return build_absolute_uri(path)
+
+    @staticmethod
+    def resolve_channels(root: models.PriceList, info):
+        db = get_database_connection_name(info.context)
+        return root.channels.using(db).all()
+
+    @staticmethod
     def resolve_items(root: models.PriceList, info, **kwargs):
-        qs = root.items.select_related("product").all()
+        db = get_database_connection_name(info.context)
+        qs = root.items.using(db).select_related("product").all()
+        filter_input = kwargs.pop("filter", None)
+        if filter_input and filter_input.get("is_valid") is not None:
+            qs = qs.filter(is_valid=filter_input["is_valid"])
         return create_connection_slice(
             qs, info, kwargs, PriceListItemCountableConnection
         )
@@ -105,13 +155,15 @@ class PriceList(ModelObjectType[models.PriceList]):
         # Use pre-computed annotation when available (avoids N+1 in list queries)
         if hasattr(root, "_item_count"):
             return root._item_count
-        return root.items.count()
+        db = get_database_connection_name(info.context)
+        return root.items.using(db).count()
 
     @staticmethod
     def resolve_valid_item_count(root: models.PriceList, info):
         if hasattr(root, "_valid_item_count"):
             return root._valid_item_count
-        return root.items.filter(is_valid=True).count()
+        db = get_database_connection_name(info.context)
+        return root.items.using(db).filter(is_valid=True).count()
 
     @staticmethod
     def resolve_warehouse(root: models.PriceList, info):

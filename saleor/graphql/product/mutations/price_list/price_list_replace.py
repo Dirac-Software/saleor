@@ -1,8 +1,14 @@
 """PriceList replace mutation."""
 
 import graphene
+from django.core.exceptions import ValidationError
 
 from .....permission.enums import ProductPermissions
+from .....product.error_codes import ProductErrorCode
+from .....product.tasks import (
+    _count_draft_unconfirmed_orders,
+    replace_price_list_task,
+)
 from ....core import ResolveInfo
 from ....core.doc_category import DOC_CATEGORY_PRODUCTS
 from ....core.mutations import BaseMutation
@@ -27,6 +33,13 @@ class PriceListReplace(BaseMutation):
         new_price_list_id = graphene.ID(
             required=True,
             description="ID of the processed price list that will become active.",
+        )
+        force = graphene.Boolean(
+            description=(
+                "Proceed even if draft/unconfirmed orders may have allocations "
+                "affected by this replacement."
+            ),
+            default_value=False,
         )
 
     class Meta:
@@ -53,5 +66,20 @@ class PriceListReplace(BaseMutation):
             field="new_price_list_id",
             only_type="PriceList",
         )
-        old_pl.replace_with(new_pl)
+
+        if not data.get("force"):
+            affected_count = _count_draft_unconfirmed_orders(old_pl.warehouse)
+            if affected_count:
+                raise ValidationError(
+                    {
+                        "force": ValidationError(
+                            f"{affected_count} draft/unconfirmed order(s) may have "
+                            "allocations affected by this replacement. "
+                            "Pass force=true to proceed.",
+                            code=ProductErrorCode.ORDERS_REQUIRE_AMENDMENT.value,
+                        )
+                    }
+                )
+
+        replace_price_list_task.delay(old_pl.pk, new_pl.pk)
         return PriceListReplace(old_price_list=old_pl, new_price_list=new_pl)

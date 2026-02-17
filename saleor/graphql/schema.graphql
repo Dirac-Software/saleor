@@ -13506,6 +13506,9 @@ type PriceList implements Node {
   """The ID of the price list."""
   id: ID!
 
+  """Human-readable name of the price list."""
+  name: String!
+
   """Current status: ACTIVE or INACTIVE."""
   status: String!
 
@@ -13536,8 +13539,17 @@ type PriceList implements Node {
   """The price list that replaced this one, if any."""
   replacedBy: PriceList
 
-  """All items in this price list."""
+  """Channels this price list is active in."""
+  channels: [Channel!]!
+
+  """URL to download the original Excel file."""
+  excelFileUrl: String
+
+  """Items in this price list."""
   items(
+    """Filter items by validation status."""
+    filter: PriceListItemFilterInput
+
     """Return the elements in the list that come before the specified cursor."""
     before: String
 
@@ -13631,6 +13643,11 @@ type PriceListItem implements Node {
 
   """Matched Saleor product, if resolved."""
   product: Product
+}
+
+input PriceListItemFilterInput {
+  """Filter items by validation status."""
+  isValid: Boolean
 }
 
 type PriceListCountableConnection @doc(category: "Products") {
@@ -17310,6 +17327,11 @@ type Mutation {
   Requires one of the following permissions: MANAGE_PRODUCTS.
   """
   priceListDeactivate(
+    """
+    Proceed even if draft/unconfirmed orders have allocations that will be removed.
+    """
+    force: Boolean = false
+
     """ID of the price list to deactivate."""
     id: ID!
   ): PriceListDeactivate @doc(category: "Products")
@@ -17320,6 +17342,11 @@ type Mutation {
   Requires one of the following permissions: MANAGE_PRODUCTS.
   """
   priceListReplace(
+    """
+    Proceed even if draft/unconfirmed orders may have allocations affected by this replacement.
+    """
+    force: Boolean = false
+
     """ID of the processed price list that will become active."""
     newPriceListId: ID!
 
@@ -21210,6 +21237,11 @@ input WarehouseCreateInput @doc(category: "Products") {
 
   """Determine if the warehouse is owned by Dirac."""
   isOwned: Boolean
+
+  """
+  When true, automatically assign the warehouse to all channels and shipping zones. Defaults to true for non-owned warehouses. Has no effect on owned warehouses.
+  """
+  assignToAllChannelsAndZones: Boolean
 }
 
 """
@@ -22629,6 +22661,7 @@ enum ProductErrorCode @doc(category: "Products") {
   COLUMN_MAPPING_INVALID
   FILE_NOT_FOUND
   FILE_EXPIRED
+  ORDERS_REQUIRE_AMENDMENT
 }
 
 input ProductAttributeAssignInput @doc(category: "Products") {
@@ -24731,8 +24764,14 @@ input PriceListCreateInput @doc(category: "Products") {
   """Warehouse this price list belongs to."""
   warehouseId: ID!
 
+  """Human-readable name for the price list."""
+  name: String
+
+  """Channels this price list should be active in. At least one required."""
+  channelIds: [ID!]
+
   """Excel file (.xlsx or .xls) containing the price list."""
-  file: Upload!
+  file: Upload
 
   """Name of the sheet to read from the Excel file."""
   sheetName: String = "Sheet1"

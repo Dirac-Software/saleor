@@ -394,8 +394,10 @@ class ProductQueries(graphene.ObjectType):
         from ...product.models import PriceList as PriceListModel
 
         _, pk = from_global_id_or_error(id, PriceList)
+        db = get_database_connection_name(info.context)
         return (
-            PriceListModel.objects.select_related("replaced_by")
+            PriceListModel.objects.using(db)
+            .select_related("replaced_by")
             .annotate(
                 _item_count=Count("items"),
                 _valid_item_count=Count("items", filter=Q(items__is_valid=True)),
@@ -412,9 +414,14 @@ class ProductQueries(graphene.ObjectType):
 
         from ...product.models import PriceList as PriceListModel
 
-        qs = PriceListModel.objects.select_related("replaced_by").annotate(
-            _item_count=Count("items"),
-            _valid_item_count=Count("items", filter=Q(items__is_valid=True)),
+        db = get_database_connection_name(info.context)
+        qs = (
+            PriceListModel.objects.using(db)
+            .select_related("replaced_by")
+            .annotate(
+                _item_count=Count("items"),
+                _valid_item_count=Count("items", filter=Q(items__is_valid=True)),
+            )
         )
         if status:
             qs = qs.filter(status=status)

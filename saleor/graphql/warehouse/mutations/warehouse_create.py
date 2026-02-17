@@ -1,4 +1,8 @@
 from ....permission.enums import ProductPermissions
+from ....product.ingestion import (
+    assign_warehouse_to_all_channels,
+    assign_warehouse_to_all_shipping_zones,
+)
 from ....warehouse import models
 from ...account.i18n import I18nMixin
 from ...account.mixins import AddressMetadataMixin
@@ -37,6 +41,12 @@ class WarehouseCreate(
     def post_save_action(cls, info: ResolveInfo, instance, cleaned_input):
         manager = get_plugin_manager_promise(info.context).get()
         cls.call_event(manager.warehouse_created, instance)
+
+        is_owned = cleaned_input.get("is_owned", False)
+        assign = cleaned_input.get("assign_to_all_channels_and_zones", not is_owned)
+        if assign and not is_owned:
+            assign_warehouse_to_all_channels(instance)
+            assign_warehouse_to_all_shipping_zones(instance)
 
     @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):

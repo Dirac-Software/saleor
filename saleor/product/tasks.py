@@ -387,6 +387,8 @@ def process_price_list_task(price_list_id: int):
 
         parsed_rows = parse_sheet(df, column_map, default_currency, valid_categories)
 
+        PriceListItem.objects.filter(price_list=price_list).delete()
+
         PriceListItem.objects.bulk_create(
             [
                 PriceListItem(
@@ -410,6 +412,27 @@ def process_price_list_task(price_list_id: int):
                 for row in parsed_rows
             ]
         )
+
+        # Mark duplicate (product_code, brand) rows as invalid
+        all_items = list(price_list.items.all())
+        seen_keys: set[tuple[str, str]] = set()
+        duplicate_items = []
+        for item in all_items:
+            if not item.is_valid:
+                continue
+            key = (item.product_code, item.brand)
+            if key in seen_keys:
+                item.is_valid = False
+                item.validation_errors = list(item.validation_errors) + [
+                    f"duplicate product_code+brand in this sheet: {item.product_code}"
+                ]
+                duplicate_items.append(item)
+            else:
+                seen_keys.add(key)
+        if duplicate_items:
+            PriceListItem.objects.bulk_update(
+                duplicate_items, ["is_valid", "validation_errors"]
+            )
 
         # Batch-populate product FK for valid items
         items = list(price_list.items.filter(is_valid=True))
@@ -441,8 +464,9 @@ def process_price_list_task(price_list_id: int):
         )
 
     except Exception:
+        price_list.processing_completed_at = None
         price_list.processing_failed_at = timezone.now()
-        price_list.save(update_fields=["processing_failed_at"])
+        price_list.save(update_fields=["processing_completed_at", "processing_failed_at"])
         raise
 
 
@@ -466,8 +490,7 @@ def _build_product_data_from_item(item):
     )
 
 
-def _load_activation_context(categories):
-    from ..channel.models import Channel
+def _load_activation_context(categories, channels):
     from .ingestion import get_exchange_rates
     from .models import Category, ProductType
 
@@ -490,9 +513,8 @@ def _load_activation_context(categories):
         attr.name: attr
         for attr in Attribute.objects.filter(name__in=required_attributes)
     }
-    channels = list(Channel.objects.all())
     exchange_rates = get_exchange_rates()
-    return product_type_map, category_map, attribute_map, channels, exchange_rates
+    return product_type_map, category_map, attribute_map, list(channels), exchange_rates
 
 
 def _activate_item(
@@ -503,6 +525,7 @@ def _activate_item(
     attribute_map,
     channels,
     exchange_rates,
+    newly_created: dict | None = None,
 ):
     from django.db.models import F
 
@@ -519,21 +542,31 @@ def _activate_item(
 
     if item.product_id is None:
         product_data = _build_product_data_from_item(item)
-        product_type = product_type_map.get(item.category)
-        category = category_map.get(item.category)
-        if product_type is None or category is None:
-            logger.warning(
-                "Cannot create product for item %s: missing product_type or category '%s'",
-                item.product_code,
-                item.category,
-            )
-            return False
 
-        product = create_product(product_data, product_type, category)
-        for channel in channels:
-            create_product_channel_listing(product, channel)
-        assign_product_attributes(product, product_data, attribute_map, moq_value=1)
-        item.product_id = product.pk
+        # Guard against within-run duplicates that slipped past processing
+        cache_key = (item.product_code, item.brand)
+        if newly_created is not None and cache_key in newly_created:
+            product = newly_created[cache_key]
+            product_type = product_type_map.get(item.category)
+            item.product_id = product.pk
+        else:
+            product_type = product_type_map.get(item.category)
+            category = category_map.get(item.category)
+            if product_type is None or category is None:
+                logger.warning(
+                    "Cannot create product for item %s: missing product_type or category '%s'",
+                    item.product_code,
+                    item.category,
+                )
+                return False
+
+            product = create_product(product_data, product_type, category)
+            for channel in channels:
+                create_product_channel_listing(product, channel)
+            assign_product_attributes(product, product_data, attribute_map, moq_value=1)
+            item.product_id = product.pk
+            if newly_created is not None:
+                newly_created[cache_key] = product
 
         for size, qty in item.sizes_and_qty.items():
             variant = create_variant(product, size, weight_kg=product_data.weight_kg)
@@ -626,9 +659,10 @@ def activate_price_list_task(price_list_id: int):
 
         categories = {i.category for i in items if i.category}
         product_type_map, category_map, attribute_map, channels, exchange_rates = (
-            _load_activation_context(categories)
+            _load_activation_context(categories, price_list.channels.all())
         )
 
+        newly_created: dict = {}
         updated_items = []
         for item in items:
             old_product_id = item.product_id
@@ -640,6 +674,7 @@ def activate_price_list_task(price_list_id: int):
                 attribute_map,
                 channels,
                 exchange_rates,
+                newly_created=newly_created,
             )
             if item.product_id != old_product_id:
                 updated_items.append(item)
@@ -647,10 +682,74 @@ def activate_price_list_task(price_list_id: int):
         if updated_items:
             PriceListItem.objects.bulk_update(updated_items, ["product_id"])
 
+        activated_product_ids = [i.product_id for i in items if i.product_id is not None]
+        Product.objects.filter(id__in=activated_product_ids).update(search_index_dirty=True)
+
         PriceList.objects.filter(pk=price_list_id).update(
             status=PriceListStatus.ACTIVE,
             activated_at=timezone.now(),
+            deactivated_at=None,
         )
+
+    update_products_search_vector_task.delay()
+
+
+def _count_draft_unconfirmed_orders(warehouse, product_ids=None):
+    """Return count of distinct draft/unconfirmed orders with allocations at warehouse.
+
+    If product_ids is given, only considers allocations for those products.
+    """
+    from ..order import OrderStatus
+    from ..warehouse.models import Allocation
+
+    qs = Allocation.objects.filter(
+        stock__warehouse=warehouse,
+        order_line__order__status__in=[OrderStatus.DRAFT, OrderStatus.UNCONFIRMED],
+        quantity_allocated__gt=0,
+    )
+    if product_ids is not None:
+        qs = qs.filter(stock__product_variant__product_id__in=product_ids)
+    return qs.values("order_line__order_id").distinct().count()
+
+
+def _deallocate_draft_unconfirmed(warehouse, product_ids, size_names=None):
+    """Delete Allocation rows for draft/unconfirmed orders and reduce Stock.quantity_allocated.
+
+    Must be called inside a transaction.atomic() block.
+    """
+    from django.db.models import F, Value
+    from django.db.models.functions import Greatest
+
+    from ..order import OrderStatus
+    from ..warehouse.models import Allocation, Stock
+
+    qs = (
+        Allocation.objects.select_for_update()
+        .filter(
+            stock__warehouse=warehouse,
+            stock__product_variant__product_id__in=product_ids,
+            order_line__order__status__in=[OrderStatus.DRAFT, OrderStatus.UNCONFIRMED],
+            quantity_allocated__gt=0,
+        )
+        .select_related("stock")
+    )
+    if size_names is not None:
+        qs = qs.filter(stock__product_variant__name__in=size_names)
+
+    allocations = list(qs)
+    if not allocations:
+        return
+
+    deltas: dict[int, int] = {}
+    for alloc in allocations:
+        deltas[alloc.stock_id] = deltas.get(alloc.stock_id, 0) + alloc.quantity_allocated
+
+    for stock_id, delta in deltas.items():
+        Stock.objects.filter(pk=stock_id).update(
+            quantity_allocated=Greatest(Value(0), F("quantity_allocated") - delta)
+        )
+
+    Allocation.objects.filter(pk__in=[a.pk for a in allocations]).delete()
 
 
 @app.task
@@ -680,15 +779,21 @@ def deactivate_price_list_task(price_list_id: int):
             .distinct()
         )
 
+        _deallocate_draft_unconfirmed(price_list.warehouse, product_ids)
+
         Stock.objects.filter(
             product_variant__product_id__in=product_ids,
             warehouse=price_list.warehouse,
         ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
 
+        Product.objects.filter(id__in=product_ids).update(search_index_dirty=True)
+
         PriceList.objects.filter(pk=price_list_id).update(
             status=PriceListStatus.INACTIVE,
             deactivated_at=timezone.now(),
         )
+
+    update_products_search_vector_task.delay()
 
 
 @app.task
@@ -779,10 +884,11 @@ def replace_price_list_task(old_id: int, new_id: int):
 
         categories = {i.category for i in new_items if i.category}
         product_type_map, category_map, attribute_map, channels, exchange_rates = (
-            _load_activation_context(categories)
+            _load_activation_context(categories, new_pl.channels.all())
         )
 
         if old_only:
+            _deallocate_draft_unconfirmed(warehouse, list(old_only))
             Stock.objects.filter(
                 product_variant__product_id__in=old_only,
                 warehouse=warehouse,
@@ -796,6 +902,9 @@ def replace_price_list_task(old_id: int, new_id: int):
 
             removed_sizes = old_sizes - new_sizes
             if removed_sizes:
+                _deallocate_draft_unconfirmed(
+                    warehouse, [product_id], size_names=removed_sizes
+                )
                 Stock.objects.filter(
                     product_variant__product_id=product_id,
                     product_variant__name__in=removed_sizes,
@@ -829,6 +938,7 @@ def replace_price_list_task(old_id: int, new_id: int):
                         product_variant=variant, warehouse=warehouse, quantity=qty
                     )
 
+        newly_created: dict = {}
         updated_new_items = []
         for product_id in new_only:
             new_item = new_item_by_product[product_id]
@@ -841,12 +951,16 @@ def replace_price_list_task(old_id: int, new_id: int):
                 attribute_map,
                 channels,
                 exchange_rates,
+                newly_created=newly_created,
             )
             if new_item.product_id != old_product_id:
                 updated_new_items.append(new_item)
 
         if updated_new_items:
             PriceListItem.objects.bulk_update(updated_new_items, ["product_id"])
+
+        all_affected_ids = list(old_product_ids | new_product_ids)
+        Product.objects.filter(id__in=all_affected_ids).update(search_index_dirty=True)
 
         now = timezone.now()
         PriceList.objects.filter(pk=old_id).update(
@@ -857,4 +971,7 @@ def replace_price_list_task(old_id: int, new_id: int):
         PriceList.objects.filter(pk=new_id).update(
             status=PriceListStatus.ACTIVE,
             activated_at=now,
+            deactivated_at=None,
         )
+
+    update_products_search_vector_task.delay()
