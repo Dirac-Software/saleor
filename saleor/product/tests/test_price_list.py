@@ -1,0 +1,1092 @@
+"""Tests for PriceList processing task."""
+
+import os
+from decimal import Decimal
+
+import pytest
+
+from saleor.product.models import PriceList, PriceListItem
+from saleor.product.tasks import (
+    activate_price_list_task,
+    deactivate_price_list_task,
+    process_price_list_task,
+    replace_price_list_task,
+)
+from saleor.warehouse.models import Stock, Warehouse
+
+HK_COLUMN_MAP = {
+    "0": "brand",
+    "1": "product_code",
+    "2": "description",
+    "3": "rrp",
+    "4": "sell_price",
+    "6": "category",
+    "12": "weight_kg",
+    "13": "sizes",
+}
+
+# First 5 rows from saleor_hk (2).xlsx — updated_sizing at col 13
+HK_ROWS = [
+    [
+        "Adidas",
+        "IS1637",
+        "TIRO24 C TRPNTW",
+        40,
+        9.025,
+        190,
+        "Apparel",
+        "Women",
+        "XS[20], M[50], L[50], XL[50], 3XL[20]",
+        "Apparel",
+        "Women",
+        40,
+        0.2,
+        "XS[20], M[50], L[50], XL[50], 3XL[20]",
+        None,
+        "TIRO24 C TRPNTW",
+    ],
+    [
+        "Adidas",
+        "HY4520",
+        "aSMC TST LS HO",
+        110,
+        23.69,
+        155,
+        "Apparel",
+        "Women",
+        "XS[16], S[26], M[92], L[21]",
+        "Apparel",
+        "Women",
+        110,
+        0.2,
+        "XS[16], S[26], M[92], L[21]",
+        None,
+        "aSMC TST LS HO HY4520",
+    ],
+    [
+        "Adidas",
+        "HH9288",
+        "W TXFlooceLT HJ WONRED",
+        70,
+        15.25,
+        154,
+        "Apparel",
+        "Women",
+        "XS[40], S[46], M[48], L[10], XL[10]",
+        "Apparel",
+        "Women",
+        70,
+        0.2,
+        "XS[40], S[46], M[48], L[10], XL[10]",
+        None,
+        "W TXFlooceLT HJ WONRED",
+    ],
+    [
+        "Adidas",
+        "H59015",
+        "BLOUSON",
+        110,
+        24.99,
+        138,
+        "Apparel",
+        "Women",
+        "32[58], 34[34], 36[23], 38[11], 40[12]",
+        "Apparel",
+        "Women",
+        110,
+        0.2,
+        "32[58], 34[34], 36[23], 38[11], 40[12]",
+        None,
+        "BLOUSON",
+    ],
+    [
+        "Adidas",
+        "HK5015",
+        "ADV WNTR AOP OH",
+        60,
+        14.43,
+        135,
+        "Apparel",
+        "Men",
+        "XS[25], S[14], M[43], L[16], XL[26], 2XL[11]",
+        "Apparel",
+        "Men",
+        60,
+        0.2,
+        "XS[25], S[14], M[43], L[16], XL[26], 2XL[11]",
+        None,
+        "ADV WNTR AOP OH",
+    ],
+]
+
+HK_HEADERS = [
+    "Brand",
+    "Article",
+    "Description",
+    "RRP (GBP)",
+    "Sale Price (GBP)",
+    "Quantity",
+    "Category",
+    "Gender",
+    "Sizing (UK)",
+    "Category.1",
+    "Gender.1",
+    "Rounded RRP (GBP)",
+    "unit_weight_kg",
+    "updated_sizing",
+    "issues",
+    "updated_description",
+]
+
+
+@pytest.fixture
+def warehouse(db):
+    from saleor.account.models import Address
+
+    address = Address.objects.create(
+        street_address_1="1 Test St",
+        city="Test City",
+        country="HK",
+    )
+    return Warehouse.objects.create(
+        name="HK Warehouse",
+        slug="hk-warehouse",
+        address=address,
+        is_owned=False,
+    )
+
+
+@pytest.fixture
+def hk_excel(tmp_path):
+    """Small HK-format Excel fixture using first 5 rows of real HK sheet data."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1 (1)"
+    ws.append(HK_HEADERS)
+    for row in HK_ROWS:
+        ws.append(row)
+    path = tmp_path / "hk_sample.xlsx"
+    wb.save(path)
+    return path
+
+
+@pytest.fixture
+def hk_excel_with_invalid_row(tmp_path):
+    """HK-format Excel with one invalid row (missing product_code, unparseable sizes)."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1 (1)"
+    ws.append(HK_HEADERS)
+    for row in HK_ROWS[:2]:
+        ws.append(row)
+    invalid_row = [
+        "Adidas",
+        "",
+        "Some Jacket",
+        50,
+        12.0,
+        10,
+        "Apparel",
+        "Men",
+        "INVALID SIZES",
+        "Apparel",
+        "Men",
+        50,
+        0.2,
+        "INVALID SIZES",
+        None,
+        "Some Jacket",
+    ]
+    ws.append(invalid_row)
+    path = tmp_path / "hk_invalid.xlsx"
+    wb.save(path)
+    return path
+
+
+def _make_price_list(warehouse, excel_path, column_map=None):
+    from django.core.files import File
+
+    with open(excel_path, "rb") as f:
+        return PriceList.objects.create(
+            warehouse=warehouse,
+            excel_file=File(f, name=os.path.basename(excel_path)),
+            config={
+                "sheet_name": "Sheet1 (1)",
+                "header_row": 0,
+                "column_map": column_map or HK_COLUMN_MAP,
+                "default_currency": "GBP",
+            },
+        )
+
+
+def test_process_creates_items(db, warehouse, hk_excel):
+    price_list = _make_price_list(warehouse, hk_excel)
+
+    process_price_list_task(price_list.pk)
+
+    assert PriceListItem.objects.filter(price_list=price_list).count() == len(HK_ROWS)
+
+
+def test_process_sets_completed_at(db, warehouse, hk_excel):
+    price_list = _make_price_list(warehouse, hk_excel)
+
+    process_price_list_task(price_list.pk)
+
+    price_list.refresh_from_db()
+    assert price_list.processing_completed_at is not None
+    assert price_list.processing_failed_at is None
+
+
+def test_process_parses_item_fields(db, warehouse, hk_excel):
+    price_list = _make_price_list(warehouse, hk_excel)
+
+    process_price_list_task(price_list.pk)
+
+    item = PriceListItem.objects.get(price_list=price_list, product_code="IS1637")
+    assert item.brand == "Adidas"
+    assert item.description == "TIRO24 C TRPNTW"
+    assert item.category == "Apparel"
+    assert item.rrp == Decimal(40)
+    assert item.sell_price == Decimal("9.03")  # decimal_places=2 rounds 9.025 → 9.03
+    assert item.weight_kg == Decimal("0.2")
+    assert item.currency == "GBP"
+    assert item.is_valid is True
+    assert item.validation_errors == []
+
+
+def test_process_parses_apparel_sizes(db, warehouse, hk_excel):
+    price_list = _make_price_list(warehouse, hk_excel)
+
+    process_price_list_task(price_list.pk)
+
+    item = PriceListItem.objects.get(price_list=price_list, product_code="IS1637")
+    assert item.sizes_and_qty == {"XS": 20, "M": 50, "L": 50, "XL": 50, "3XL": 20}
+
+
+def test_process_parses_numeric_sizes(db, warehouse, hk_excel):
+    price_list = _make_price_list(warehouse, hk_excel)
+
+    process_price_list_task(price_list.pk)
+
+    item = PriceListItem.objects.get(price_list=price_list, product_code="H59015")
+    assert item.sizes_and_qty == {"32": 58, "34": 34, "36": 23, "38": 11, "40": 12}
+
+
+def test_process_parses_multi_size_variant(db, warehouse, hk_excel):
+    price_list = _make_price_list(warehouse, hk_excel)
+
+    process_price_list_task(price_list.pk)
+
+    item = PriceListItem.objects.get(price_list=price_list, product_code="HK5015")
+    assert item.sizes_and_qty == {
+        "XS": 25,
+        "S": 14,
+        "M": 43,
+        "L": 16,
+        "XL": 26,
+        "2XL": 11,
+    }
+
+
+def test_process_invalid_row_sets_is_valid_false(
+    db, warehouse, hk_excel_with_invalid_row
+):
+    price_list = _make_price_list(warehouse, hk_excel_with_invalid_row)
+
+    process_price_list_task(price_list.pk)
+
+    items = PriceListItem.objects.filter(price_list=price_list)
+    assert items.count() == 3
+    assert items.filter(is_valid=True).count() == 2
+
+    invalid_item = items.get(is_valid=False)
+    assert "product_code: required" in invalid_item.validation_errors
+    assert any("sizes" in e for e in invalid_item.validation_errors)
+
+
+def test_process_sets_failed_at_on_missing_file(db, warehouse, tmp_path):
+    from django.core.files.base import ContentFile
+
+    price_list = PriceList.objects.create(
+        warehouse=warehouse,
+        excel_file=ContentFile(b"", name="empty.xlsx"),
+        config={
+            "sheet_name": "Sheet1",
+            "header_row": 0,
+            "column_map": HK_COLUMN_MAP,
+            "default_currency": "GBP",
+        },
+    )
+    # Delete the file so the task cannot open it
+    price_list.excel_file.delete(save=False)
+
+    with pytest.raises(FileNotFoundError):
+        process_price_list_task(price_list.pk)
+
+    price_list.refresh_from_db()
+    assert price_list.processing_failed_at is not None
+    assert price_list.processing_completed_at is None
+
+
+# ---------------------------------------------------------------------------
+# Helpers for activate / deactivate / replace tests
+# ---------------------------------------------------------------------------
+
+
+def _make_processed_price_list(warehouse, sizes_and_qty=None, product=None):
+    """Create a PriceList with one valid item and processing_completed_at set."""
+    from django.utils import timezone
+
+    if sizes_and_qty is None:
+        sizes_and_qty = {"S": 10, "M": 20}
+
+    pl = PriceList.objects.create(
+        warehouse=warehouse,
+        config={},
+        processing_completed_at=timezone.now(),
+    )
+    item = PriceListItem.objects.create(
+        price_list=pl,
+        row_index=0,
+        product_code="TEST-001",
+        brand="TestBrand",
+        description="Test Product",
+        category="Apparel",
+        sizes_and_qty=sizes_and_qty,
+        sell_price=Decimal("25.00"),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+    return pl, item
+
+
+def _make_product_with_variant_and_stock(warehouse, size="S", quantity=100):
+    """Create a Product → Variant → Stock chain and return (product, variant, stock)."""
+    from saleor.product.models import ProductType, ProductVariant
+
+    product_type, _ = ProductType.objects.get_or_create(
+        slug="apparel-type",
+        defaults={"name": "Apparel", "has_variants": True},
+    )
+    from saleor.product.models import Product
+
+    product = Product.objects.create(
+        name="Test Product",
+        slug=f"test-product-{Product.objects.count()}",
+        product_type=product_type,
+    )
+    variant = ProductVariant.objects.create(
+        product=product,
+        name=size,
+        sku=f"sku-{product.pk}-{size}",
+    )
+    stock = Stock.objects.create(
+        product_variant=variant,
+        warehouse=warehouse,
+        quantity=quantity,
+    )
+    return product, variant, stock
+
+
+# ---------------------------------------------------------------------------
+# Activation tests
+# ---------------------------------------------------------------------------
+
+
+def test_activate_creates_stock(db, warehouse):
+    product, variant, _ = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=0
+    )
+    Stock.objects.filter(product_variant=variant).delete()
+
+    pl, item = _make_processed_price_list(
+        warehouse,
+        sizes_and_qty={"S": 15},
+        product=product,
+    )
+
+    activate_price_list_task(pl.pk)
+
+    stock = Stock.objects.get(product_variant=variant, warehouse=warehouse)
+    assert stock.quantity == 15
+
+
+def test_activate_sets_status_active(db, warehouse):
+    from saleor.product import PriceListStatus
+
+    product, _, _ = _make_product_with_variant_and_stock(warehouse)
+    pl, _ = _make_processed_price_list(warehouse, product=product)
+
+    activate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.status == PriceListStatus.ACTIVE
+    assert pl.activated_at is not None
+
+
+def test_activate_raises_if_not_processed(db, warehouse):
+    pl = PriceList.objects.create(warehouse=warehouse, config={})
+
+    with pytest.raises(ValueError, match="has not completed processing"):
+        activate_price_list_task(pl.pk)
+
+
+def test_activate_raises_for_owned_warehouse(db):
+    from saleor.account.models import Address
+
+    address = Address.objects.create(
+        street_address_1="1 Owned St", city="City", country="GB"
+    )
+    owned_wh = Warehouse.objects.create(
+        name="Owned WH", slug="owned-wh", address=address, is_owned=True
+    )
+    from django.utils import timezone
+
+    pl = PriceList.objects.create(
+        warehouse=owned_wh, config={}, processing_completed_at=timezone.now()
+    )
+
+    with pytest.raises(AssertionError):
+        activate_price_list_task(pl.pk)
+
+
+def test_activate_creates_variant_for_new_size(db, warehouse):
+    from saleor.product.models import ProductVariant
+
+    product, _, _ = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=5
+    )
+    pl, _ = _make_processed_price_list(
+        warehouse,
+        sizes_and_qty={"S": 10, "L": 30},
+        product=product,
+    )
+
+    activate_price_list_task(pl.pk)
+
+    assert ProductVariant.objects.filter(product=product, name="L").exists()
+    stock = Stock.objects.get(
+        product_variant__product=product,
+        product_variant__name="L",
+        warehouse=warehouse,
+    )
+    assert stock.quantity == 30
+
+
+# ---------------------------------------------------------------------------
+# Deactivation tests
+# ---------------------------------------------------------------------------
+
+
+def test_deactivate_zeros_stock(db, warehouse):
+    from saleor.product import PriceListStatus
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    pl, _ = _make_processed_price_list(warehouse, product=product)
+    pl.status = PriceListStatus.ACTIVE
+    pl.save(update_fields=["status"])
+
+    deactivate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 0
+
+    pl.refresh_from_db()
+    assert pl.status == PriceListStatus.INACTIVE
+    assert pl.deactivated_at is not None
+
+
+def test_deactivate_respects_allocations(db, warehouse):
+    from saleor.product import PriceListStatus
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock.quantity_allocated = 30
+    stock.save(update_fields=["quantity_allocated"])
+
+    pl, _ = _make_processed_price_list(warehouse, product=product)
+    pl.status = PriceListStatus.ACTIVE
+    pl.save(update_fields=["status"])
+
+    deactivate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 30
+
+
+def test_deactivate_skips_items_without_product_fk(db, warehouse):
+    pl, item = _make_processed_price_list(warehouse, product=None)
+
+    deactivate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    from saleor.product import PriceListStatus
+
+    assert pl.status == PriceListStatus.INACTIVE
+
+
+# ---------------------------------------------------------------------------
+# Replace tests
+# ---------------------------------------------------------------------------
+
+
+def test_replace_validates_same_warehouse(db, warehouse):
+    from django.utils import timezone
+
+    from saleor.account.models import Address
+
+    address = Address.objects.create(
+        street_address_1="2 Other St", city="City", country="GB"
+    )
+    other_wh = Warehouse.objects.create(
+        name="Other WH", slug="other-wh", address=address, is_owned=False
+    )
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    new_pl = PriceList.objects.create(
+        warehouse=other_wh, config={}, processing_completed_at=timezone.now()
+    )
+
+    with pytest.raises(ValueError, match="different warehouses"):
+        replace_price_list_task(old_pl.pk, new_pl.pk)
+
+
+def test_replace_validates_new_is_processed(db, warehouse):
+    from django.utils import timezone
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    new_pl = PriceList.objects.create(warehouse=warehouse, config={})
+
+    with pytest.raises(ValueError, match="has not completed processing"):
+        replace_price_list_task(old_pl.pk, new_pl.pk)
+
+
+def test_replace_diffs_correctly(db, warehouse):
+    from django.utils import timezone
+
+    from saleor.product import PriceListStatus
+
+    product_a, variant_a, stock_a = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=50
+    )
+    product_b, variant_b, stock_b = _make_product_with_variant_and_stock(
+        warehouse, size="M", quantity=40
+    )
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=old_pl,
+        row_index=0,
+        product_code="A",
+        brand="B",
+        description="A",
+        category="Apparel",
+        sizes_and_qty={"S": 50},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product_a,
+    )
+    PriceListItem.objects.create(
+        price_list=old_pl,
+        row_index=1,
+        product_code="B",
+        brand="B",
+        description="B",
+        category="Apparel",
+        sizes_and_qty={"M": 40},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product_b,
+    )
+
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=new_pl,
+        row_index=0,
+        product_code="B",
+        brand="B",
+        description="B",
+        category="Apparel",
+        sizes_and_qty={"M": 99},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product_b,
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    stock_a.refresh_from_db()
+    assert stock_a.quantity == 0
+
+    stock_b.refresh_from_db()
+    assert stock_b.quantity == 99
+
+    old_pl.refresh_from_db()
+    assert old_pl.status == PriceListStatus.INACTIVE
+    assert old_pl.replaced_by_id == new_pl.pk
+
+    new_pl.refresh_from_db()
+    assert new_pl.status == PriceListStatus.ACTIVE
+
+
+def test_replace_respects_allocations(db, warehouse):
+    from django.utils import timezone
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock.quantity_allocated = 20
+    stock.save(update_fields=["quantity_allocated"])
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=old_pl,
+        row_index=0,
+        product_code="X",
+        brand="B",
+        description="X",
+        category="Apparel",
+        sizes_and_qty={"S": 50},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 20
+
+
+# ---------------------------------------------------------------------------
+# Auto-replace tests
+# ---------------------------------------------------------------------------
+
+
+def test_activate_auto_replaces_existing_active_list(db, warehouse):
+    """Activating a new list when another is active dispatches replace task instead."""
+    from unittest.mock import patch
+
+    from saleor.product import PriceListStatus
+    from saleor.product.tasks import replace_price_list_task
+
+    product, _, _ = _make_product_with_variant_and_stock(warehouse)
+
+    old_pl, _ = _make_processed_price_list(warehouse, product=product)
+    old_pl.status = PriceListStatus.ACTIVE
+    old_pl.save(update_fields=["status"])
+
+    new_pl, _ = _make_processed_price_list(warehouse, product=product)
+
+    with patch.object(replace_price_list_task, "delay") as mock_delay:
+        activate_price_list_task(new_pl.pk)
+
+    mock_delay.assert_called_once_with(old_pl.pk, new_pl.pk)
+
+    new_pl.refresh_from_db()
+    assert new_pl.status == PriceListStatus.INACTIVE
+
+
+def test_activate_no_auto_replace_when_no_active_list(db, warehouse):
+    """Activating a list when no other is active proceeds with direct activation."""
+    from saleor.product import PriceListStatus
+
+    product, variant, _ = _make_product_with_variant_and_stock(warehouse, quantity=0)
+    Stock.objects.filter(product_variant=variant).delete()
+
+    pl, _ = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 5}, product=product
+    )
+
+    activate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.status == PriceListStatus.ACTIVE
+
+
+# ---------------------------------------------------------------------------
+# Additional activate tests
+# ---------------------------------------------------------------------------
+
+
+def test_activate_increments_existing_stock(db, warehouse):
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=5
+    )
+    pl, _ = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 10}, product=product
+    )
+
+    activate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 15
+
+
+def test_activate_creates_product_when_no_product_fk(db, warehouse):
+    from saleor.product.models import Category, Product, ProductType
+
+    ProductType.objects.get_or_create(
+        slug="apparel-type", defaults={"name": "Apparel", "has_variants": True}
+    )
+    Category.objects.create(name="Apparel", slug="apparel")
+
+    pl, item = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 7}, product=None
+    )
+
+    activate_price_list_task(pl.pk)
+
+    item.refresh_from_db()
+    assert item.product_id is not None
+    assert Product.objects.filter(pk=item.product_id).exists()
+    assert Stock.objects.filter(
+        product_variant__product_id=item.product_id,
+        warehouse=warehouse,
+        quantity=7,
+    ).exists()
+
+
+def test_activate_is_idempotent(db, warehouse):
+    from saleor.product import PriceListStatus
+
+    product, _, stock = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=10
+    )
+    pl, _ = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 5}, product=product
+    )
+    pl.status = PriceListStatus.ACTIVE
+    pl.save(update_fields=["status"])
+
+    activate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 10
+
+
+# ---------------------------------------------------------------------------
+# Additional deactivate tests
+# ---------------------------------------------------------------------------
+
+
+def test_deactivate_is_idempotent(db, warehouse):
+    product, _, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
+    pl, _ = _make_processed_price_list(warehouse, product=product)
+
+    deactivate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 50
+
+
+def test_deactivate_does_not_affect_other_warehouse(db, warehouse):
+    from saleor.account.models import Address
+    from saleor.product import PriceListStatus
+
+    address = Address.objects.create(
+        street_address_1="2 Other St", city="City", country="GB"
+    )
+    other_wh = Warehouse.objects.create(
+        name="Other WH", slug="other-wh", address=address, is_owned=False
+    )
+
+    product, variant, stock_main = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock_other = Stock.objects.create(
+        product_variant=variant, warehouse=other_wh, quantity=50
+    )
+
+    pl, _ = _make_processed_price_list(warehouse, product=product)
+    pl.status = PriceListStatus.ACTIVE
+    pl.save(update_fields=["status"])
+
+    deactivate_price_list_task(pl.pk)
+
+    stock_main.refresh_from_db()
+    stock_other.refresh_from_db()
+    assert stock_main.quantity == 0
+    assert stock_other.quantity == 50
+
+
+def test_deactivate_with_unlinked_items_zeroes_only_linked_stock(db, warehouse):
+    from django.utils import timezone
+
+    from saleor.product import PriceListStatus
+
+    product, _, stock = _make_product_with_variant_and_stock(warehouse, quantity=40)
+
+    pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=pl,
+        row_index=0,
+        product_code="LINKED",
+        brand="B",
+        description="linked",
+        category="Apparel",
+        sizes_and_qty={"S": 40},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+    PriceListItem.objects.create(
+        price_list=pl,
+        row_index=1,
+        product_code="UNLINKED",
+        brand="B",
+        description="unlinked",
+        category="Apparel",
+        sizes_and_qty={"S": 10},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=None,
+    )
+    pl.status = PriceListStatus.ACTIVE
+    pl.save(update_fields=["status"])
+
+    deactivate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 0
+
+
+# ---------------------------------------------------------------------------
+# Additional replace tests
+# ---------------------------------------------------------------------------
+
+
+def test_replace_zeros_removed_size(db, warehouse):
+    from django.utils import timezone
+
+    from saleor.product.models import ProductVariant
+
+    product, _, stock_s = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=30
+    )
+    variant_m = ProductVariant.objects.create(
+        product=product, name="M", sku=f"sku-{product.pk}-M"
+    )
+    stock_m = Stock.objects.create(
+        product_variant=variant_m, warehouse=warehouse, quantity=20
+    )
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=old_pl,
+        row_index=0,
+        product_code="X",
+        brand="B",
+        description="X",
+        category="Apparel",
+        sizes_and_qty={"S": 30, "M": 20},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=new_pl,
+        row_index=0,
+        product_code="X",
+        brand="B",
+        description="X",
+        category="Apparel",
+        sizes_and_qty={"S": 15},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    stock_s.refresh_from_db()
+    stock_m.refresh_from_db()
+    assert stock_s.quantity == 15
+    assert stock_m.quantity == 0
+
+
+def test_replace_creates_stock_for_added_size(db, warehouse):
+    from django.utils import timezone
+
+    product, _, stock_s = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=30
+    )
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=old_pl,
+        row_index=0,
+        product_code="X",
+        brand="B",
+        description="X",
+        category="Apparel",
+        sizes_and_qty={"S": 30},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=new_pl,
+        row_index=0,
+        product_code="X",
+        brand="B",
+        description="X",
+        category="Apparel",
+        sizes_and_qty={"S": 15, "L": 25},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product,
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    stock_s.refresh_from_db()
+    assert stock_s.quantity == 15
+    stock_l = Stock.objects.get(
+        product_variant__product=product,
+        product_variant__name="L",
+        warehouse=warehouse,
+    )
+    assert stock_l.quantity == 25
+
+
+def test_replace_activates_new_only_product(db, warehouse):
+    from django.utils import timezone
+
+    product_a, _, stock_a = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=50
+    )
+    product_b, _, stock_b = _make_product_with_variant_and_stock(
+        warehouse, size="M", quantity=10
+    )
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=old_pl,
+        row_index=0,
+        product_code="A",
+        brand="B",
+        description="A",
+        category="Apparel",
+        sizes_and_qty={"S": 50},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product_a,
+    )
+
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    PriceListItem.objects.create(
+        price_list=new_pl,
+        row_index=0,
+        product_code="B",
+        brand="B",
+        description="B",
+        category="Apparel",
+        sizes_and_qty={"M": 5},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
+        product=product_b,
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    stock_a.refresh_from_db()
+    stock_b.refresh_from_db()
+    assert stock_a.quantity == 0
+    assert stock_b.quantity == 15
+
+
+def test_replace_sets_timestamps(db, warehouse):
+    from django.utils import timezone
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse, config={}, processing_completed_at=timezone.now()
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    old_pl.refresh_from_db()
+    new_pl.refresh_from_db()
+    assert old_pl.deactivated_at is not None
+    assert new_pl.activated_at is not None
+
+
+def test_replace_is_idempotent(db, warehouse):
+    from django.utils import timezone
+
+    from saleor.product import PriceListStatus
+
+    product, _, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
+
+    old_pl = PriceList.objects.create(
+        warehouse=warehouse,
+        config={},
+        processing_completed_at=timezone.now(),
+        status=PriceListStatus.INACTIVE,
+    )
+    new_pl = PriceList.objects.create(
+        warehouse=warehouse,
+        config={},
+        processing_completed_at=timezone.now(),
+        status=PriceListStatus.ACTIVE,
+    )
+
+    replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 50

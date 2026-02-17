@@ -7,6 +7,13 @@ from .collection import (
     CollectionReorderProducts,
     CollectionUpdate,
 )
+from .price_list import (
+    PriceListActivate,
+    PriceListCreate,
+    PriceListDeactivate,
+    PriceListDelete,
+    PriceListReplace,
+)
 from .product import (
     ProductCreate,
     ProductDelete,
@@ -49,6 +56,11 @@ __all__ = [
     "ProductMediaReorder",
     "ProductMediaUpdate",
     "ProductUpdate",
+    "PriceListActivate",
+    "PriceListCreate",
+    "PriceListDeactivate",
+    "PriceListDelete",
+    "PriceListReplace",
     "ProductIngestionFileUpload",
     "ProductIngestionIngest",
     "ProductVariantCreate",
