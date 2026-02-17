@@ -52,7 +52,7 @@ from .mutations.fulfillment_mark_proforma_paid import FulfillmentMarkProformaInv
 from .mutations.fulfillment_refund_products import FulfillmentRefundProducts
 from .mutations.fulfillment_return_products import FulfillmentReturnProducts
 from .mutations.fulfillment_update_tracking import FulfillmentUpdateTracking
-from .mutations.order_add_xero_payment import OrderAddXeroPayment
+from .mutations.order_add_xero_payment import OrderSyncXeroPayment
 from .mutations.order_cancel import OrderCancel
 from .mutations.order_capture import OrderCapture
 from .mutations.order_confirm import OrderConfirm
@@ -79,6 +79,10 @@ from .mutations.order_void import OrderVoid
 from .mutations.pick_complete import PickComplete
 from .mutations.pick_start import PickStart
 from .mutations.pick_update_item import PickUpdateItem
+from .queries.xero_payments import (
+    AvailableXeroPayments,
+    resolve_available_xero_payments,
+)
 from .resolvers import (
     resolve_draft_orders,
     resolve_homepage_events,
@@ -244,6 +248,17 @@ class OrderQueries(graphene.ObjectType):
         permissions=[OrderPermissions.MANAGE_ORDERS],
         doc_category=DOC_CATEGORY_ORDERS,
     )
+    available_xero_payments = PermissionsField(
+        AvailableXeroPayments,
+        description="List available Xero payments for an order's customer (last 5).",
+        order_id=graphene.Argument(
+            graphene.ID,
+            required=True,
+            description="ID of the order to fetch payments for.",
+        ),
+        permissions=[OrderPermissions.MANAGE_ORDERS],
+        doc_category=DOC_CATEGORY_ORDERS,
+    )
 
     @staticmethod
     def resolve_homepage_events(_root, info: ResolveInfo, **kwargs):
@@ -333,6 +348,10 @@ class OrderQueries(graphene.ObjectType):
         return resolve_order_by_token(info, token)
 
     @staticmethod
+    def resolve_available_xero_payments(_root, info: ResolveInfo, *, order_id):
+        return resolve_available_xero_payments(_root, info, order_id)
+
+    @staticmethod
     def resolve_pick(_root, info: ResolveInfo, *, id):
         _, pick_id = from_global_id_or_error(id, Pick)
         return models.Pick.objects.filter(id=pick_id).first()
@@ -408,7 +427,7 @@ class OrderMutations(graphene.ObjectType):
     order_mark_as_paid = OrderMarkAsPaid.Field()
     order_refund = OrderRefund.Field()
     order_set_deposit_required = OrderSetDepositRequired.Field()
-    order_add_xero_payment = OrderAddXeroPayment.Field()
+    order_sync_xero_payment = OrderSyncXeroPayment.Field()
     order_update = OrderUpdate.Field()
     order_update_shipping = OrderUpdateShipping.Field()
     order_update_shipping_cost = OrderUpdateShippingCost.Field()

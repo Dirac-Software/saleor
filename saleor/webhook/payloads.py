@@ -1056,7 +1056,7 @@ def generate_proforma_invoice_payload(
 
         if variant and variant.product:
             # Look for product code attribute using site settings
-            from ...site.models import Site
+            from ..site.models import Site
 
             site = Site.objects.get_current()
             code_attribute_slug = (

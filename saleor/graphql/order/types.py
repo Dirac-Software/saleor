@@ -1070,7 +1070,10 @@ class Fulfillment(
     def resolve_proforma_invoice(
         root: SyncWebhookControlContext[models.Fulfillment], _info
     ):
-        return root.node.proforma_invoice
+        try:
+            return root.node.proforma_invoice
+        except models.Fulfillment.proforma_invoice.RelatedObjectDoesNotExist:
+            return None
 
     @staticmethod
     def resolve_proforma_invoice_paid(
@@ -1130,6 +1133,10 @@ class OrderLine(
     can_fulfill_quantity = graphene.Int(
         required=True,
         description="Maximum quantity that can be fulfilled now (min of ordered vs available minus already fulfilled).",
+    )
+    is_ready_to_fulfill = graphene.Boolean(
+        required=True,
+        description="Whether this line can be fulfilled now (has stock and deposit requirements met).",
     )
     tax_rate = graphene.Float(
         required=True, description="Rate of tax applied on product variant."
@@ -1362,6 +1369,25 @@ class OrderLine(
         return get_fulfillable_quantity_for_order_line(
             root.node, database_connection_name=database_connection_name
         )
+
+    @staticmethod
+    def resolve_is_ready_to_fulfill(
+        root: SyncWebhookControlContext[models.OrderLine], info
+    ):
+        from ...warehouse.stock_utils import get_fulfillable_quantity_for_order_line
+        from ..core.context import get_database_connection_name
+
+        order_line = root.node
+        order = order_line.order
+
+        if order.deposit_required and not order.deposit_threshold_met:
+            return False
+
+        database_connection_name = get_database_connection_name(info.context)
+        can_fulfill = get_fulfillable_quantity_for_order_line(
+            order_line, database_connection_name=database_connection_name
+        )
+        return can_fulfill > 0
 
     @staticmethod
     @traced_resolver

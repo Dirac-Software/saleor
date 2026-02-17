@@ -1384,6 +1384,24 @@ class FulfillmentMetadataUpdated(SubscriptionObjectType, FulfillmentBase):
         description = "Event sent when fulfillment metadata is updated."
 
 
+class FulfillmentProformaInvoiceGenerated(SubscriptionObjectType, FulfillmentBase):
+    proforma_invoice = graphene.Field(
+        "saleor.graphql.invoice.types.Invoice",
+        description="The proforma invoice that was generated.",
+    )
+
+    class Meta:
+        root_type = "Fulfillment"
+        enable_dry_run = True
+        interfaces = (Event,)
+        description = "Event sent when proforma invoice is generated for a fulfillment."
+
+    @staticmethod
+    def resolve_proforma_invoice(root, _info: ResolveInfo):
+        _, fulfillment = root
+        return getattr(fulfillment, 'proforma_invoice', None)
+
+
 class UserBase(AbstractType):
     user = graphene.Field(
         "saleor.graphql.account.types.User",
@@ -3022,6 +3040,7 @@ ASYNC_WEBHOOK_TYPES_MAP = {
     WebhookEventAsyncType.FULFILLMENT_CANCELED: FulfillmentCanceled,
     WebhookEventAsyncType.FULFILLMENT_APPROVED: FulfillmentApproved,
     WebhookEventAsyncType.FULFILLMENT_METADATA_UPDATED: FulfillmentMetadataUpdated,
+    WebhookEventAsyncType.FULFILLMENT_PROFORMA_INVOICE_GENERATED: FulfillmentProformaInvoiceGenerated,  # noqa: E501
     WebhookEventAsyncType.CUSTOMER_CREATED: CustomerCreated,
     WebhookEventAsyncType.CUSTOMER_UPDATED: CustomerUpdated,
     WebhookEventAsyncType.CUSTOMER_METADATA_UPDATED: CustomerMetadataUpdated,

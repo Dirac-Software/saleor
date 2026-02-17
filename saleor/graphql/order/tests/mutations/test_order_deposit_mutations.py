@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 import graphene
 import pytest
@@ -24,20 +25,16 @@ ORDER_SET_DEPOSIT_REQUIRED_MUTATION = """
     }
 """
 
-ORDER_ADD_XERO_PAYMENT_MUTATION = """
-    mutation addXeroPayment(
+ORDER_SYNC_XERO_PAYMENT_MUTATION = """
+    mutation syncXeroPayment(
         $orderId: ID!
         $xeroPaymentId: String!
-        $amount: Decimal!
         $isDeposit: Boolean
-        $paidAt: DateTime
     ) {
-        orderAddXeroPayment(
+        orderSyncXeroPayment(
             orderId: $orderId
             xeroPaymentId: $xeroPaymentId
-            amount: $amount
             isDeposit: $isDeposit
-            paidAt: $paidAt
         ) {
             errors {
                 field
@@ -118,7 +115,7 @@ def test_order_set_deposit_required_percentage_validation(
         assert errors[0]["code"] == OrderErrorCode.INVALID.name
 
 
-def test_order_add_xero_payment(
+def test_order_sync_xero_payment(
     staff_api_client, permission_group_manage_orders, order_with_lines
 ):
     permission_group_manage_orders.user_set.add(staff_api_client.user)
@@ -127,20 +124,32 @@ def test_order_add_xero_payment(
     order.save()
     order_id = graphene.Node.to_global_id("Order", order.id)
     xero_payment_id = "XERO-PMT-12345"
-    amount = "100.00"
+    amount = Decimal("100.00")
 
-    response = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": xero_payment_id,
-            "amount": amount,
-            "isDeposit": True,
-        },
-    )
+    mock_xero_data = {
+        "payment_id": xero_payment_id,
+        "amount": amount,
+        "date": "2024-01-15T10:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-123",
+    }
+
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data,
+    ):
+        response = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": xero_payment_id,
+                "isDeposit": True,
+            },
+        )
 
     content = get_graphql_content(response)
-    data = content["data"]["orderAddXeroPayment"]
+    data = content["data"]["orderSyncXeroPayment"]
     assert not data["errors"]
     assert data["payment"]["gateway"] == "xero"
     assert data["payment"]["pspReference"] == xero_payment_id
@@ -150,11 +159,11 @@ def test_order_add_xero_payment(
     assert order.payments.filter(gateway=CustomPaymentChoices.XERO).count() == 1
     payment = order.payments.first()
     assert payment.psp_reference == xero_payment_id
-    assert payment.captured_amount == Decimal(amount)
+    assert payment.captured_amount == amount
     assert payment.metadata["is_deposit"] is True
 
 
-def test_order_add_xero_payment_without_deposit_required_fails(
+def test_order_sync_xero_payment_without_deposit_required_fails(
     staff_api_client, permission_group_manage_orders, order_with_lines
 ):
     permission_group_manage_orders.user_set.add(staff_api_client.user)
@@ -164,23 +173,22 @@ def test_order_add_xero_payment_without_deposit_required_fails(
     order_id = graphene.Node.to_global_id("Order", order.id)
 
     response = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
+        ORDER_SYNC_XERO_PAYMENT_MUTATION,
         {
             "orderId": order_id,
             "xeroPaymentId": "XERO-PMT-12345",
-            "amount": "100.00",
             "isDeposit": True,
         },
     )
 
     content = get_graphql_content(response)
-    errors = content["data"]["orderAddXeroPayment"]["errors"]
+    errors = content["data"]["orderSyncXeroPayment"]["errors"]
     assert len(errors) == 1
     assert "does not require deposit" in errors[0]["message"]
     assert errors[0]["code"] == OrderErrorCode.INVALID.name
 
 
-def test_order_add_multiple_xero_payments(
+def test_order_sync_multiple_xero_payments(
     staff_api_client, permission_group_manage_orders, order_with_lines
 ):
     permission_group_manage_orders.user_set.add(staff_api_client.user)
@@ -191,45 +199,69 @@ def test_order_add_multiple_xero_payments(
     order.save()
     order_id = graphene.Node.to_global_id("Order", order.id)
 
-    response1 = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": "PAY-001",
-            "amount": "100.00",
-            "isDeposit": True,
-        },
-    )
+    mock_xero_data1 = {
+        "payment_id": "PAY-001",
+        "amount": Decimal("100.00"),
+        "date": "2024-01-15T10:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-123",
+    }
+
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data1,
+    ):
+        response1 = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": "PAY-001",
+                "isDeposit": True,
+            },
+        )
     content1 = get_graphql_content(response1)
-    assert not content1["data"]["orderAddXeroPayment"]["errors"]
+    assert not content1["data"]["orderSyncXeroPayment"]["errors"]
     assert (
-        float(content1["data"]["orderAddXeroPayment"]["order"]["totalDepositPaid"])
+        float(content1["data"]["orderSyncXeroPayment"]["order"]["totalDepositPaid"])
         == 100.0
     )
     assert (
-        content1["data"]["orderAddXeroPayment"]["order"]["depositThresholdMet"] is False
+        content1["data"]["orderSyncXeroPayment"]["order"]["depositThresholdMet"] is False
     )
-    assert content1["data"]["orderAddXeroPayment"]["order"]["depositPaidAt"] is None
+    assert content1["data"]["orderSyncXeroPayment"]["order"]["depositPaidAt"] is None
 
-    response2 = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": "PAY-002",
-            "amount": "200.00",
-            "isDeposit": True,
-        },
-    )
+    mock_xero_data2 = {
+        "payment_id": "PAY-002",
+        "amount": Decimal("200.00"),
+        "date": "2024-01-15T11:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-123",
+    }
+
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data2,
+    ):
+        response2 = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": "PAY-002",
+                "isDeposit": True,
+            },
+        )
     content2 = get_graphql_content(response2)
-    assert not content2["data"]["orderAddXeroPayment"]["errors"]
+    assert not content2["data"]["orderSyncXeroPayment"]["errors"]
     assert (
-        float(content2["data"]["orderAddXeroPayment"]["order"]["totalDepositPaid"])
+        float(content2["data"]["orderSyncXeroPayment"]["order"]["totalDepositPaid"])
         == 300.0
     )
     assert (
-        content2["data"]["orderAddXeroPayment"]["order"]["depositThresholdMet"] is True
+        content2["data"]["orderSyncXeroPayment"]["order"]["depositThresholdMet"] is True
     )
-    assert content2["data"]["orderAddXeroPayment"]["order"]["depositPaidAt"] is not None
+    assert content2["data"]["orderSyncXeroPayment"]["order"]["depositPaidAt"] is not None
 
     order.refresh_from_db()
     assert order.payments.filter(gateway=CustomPaymentChoices.XERO).count() == 2
@@ -238,7 +270,7 @@ def test_order_add_multiple_xero_payments(
     assert order.deposit_paid_at is not None
 
 
-def test_order_add_duplicate_xero_payment_id_fails(
+def test_order_sync_duplicate_xero_payment_id_fails(
     staff_api_client, permission_group_manage_orders, order_with_lines
 ):
     permission_group_manage_orders.user_set.add(staff_api_client.user)
@@ -248,82 +280,163 @@ def test_order_add_duplicate_xero_payment_id_fails(
     order_id = graphene.Node.to_global_id("Order", order.id)
     payment_id = "PAY-001"
 
-    response1 = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": payment_id,
-            "amount": "100.00",
-            "isDeposit": True,
-        },
-    )
-    content1 = get_graphql_content(response1)
-    assert not content1["data"]["orderAddXeroPayment"]["errors"]
+    mock_xero_data = {
+        "payment_id": payment_id,
+        "amount": Decimal("100.00"),
+        "date": "2024-01-15T10:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-123",
+    }
 
-    response2 = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": payment_id,
-            "amount": "50.00",
-            "isDeposit": True,
-        },
-    )
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data,
+    ):
+        response1 = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": payment_id,
+                "isDeposit": True,
+            },
+        )
+        content1 = get_graphql_content(response1)
+        assert not content1["data"]["orderSyncXeroPayment"]["errors"]
+
+        response2 = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": payment_id,
+                "isDeposit": True,
+            },
+        )
     content2 = get_graphql_content(response2)
-    errors = content2["data"]["orderAddXeroPayment"]["errors"]
+    errors = content2["data"]["orderSyncXeroPayment"]["errors"]
     assert len(errors) == 1
     assert "already exists" in errors[0]["message"]
     assert errors[0]["code"] == OrderErrorCode.UNIQUE.name
 
 
-def test_order_add_zero_amount_fails(
-    staff_api_client, permission_group_manage_orders, order_with_lines
-):
-    permission_group_manage_orders.user_set.add(staff_api_client.user)
-    order = order_with_lines
-    order.deposit_required = True
-    order.save()
-    order_id = graphene.Node.to_global_id("Order", order.id)
-
-    response = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": "PAY-001",
-            "amount": "0",
-            "isDeposit": True,
-        },
-    )
-
-    content = get_graphql_content(response)
-    errors = content["data"]["orderAddXeroPayment"]["errors"]
-    assert len(errors) == 1
-    assert "greater than zero" in errors[0]["message"]
-    assert errors[0]["code"] == OrderErrorCode.INVALID.name
-
-
-def test_order_add_xero_payment_non_deposit(
+def test_order_sync_xero_payment_non_deposit(
     staff_api_client, permission_group_manage_orders, order_with_lines
 ):
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     order = order_with_lines
     order_id = graphene.Node.to_global_id("Order", order.id)
 
-    response = staff_api_client.post_graphql(
-        ORDER_ADD_XERO_PAYMENT_MUTATION,
-        {
-            "orderId": order_id,
-            "xeroPaymentId": "XERO-FINAL-001",
-            "amount": "500.00",
-            "isDeposit": False,
-        },
-    )
+    mock_xero_data = {
+        "payment_id": "XERO-FINAL-001",
+        "amount": Decimal("500.00"),
+        "date": "2024-01-15T10:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-123",
+    }
+
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data,
+    ):
+        response = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": "XERO-FINAL-001",
+                "isDeposit": False,
+            },
+        )
 
     content = get_graphql_content(response)
-    data = content["data"]["orderAddXeroPayment"]
+    data = content["data"]["orderSyncXeroPayment"]
     assert not data["errors"]
     assert data["payment"]["gateway"] == "xero"
 
     order.refresh_from_db()
     payment = order.payments.first()
     assert payment.metadata["is_deposit"] is False
+
+
+def test_order_sync_xero_payment_validates_customer_match(
+    staff_api_client, permission_group_manage_orders, order_with_lines, customer_user
+):
+    """Test that payment must belong to correct Xero contact."""
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.user = customer_user
+    order.user.xero_contact_id = "XERO-CONTACT-CORRECT"
+    order.user.save()
+    order.save()
+    order_id = graphene.Node.to_global_id("Order", order.id)
+
+    # Payment belongs to different customer
+    mock_xero_data = {
+        "payment_id": "PAY-WRONG-CUSTOMER",
+        "amount": Decimal("100.00"),
+        "date": "2024-01-15T10:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-WRONG",
+    }
+
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data,
+    ):
+        response = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": "PAY-WRONG-CUSTOMER",
+                "isDeposit": False,
+            },
+        )
+
+    content = get_graphql_content(response)
+    errors = content["data"]["orderSyncXeroPayment"]["errors"]
+    assert len(errors) == 1
+    assert "different customer" in errors[0]["message"]
+    assert errors[0]["code"] == OrderErrorCode.INVALID.name
+
+
+def test_order_sync_xero_payment_auto_populates_contact_id(
+    staff_api_client, permission_group_manage_orders, order_with_lines, customer_user
+):
+    """Test that user's xero_contact_id is auto-populated from payment."""
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.user = customer_user
+    order.user.xero_contact_id = None  # Not set yet
+    order.user.save()
+    order.save()
+    order_id = graphene.Node.to_global_id("Order", order.id)
+
+    mock_xero_data = {
+        "payment_id": "PAY-001",
+        "amount": Decimal("100.00"),
+        "date": "2024-01-15T10:00:00",
+        "invoice_id": "INV-123",
+        "status": "AUTHORISED",
+        "contact_id": "XERO-CONTACT-NEW",
+    }
+
+    with patch(
+        "saleor.graphql.order.mutations.order_add_xero_payment.validate_xero_payment",
+        return_value=mock_xero_data,
+    ):
+        response = staff_api_client.post_graphql(
+            ORDER_SYNC_XERO_PAYMENT_MUTATION,
+            {
+                "orderId": order_id,
+                "xeroPaymentId": "PAY-001",
+                "isDeposit": False,
+            },
+        )
+
+    content = get_graphql_content(response)
+    assert not content["data"]["orderSyncXeroPayment"]["errors"]
+
+    # Verify contact ID was auto-populated
+    order.user.refresh_from_db()
+    assert order.user.xero_contact_id == "XERO-CONTACT-NEW"

@@ -68,7 +68,7 @@ def unconfirmed_order_with_allocations(
     return order
 
 
-def test_confirm_poi_creates_fulfillments_automatically(
+def test_confirm_poi_does_not_create_fulfillments(
     unconfirmed_order_with_allocations,
     purchase_order,
     warehouse,
@@ -79,7 +79,6 @@ def test_confirm_poi_creates_fulfillments_automatically(
     order = unconfirmed_order_with_allocations
     line = order.lines.first()
 
-    # Create POI for the order
     from ..models import PurchaseOrderItem
 
     poi = PurchaseOrderItem.objects.create(
@@ -89,7 +88,6 @@ def test_confirm_poi_creates_fulfillments_automatically(
         total_price_amount=50.0,
     )
 
-    # Link PO to correct warehouses
     purchase_order.source_warehouse = warehouse_for_cc
     purchase_order.destination_warehouse = warehouse
     purchase_order.save()
@@ -106,20 +104,11 @@ def test_confirm_poi_creates_fulfillments_automatically(
     # Order should be auto-confirmed
     assert order.status == OrderStatus.UNFULFILLED
 
-    # Fulfillments should be auto-created
-    fulfillments = Fulfillment.objects.filter(order=order)
-    assert fulfillments.count() == 1
-
-    fulfillment = fulfillments.first()
-    assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
-    assert fulfillment.lines.count() == 1
-
-    # Pick should be created
-    assert hasattr(fulfillment, "pick")
-    assert fulfillment.pick.status == PickStatus.NOT_STARTED
+    # No fulfillments should be created at confirm time - only after receipt
+    assert Fulfillment.objects.filter(order=order).count() == 0
 
 
-def test_confirm_poi_creates_multiple_fulfillments_for_multiple_warehouses(
+def test_confirm_poi_auto_confirms_order_without_creating_fulfillments(
     order, warehouse, warehouse_JPY, warehouse_for_cc, product_variant_list, staff_user
 ):
     # given
@@ -245,22 +234,8 @@ def test_confirm_poi_creates_multiple_fulfillments_for_multiple_warehouses(
     order.refresh_from_db()
     assert order.status == OrderStatus.UNFULFILLED
 
-    # Should have 2 fulfillments (one per warehouse)
-    fulfillments = Fulfillment.objects.filter(order=order)
-    assert fulfillments.count() == 2
-
-    # Each fulfillment should have correct warehouse
-    warehouses_with_fulfillments = set()
-    for fulfillment in fulfillments:
-        assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
-        assert fulfillment.lines.count() == 1
-        assert hasattr(fulfillment, "pick")
-
-        stock = fulfillment.lines.first().stock
-        warehouses_with_fulfillments.add(stock.warehouse_id)
-
-    assert warehouse.id in warehouses_with_fulfillments
-    assert warehouse_JPY.id in warehouses_with_fulfillments
+    # No fulfillments at confirm time - fulfillments are created after receipt
+    assert Fulfillment.objects.filter(order=order).count() == 0
 
 
 def test_confirm_poi_does_not_create_fulfillments_if_not_all_inventory_ready(

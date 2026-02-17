@@ -1686,6 +1686,9 @@ def create_product_media(product: "Product", image_url: str) -> "ProductMedia | 
         Created ProductMedia instance, or None if fetch failed
 
     """
+    import uuid
+    from urllib.parse import urlparse
+
     from django.core.files.base import ContentFile
 
     from saleor.core.http_client import HTTPClient
@@ -1701,20 +1704,20 @@ def create_product_media(product: "Product", image_url: str) -> "ProductMedia | 
         response.raise_for_status()
         image_data = response.content
 
-        # Create ContentFile from image bytes
-        image_file = ContentFile(image_data)
+        parsed_url = urlparse(image_url)
+        url_path = parsed_url.path.split("/")[-1]
+        if "." in url_path and not url_path.startswith("."):
+            ext = url_path.split(".")[-1].split("?")[0]
+        else:
+            ext = "jpg"
 
-        # Extract filename from URL or use product slug
-        filename = image_url.split("/")[-1] or f"{product.slug}.jpg"
+        filename = f"{uuid.uuid4()}.{ext}"
+        image_file = ContentFile(image_data, name=filename)
 
-        # Create ProductMedia
         media = ProductMedia.objects.create(
             product=product,
-            image=image_file,
             alt=product.name,
         )
-
-        # Save the file with proper filename
         media.image.save(filename, image_file, save=True)
 
         logger.info("Created product media for %s from %s", product.name, image_url)

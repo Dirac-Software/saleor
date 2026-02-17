@@ -1155,21 +1155,17 @@ def test_deallocate_stock_for_orders(order_line_with_allocation_in_many_stocks):
     order_line = order_line_with_allocation_in_many_stocks
     order = order_line.order
 
+    stocks = [alloc.stock for alloc in order_line.allocations.all()]
+
     deallocate_stock_for_orders(
         [order.id], manager=get_plugins_manager(allow_replica=False)
     )
 
-    allocations = order_line.allocations.all()
-    assert (
-        allocations[0].quantity_allocated
-        == allocations[0].stock.quantity_allocated
-        == 0
-    )
-    assert (
-        allocations[1].quantity_allocated
-        == allocations[1].stock.quantity_allocated
-        == 0
-    )
+    assert not order_line.allocations.exists()
+
+    for stock in stocks:
+        stock.refresh_from_db()
+        assert stock.quantity_allocated == 0
 
 
 def test_deallocate_stock_for_orders_with_multiple_allocations_from_the_same_stock(
@@ -1208,13 +1204,12 @@ def test_deallocate_stock_for_orders_with_multiple_allocations_from_the_same_sto
     )
 
     # then
-    first_allocation.refresh_from_db()
-    second_allocation.refresh_from_db()
+    assert not Allocation.objects.filter(
+        pk__in=[first_allocation.pk, second_allocation.pk]
+    ).exists()
     stock.refresh_from_db()
 
     assert stock.quantity_allocated == 0
-    assert first_allocation.quantity_allocated == 0
-    assert second_allocation.quantity_allocated == 0
 
 
 @mock.patch("saleor.plugins.manager.PluginsManager.product_variant_back_in_stock")

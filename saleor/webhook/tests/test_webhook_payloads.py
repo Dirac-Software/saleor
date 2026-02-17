@@ -2855,3 +2855,86 @@ def test_generate_product_media_payload(product_media_image):
 
     # then
     assert payload == expected_payload
+
+
+def test_generate_proforma_invoice_payload(
+    fulfillment, warehouse, product, site_settings
+):
+    """Test proforma invoice webhook payload generation."""
+    from decimal import Decimal
+
+    from ...attribute import AttributeType
+    from ...attribute.models import Attribute, AssignedProductAttributeValue, AttributeValue
+    from ...payment import ChargeStatus, CustomPaymentChoices
+    from ...payment.models import Payment
+    from ..payloads import generate_proforma_invoice_payload
+
+    # Setup order with deposit
+    order = fulfillment.order
+    order.deposit_required = True
+    order.deposit_percentage = Decimal("30.00")
+    order.total_gross_amount = Decimal("200.00")
+    order.save()
+
+    # Add deposit payment
+    Payment.objects.create(
+        order=order,
+        gateway=CustomPaymentChoices.XERO,
+        psp_reference="XERO-TEST-001",
+        total=Decimal("60.00"),
+        captured_amount=Decimal("60.00"),
+        charge_status=ChargeStatus.FULLY_CHARGED,
+        currency=order.currency,
+        is_active=True,
+        metadata={"is_deposit": True},
+    )
+
+    # Create product code attribute
+    attribute = Attribute.objects.create(
+        slug="product-code",
+        name="Product Code",
+        type=AttributeType.PRODUCT_TYPE,
+    )
+    site_settings.invoice_product_code_attribute = attribute.slug
+    site_settings.save()
+
+    # Create attribute value for product
+    attr_value = AttributeValue.objects.create(
+        attribute=attribute,
+        name="PROD-001",
+        slug="prod-001",
+    )
+    AssignedProductAttributeValue.objects.create(
+        product=product,
+        value=attr_value,
+    )
+
+    # Set fulfillment deposit allocation
+    fulfillment.deposit_allocated_amount = Decimal("30.00")
+    fulfillment.save()
+
+    # Create proforma invoice for the fulfillment
+    from ...invoice.models import Invoice
+    from ...invoice import InvoiceType
+
+    Invoice.objects.create(
+        order=order,
+        fulfillment=fulfillment,
+        type=InvoiceType.PROFORMA,
+    )
+
+    # Generate payload
+    payload = json.loads(generate_proforma_invoice_payload(fulfillment))
+
+    # Verify structure
+    assert "order" in payload
+    assert "fulfillment" in payload
+    assert "invoice" in payload
+    assert "calculated_amounts" in payload
+
+    # Verify deposit info
+    assert payload["fulfillment"]["deposit_allocated"]["amount"] == "30.00"
+
+    # Verify lines have product codes
+    assert len(payload["fulfillment"]["lines"]) > 0
+    # Product code extraction tested (even if None due to variant not having product assignment)

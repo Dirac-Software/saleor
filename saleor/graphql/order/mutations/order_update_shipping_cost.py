@@ -72,6 +72,51 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         error_type_field = "order_errors"
 
     @classmethod
+    def _get_or_create_manual_shipping_method(cls, channel):
+        from ....shipping.models import ShippingMethod, ShippingMethodChannelListing, ShippingZone
+        from decimal import Decimal
+
+        # Find or create a global "MANUAL" shipping zone
+        manual_zone, _ = ShippingZone.objects.get_or_create(
+            name="MANUAL",
+            defaults={
+                "countries": [],
+                "description": "Automatic zone for manual shipping costs",
+            },
+        )
+
+        # Ensure the channel is linked to this zone
+        if not manual_zone.channels.filter(id=channel.id).exists():
+            manual_zone.channels.add(channel)
+
+        # Find or create the MANUAL shipping method
+        manual_method, created = ShippingMethod.objects.get_or_create(
+            shipping_zone=manual_zone,
+            name="MANUAL",
+            defaults={
+                "type": "manual",
+            },
+        )
+
+        # Update existing methods to use manual type
+        if not created and manual_method.type != "manual":
+            manual_method.type = "manual"
+            manual_method.save(update_fields=["type"])
+
+        # Ensure channel listing exists (zero cost - actual price from manual input)
+        ShippingMethodChannelListing.objects.get_or_create(
+            shipping_method=manual_method,
+            channel=channel,
+            defaults={
+                "minimum_order_price_amount": Decimal(0),
+                "price_amount": Decimal(0),
+                "currency": channel.currency_code,
+            },
+        )
+
+        return manual_method
+
+    @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
         order = cls.get_node_or_error(
             info,
@@ -123,8 +168,12 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         order.undiscounted_base_shipping_price_amount = net_amount
         order.shipping_tax_rate = vat_percentage / Decimal(100)
 
-        if not order.shipping_method:
+        needs_manual_method = not order.shipping_method
+        if needs_manual_method:
             order.shipping_method_name = "Manual Shipping Cost"
+            # Auto-assign MANUAL shipping method to satisfy validation
+            manual_method = cls._get_or_create_manual_shipping_method(order.channel)
+            order.shipping_method = manual_method
 
         if inco_term:
             order.inco_term = inco_term
@@ -140,8 +189,8 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             "should_refresh_prices",
             "updated_at",
         ]
-        if not order.shipping_method:
-            update_fields.append("shipping_method_name")
+        if needs_manual_method:
+            update_fields.extend(["shipping_method", "shipping_method_name"])
         if inco_term:
             update_fields.append("inco_term")
 

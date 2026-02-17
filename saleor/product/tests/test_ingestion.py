@@ -1,5 +1,7 @@
 """Tests for product ingestion utilities."""
 
+from unittest.mock import Mock, patch
+
 import pytest
 
 from saleor.attribute import AttributeInputType, AttributeType
@@ -9,16 +11,18 @@ from saleor.attribute.models.product_variant import (
     AssignedVariantAttributeValue,
     AttributeVariant,
 )
+from saleor.core.http_client import HTTPClient
 from saleor.product.ingestion import (
     IngestConfig,
     MissingDatabaseSetup,
     SizeQtyUnparseable,
     SpreadsheetColumnMapping,
+    create_product_media,
     get_products_by_code_and_brand,
     get_size_to_variant_map,
     parse_sizes_and_qty,
 )
-from saleor.product.models import Product, ProductType, ProductVariant
+from saleor.product.models import Product, ProductMedia, ProductType, ProductVariant
 
 
 def test_parse_sizes_and_qty_with_bracket_notation():
@@ -302,3 +306,154 @@ def product_with_variants(simple_product):
         ProductVariant.objects.create(product=product, name=f"Variant {i}", sku=None)
 
     return product
+
+
+def test_create_product_media_success(simple_product, mocker):
+    """Test successful product media creation from URL."""
+    image_url = "https://example.com/image.jpg"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(
+        type(HTTPClient), "send_request", return_value=mock_response
+    )
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.product == simple_product
+    assert media.alt == simple_product.name
+    assert media.image.name.endswith(".jpg")
+
+
+def test_create_product_media_with_query_params(simple_product, mocker):
+    """Test media creation with URL containing query parameters."""
+    image_url = "https://example.com/image.jpg?w=800&h=600&fit=crop"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.image.name.endswith(".jpg")
+    assert "?" not in media.image.name
+    assert "w=" not in media.image.name
+
+
+def test_create_product_media_very_long_url(simple_product, mocker):
+    """Test media creation with extremely long URL does not create long filename."""
+    base_url = "https://example.com/very/long/path"
+    long_path = "/".join(["segment"] * 50)
+    image_url = f"{base_url}/{long_path}/image.jpg?param1=value1&param2=value2"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    filename = media.image.name.split("/")[-1]
+    assert len(filename) < 100
+    assert filename.endswith(".jpg")
+
+
+def test_create_product_media_http_error(simple_product, mocker):
+    """Test media creation handles HTTP errors gracefully."""
+    image_url = "https://example.com/nonexistent.jpg"
+
+    mock_response = Mock()
+    mock_response.raise_for_status.side_effect = Exception("404 Not Found")
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is None
+    assert ProductMedia.objects.filter(product=simple_product).count() == 0
+
+
+def test_create_product_media_network_error(simple_product, mocker):
+    """Test media creation handles network errors gracefully."""
+    image_url = "https://example.com/image.jpg"
+
+    mocker.patch.object(
+        type(HTTPClient), "send_request", side_effect=Exception("Network timeout")
+    )
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is None
+    assert ProductMedia.objects.filter(product=simple_product).count() == 0
+
+
+def test_create_product_media_no_extension(simple_product, mocker):
+    """Test media creation falls back to jpg when URL has no extension."""
+    image_url = "https://example.com/image"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.image.name.endswith(".jpg")
+
+
+def test_create_product_media_different_extensions(simple_product, mocker):
+    """Test media creation preserves different image extensions."""
+    extensions = ["jpg", "jpeg", "png", "gif", "webp"]
+
+    for ext in extensions:
+        image_url = f"https://example.com/image.{ext}"
+        fake_image_data = b"fake-image-data"
+
+        mock_response = Mock()
+        mock_response.content = fake_image_data
+        mock_response.raise_for_status = Mock()
+
+        mocker.patch.object(
+            type(HTTPClient), "send_request", return_value=mock_response
+        )
+
+        media = create_product_media(simple_product, image_url)
+
+        assert media is not None
+        assert media.image.name.endswith(f".{ext}")
+
+        ProductMedia.objects.filter(product=simple_product).delete()
+
+
+def test_create_product_media_storage_error(simple_product, mocker):
+    """Test media creation handles storage errors gracefully."""
+    image_url = "https://example.com/image.jpg"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+    mocker.patch(
+        "saleor.product.models.ProductMedia.objects.create",
+        side_effect=Exception("Storage backend error"),
+    )
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is None

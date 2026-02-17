@@ -1421,3 +1421,84 @@ def get_external_shipping_id(order: "Order"):
     if not order:
         return None
     return order.get_value_from_private_metadata(PRIVATE_META_APP_SHIPPING_ID)
+
+
+def record_external_payment(
+    order: "Order",
+    *,
+    amount: Decimal,
+    gateway: str,
+    psp_reference: str | None = None,
+    transaction_kind: str,
+    metadata: dict | None = None,
+    user: Optional["User"] = None,
+    app: Optional["App"] = None,
+    manager: Optional["PluginsManager"] = None,
+) -> "Payment":
+    """Record an external payment that has already been processed.
+
+    This handles:
+    - Creating payment and transaction records
+    - Updating order charge/authorize data
+    - Creating order events
+    - Triggering webhooks if order becomes fully paid
+
+    Use this for payments processed outside Saleor (Xero, manual, etc.)
+    """
+    from ..payment import ChargeStatus, TransactionKind
+    from ..payment.models import Payment, Transaction
+    from . import events
+
+    payment = Payment.objects.create(
+        order=order,
+        gateway=gateway,
+        psp_reference=psp_reference or "",
+        total=amount,
+        captured_amount=amount,
+        charge_status=ChargeStatus.FULLY_CHARGED,
+        currency=order.currency,
+        is_active=True,
+        billing_email=order.user_email,
+        metadata=metadata or {},
+    )
+
+    Transaction.objects.create(
+        payment=payment,
+        kind=transaction_kind,
+        amount=amount,
+        currency=order.currency,
+        is_success=True,
+        token=psp_reference or "",
+        gateway_response={},
+    )
+
+    update_order_charge_data(order)
+    update_order_authorize_data(order)
+
+    if user or app:
+        events.order_manually_marked_as_paid_event(
+            order=order,
+            user=user,
+            app=app,
+            transaction_reference=psp_reference,
+        )
+
+    if manager and order.is_fully_paid():
+        from ..webhook.event_types import WebhookEventAsyncType
+        from ..webhook.utils import get_webhooks_for_multiple_events
+        from . import actions
+
+        webhook_event_map = get_webhooks_for_multiple_events(
+            actions.WEBHOOK_EVENTS_FOR_FULLY_PAID
+        )
+        actions.call_order_events(
+            manager,
+            [
+                WebhookEventAsyncType.ORDER_FULLY_PAID,
+                WebhookEventAsyncType.ORDER_UPDATED,
+            ],
+            order,
+            webhook_event_map=webhook_event_map,
+        )
+
+    return payment

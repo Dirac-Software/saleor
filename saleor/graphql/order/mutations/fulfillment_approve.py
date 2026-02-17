@@ -80,14 +80,19 @@ class FulfillmentApprove(BaseMutation):
 
         OrderFulfill.check_lines_for_preorder([line.order_line for line in fulfillment])
         site = get_site_promise(info.context).get()
-        if (
-            not site.settings.fulfillment_allow_unpaid
-            and not fulfillment.order.is_fully_paid()
-        ):
-            raise ValidationError(
-                "Cannot fulfill unpaid order.",
-                code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
-            )
+
+        if not site.settings.fulfillment_allow_unpaid:
+            if hasattr(fulfillment, "proforma_invoice"):
+                if not fulfillment.proforma_invoice_paid:
+                    raise ValidationError(
+                        "Cannot fulfill with unpaid proforma invoice.",
+                        code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
+                    )
+            elif not fulfillment.order.is_fully_paid():
+                raise ValidationError(
+                    "Cannot fulfill unpaid order.",
+                    code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
+                )
 
     @classmethod
     def perform_mutation(  # type: ignore[override]

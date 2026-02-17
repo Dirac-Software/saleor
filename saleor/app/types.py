@@ -44,6 +44,8 @@ class DeprecatedAppExtensionMount:
     ORDER_OVERVIEW_CREATE = "order_overview_create"
     ORDER_OVERVIEW_MORE_ACTIONS = "order_overview_more_actions"
     ORDER_DETAILS_WIDGETS = "order_details_widgets"
+    ORDER_FULFILLMENT_DETAILS_MORE_ACTIONS = "order_fulfillment_details_more_actions"
+    ORDER_FULFILLMENT_OVERVIEW = "order_fulfillment_overview"
 
     DRAFT_ORDER_DETAILS_MORE_ACTIONS = "draft_order_details_more_actions"
     DRAFT_ORDER_OVERVIEW_CREATE = "draft_order_overview_create"
@@ -103,6 +105,8 @@ class DeprecatedAppExtensionMount:
         (ORDER_OVERVIEW_CREATE, "order_overview_create"),
         (ORDER_OVERVIEW_MORE_ACTIONS, "order_overview_more_actions"),
         (ORDER_DETAILS_WIDGETS, "order_details_widgets"),
+        (ORDER_FULFILLMENT_DETAILS_MORE_ACTIONS, "order_fulfillment_details_more_actions"),
+        (ORDER_FULFILLMENT_OVERVIEW, "order_fulfillment_overview"),
         (DRAFT_ORDER_DETAILS_MORE_ACTIONS, "draft_order_details_more_actions"),
         (DRAFT_ORDER_OVERVIEW_CREATE, "draft_order_overview_create"),
         (DRAFT_ORDER_OVERVIEW_MORE_ACTIONS, "draft_order_overview_more_actions"),

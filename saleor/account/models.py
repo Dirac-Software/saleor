@@ -197,6 +197,15 @@ class User(
     # Denormalized number of orders placed by the user
     number_of_orders = models.PositiveIntegerField(default=0, db_default=0)
 
+    # Xero integration
+    xero_contact_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Xero contact ID for this customer. Auto-populated from Xero API.",
+    )
+
     USERNAME_FIELD = "email"
     NEWLY_CREATED_USER = False
 

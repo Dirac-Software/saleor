@@ -1147,9 +1147,7 @@ def deallocate_stock_for_orders(orders_ids: list[UUID], manager: PluginsManager)
                 lambda: manager.product_variant_back_in_stock(allocation.stock)
             )
 
-    Allocation.objects.filter(id__in=[a.id for a in allocations]).update(
-        quantity_allocated=0
-    )
+    Allocation.objects.filter(id__in=[a.id for a in allocations]).delete()
     Stock.objects.bulk_update(stocks_to_update, ["quantity_allocated"])
 
 

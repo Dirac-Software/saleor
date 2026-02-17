@@ -438,6 +438,10 @@ class WebhookEventAsyncType:
             "name": "Fulfillment tracking number updated.",
             "permission": OrderPermissions.MANAGE_ORDERS,
         },
+        FULFILLMENT_PROFORMA_INVOICE_GENERATED: {
+            "name": "Proforma invoice generated for fulfillment",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
         DRAFT_ORDER_CREATED: {
             "name": "Draft order created",
             "permission": OrderPermissions.MANAGE_ORDERS,

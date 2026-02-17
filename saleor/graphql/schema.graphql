@@ -1024,6 +1024,16 @@ type Query {
     last: Int
   ): FulfillmentCountableConnection @doc(category: "Orders")
 
+  """
+  List available Xero payments for an order's customer (last 5).
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  availableXeroPayments(
+    """ID of the order to fetch payments for."""
+    orderId: ID!
+  ): AvailableXeroPayments @doc(category: "Orders")
+
   """Look up a navigation menu by ID or name."""
   menu(
     """Slug of a channel for which the data should be returned."""
@@ -1107,6 +1117,12 @@ type Query {
     """
     last: Int
   ): MenuItemCountableConnection @doc(category: "Menu")
+
+  """Look up an Invoice by Xero invoice ID."""
+  invoiceByXeroId(
+    """Xero invoice ID to look up."""
+    xeroInvoiceId: String!
+  ): Invoice @doc(category: "Orders")
 
   """
   Look up a purchase order by ID.
@@ -4089,6 +4105,7 @@ type ShippingMethodType implements Node & ObjectWithMetadata @doc(category: "Shi
 enum ShippingMethodTypeEnum @doc(category: "Shipping") {
   PRICE
   WEIGHT
+  MANUAL
 }
 
 """Represents shipping method translations."""
@@ -11886,6 +11903,11 @@ type OrderLine implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """
   canFulfillQuantity: Int!
 
+  """
+  Whether this line can be fulfilled now (has stock and deposit requirements met).
+  """
+  isReadyToFulfill: Boolean!
+
   """Rate of tax applied on product variant."""
   taxRate: Float!
   digitalContentUrl: DigitalContentUrl
@@ -12249,6 +12271,15 @@ type Invoice implements ObjectWithMetadata & Job & Node @doc(category: "Orders")
 
   """Order related to the invoice."""
   order: Order
+
+  """Xero invoice ID."""
+  xeroInvoiceId: String
+
+  """Invoice type."""
+  type: InvoiceType
+
+  """Fulfillment related to the invoice."""
+  fulfillment: Fulfillment
 }
 
 interface Job {
@@ -12270,6 +12301,11 @@ enum JobStatusEnum {
   SUCCESS
   FAILED
   DELETED
+}
+
+enum InvoiceType @doc(category: "Orders") {
+  FINAL
+  PROFORMA
 }
 
 enum IncoTermEnum @doc(category: "Shipping") {
@@ -14353,6 +14389,32 @@ input FulfillmentQueryFilterInput @doc(category: "Orders") {
   proformaInvoicePaid: Boolean
   metadata: [MetadataFilter!]
   depositAllocated: Boolean
+}
+
+"""Available Xero payments for an order's customer."""
+type AvailableXeroPayments {
+  """List of available Xero payments for this order's customer."""
+  payments: [XeroPaymentSummary!]
+
+  """Errors encountered while fetching payments."""
+  errors: [OrderError!]
+}
+
+type XeroPaymentSummary {
+  """Xero payment ID (PaymentID)."""
+  paymentId: String!
+
+  """Payment amount."""
+  amount: Decimal!
+
+  """Payment date from Xero."""
+  date: String!
+
+  """Associated invoice number."""
+  invoiceNumber: String
+
+  """Payment status in Xero."""
+  status: String!
 }
 
 type MenuCountableConnection @doc(category: "Menu") {
@@ -18128,26 +18190,20 @@ type Mutation {
   ): OrderSetDepositRequired @doc(category: "Orders")
 
   """
-  Add a Xero payment to an order. Replaces manual 'mark as paid' functionality. 
+  Sync a Xero payment to an order by validating with Xero API. Only callable by external integrations after receiving Xero webhooks. Payment amount is fetched from Xero, not provided by caller. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
   """
-  orderAddXeroPayment(
-    """Amount of this payment."""
-    amount: Decimal!
-
+  orderSyncXeroPayment(
     """Whether this is a deposit payment."""
     isDeposit: Boolean = false
 
     """ID of the order."""
     orderId: ID!
 
-    """Timestamp when payment was made. Defaults to now."""
-    paidAt: DateTime
-
-    """Xero payment ID (Invoice.PaymentID)."""
+    """Xero payment ID to validate and sync."""
     xeroPaymentId: String!
-  ): OrderAddXeroPayment @doc(category: "Orders")
+  ): OrderSyncXeroPayment @doc(category: "Orders")
 
   """
   Updates an order. 
@@ -18473,22 +18529,6 @@ type Mutation {
   ): MenuItemMove @doc(category: "Menu") @webhookEventsInfo(asyncEvents: [MENU_ITEM_UPDATED], syncEvents: [])
 
   """
-  Request an invoice for the order using plugin. 
-  
-  Requires one of the following permissions: MANAGE_ORDERS.
-  
-  Triggers the following webhook events:
-  - INVOICE_REQUESTED (async): An invoice was requested.
-  """
-  invoiceRequest(
-    """Invoice number, if not provided it will be generated."""
-    number: String
-
-    """ID of the order related to invoice."""
-    orderId: ID!
-  ): InvoiceRequest @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_REQUESTED], syncEvents: [])
-
-  """
   Requests deletion of an invoice. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -18500,19 +18540,6 @@ type Mutation {
     """ID of an invoice to request the deletion."""
     id: ID!
   ): InvoiceRequestDelete @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_DELETED], syncEvents: [])
-
-  """
-  Creates a ready to send invoice. 
-  
-  Requires one of the following permissions: MANAGE_ORDERS.
-  """
-  invoiceCreate(
-    """Fields required when creating an invoice."""
-    input: InvoiceCreateInput!
-
-    """ID of the order related to invoice."""
-    orderId: ID!
-  ): InvoiceCreate @doc(category: "Orders")
 
   """
   Deletes an invoice. 
@@ -18550,6 +18577,22 @@ type Mutation {
     """ID of an invoice to be sent."""
     id: ID!
   ): InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_SENT, NOTIFY_USER], syncEvents: [])
+
+  """
+  Create an Invoice record linking a Xero final invoice to a fulfillment. Called by external integration after creating invoice in Xero. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  invoiceCreateFinal(
+    """ID of the fulfillment."""
+    fulfillmentId: ID!
+
+    """Invoice number from Xero."""
+    invoiceNumber: String
+
+    """Xero invoice ID to link."""
+    xeroInvoiceId: String!
+  ): InvoiceCreateFinal @doc(category: "Orders")
 
   """
   Creates a new purchase order from a supplier. 
@@ -26857,15 +26900,15 @@ type OrderSetDepositRequired @doc(category: "Orders") {
 }
 
 """
-Add a Xero payment to an order. Replaces manual 'mark as paid' functionality. 
+Sync a Xero payment to an order by validating with Xero API. Only callable by external integrations after receiving Xero webhooks. Payment amount is fetched from Xero, not provided by caller. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
 """
-type OrderAddXeroPayment @doc(category: "Orders") {
+type OrderSyncXeroPayment @doc(category: "Orders") {
   """Created Xero payment."""
   payment: Payment
 
-  """Order with added payment."""
+  """Order with synced payment."""
   order: Order
   orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [OrderError!]!
@@ -27747,16 +27790,14 @@ input MenuItemMoveInput {
 }
 
 """
-Request an invoice for the order using plugin. 
+Requests deletion of an invoice. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
 
 Triggers the following webhook events:
-- INVOICE_REQUESTED (async): An invoice was requested.
+- INVOICE_DELETED (async): An invoice was requested to delete.
 """
-type InvoiceRequest @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_REQUESTED], syncEvents: []) {
-  """Order related to an invoice."""
-  order: Order
+type InvoiceRequestDelete @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_DELETED], syncEvents: []) {
   invoiceErrors: [InvoiceError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [InvoiceError!]!
   invoice: Invoice
@@ -27784,53 +27825,6 @@ enum InvoiceErrorCode @doc(category: "Orders") {
   NOT_FOUND
   INVALID_STATUS
   NO_INVOICE_PLUGIN
-}
-
-"""
-Requests deletion of an invoice. 
-
-Requires one of the following permissions: MANAGE_ORDERS.
-
-Triggers the following webhook events:
-- INVOICE_DELETED (async): An invoice was requested to delete.
-"""
-type InvoiceRequestDelete @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_DELETED], syncEvents: []) {
-  invoiceErrors: [InvoiceError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [InvoiceError!]!
-  invoice: Invoice
-}
-
-"""
-Creates a ready to send invoice. 
-
-Requires one of the following permissions: MANAGE_ORDERS.
-"""
-type InvoiceCreate @doc(category: "Orders") {
-  invoiceErrors: [InvoiceError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [InvoiceError!]!
-  invoice: Invoice
-}
-
-input InvoiceCreateInput @doc(category: "Orders") {
-  """Invoice number."""
-  number: String!
-
-  """URL of an invoice to download."""
-  url: String!
-
-  """
-  Fields required to update the invoice metadata. Can be read by any API client authorized to read the object it's attached to.
-  
-  Warning: never store sensitive information, including financial data such as credit card details.
-  """
-  metadata: [MetadataInput!]
-
-  """
-  Fields required to update the invoice private metadata. Requires permissions to modify and to read the metadata of the object it's attached to.
-  
-  Warning: never store sensitive information, including financial data such as credit card details.
-  """
-  privateMetadata: [MetadataInput!]
 }
 
 """
@@ -27890,6 +27884,18 @@ type InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEv
   invoiceErrors: [InvoiceError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [InvoiceError!]!
   invoice: Invoice
+}
+
+"""
+Create an Invoice record linking a Xero final invoice to a fulfillment. Called by external integration after creating invoice in Xero. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type InvoiceCreateFinal @doc(category: "Orders") {
+  """Created invoice record."""
+  invoice: Invoice
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
 }
 
 """

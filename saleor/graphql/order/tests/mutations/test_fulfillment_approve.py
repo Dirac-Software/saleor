@@ -743,6 +743,85 @@ def test_fulfillment_approve_order_unpaid(
     assert data["errors"][0]["code"] == OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.name
 
 
+@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
+def test_fulfillment_approve_with_proforma_paid_but_order_not_fully_paid(
+    mock_email_fulfillment,
+    mock_fulfillment_approved,
+    staff_api_client,
+    partial_fulfillment_awaiting_approval,
+    permission_group_manage_orders,
+    site_settings,
+):
+    from decimal import Decimal
+
+    from django.utils import timezone
+
+    from .....invoice import InvoiceType
+    from .....invoice.models import Invoice
+    from .....shipping import IncoTerm, ShipmentType
+    from .....shipping.models import Shipment
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    site_settings.fulfillment_allow_unpaid = False
+    site_settings.save(update_fields=["fulfillment_allow_unpaid"])
+
+    fulfillment = partial_fulfillment_awaiting_approval
+    order = fulfillment.order
+
+    Invoice.objects.create(
+        order=order,
+        number="PROFORMA-PARTIAL-001",
+        type=InvoiceType.PROFORMA,
+        fulfillment=fulfillment,
+    )
+
+    fulfillment.proforma_invoice_paid = True
+    fulfillment.proforma_invoice_paid_at = timezone.now()
+    fulfillment.save(
+        update_fields=["proforma_invoice_paid", "proforma_invoice_paid_at"]
+    )
+
+    warehouse = fulfillment.lines.first().stock.warehouse
+    shipment = Shipment.objects.create(
+        source=warehouse.address,
+        destination=warehouse.address,
+        shipment_type=ShipmentType.OUTBOUND,
+        tracking_url="TEST-PROFORMA-PAID",
+        shipping_cost_amount=Decimal("50.00"),
+        currency="USD",
+        inco_term=IncoTerm.DDP,
+        carrier="TEST-CARRIER",
+        departed_at=timezone.now(),
+    )
+    fulfillment.shipment = shipment
+    fulfillment.save(update_fields=["shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment)
+    start_pick(pick)
+    for pick_item in pick.items.all():
+        update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
+    complete_pick(pick)
+
+    assert not order.is_fully_paid()
+
+    query = APPROVE_FULFILLMENT_MUTATION
+    fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)
+    variables = {"id": fulfillment_id, "notifyCustomer": True}
+
+    response = staff_api_client.post_graphql(query, variables)
+
+    content = get_graphql_content(response)
+    data = content["data"]["orderFulfillmentApprove"]
+    assert not data["errors"]
+    assert data["fulfillment"]["status"] == FulfillmentStatus.FULFILLED.upper()
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.FULFILLED
+
+    assert mock_email_fulfillment.call_count == 1
+    mock_fulfillment_approved.assert_called_once_with(fulfillment, True)
+
+
 def test_fulfillment_approve_preorder(
     staff_api_client, fulfillment, permission_group_manage_orders, site_settings
 ):
