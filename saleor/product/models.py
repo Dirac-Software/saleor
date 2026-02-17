@@ -41,7 +41,7 @@ from ..permission.enums import (
 )
 from ..seo.models import SeoModel, SeoModelTranslationWithSlug
 from ..tax.models import TaxClass
-from . import ProductMediaTypes, ProductTypeKind, managers
+from . import PriceListStatus, ProductMediaTypes, ProductTypeKind, managers
 
 ALL_PRODUCTS_PERMISSIONS = [
     # List of permissions, where each of them allows viewing all products
@@ -784,3 +784,103 @@ class CollectionTranslation(SeoModelTranslationWithSlug):
             }
         )
         return translated_keys
+
+
+class PriceList(models.Model):
+    warehouse = models.ForeignKey(
+        "warehouse.Warehouse",
+        on_delete=models.PROTECT,
+        related_name="price_lists",
+    )
+    name = models.CharField(max_length=255, blank=True, default="")
+    channels = models.ManyToManyField(
+        "channel.Channel",
+        blank=True,
+        related_name="price_lists",
+    )
+    excel_file = models.FileField(upload_to="price_lists/")
+    google_drive_url = models.URLField(blank=True, default="")
+    config = models.JSONField(default=dict)
+    status = models.CharField(
+        max_length=16,
+        choices=PriceListStatus.CHOICES,
+        default=PriceListStatus.INACTIVE,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+    replaced_by = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="replaces",
+    )
+    attempted_processing_at = models.DateTimeField(null=True, blank=True)
+    processing_completed_at = models.DateTimeField(null=True, blank=True)
+    processing_failed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def process(self):
+        from .tasks import process_price_list_task
+
+        self.attempted_processing_at = timezone.now()
+        self.save(update_fields=["attempted_processing_at"])
+        process_price_list_task.delay(self.pk)
+
+    def activate(self):
+        from .tasks import activate_price_list_task
+
+        activate_price_list_task.delay(self.pk)
+
+    def deactivate(self):
+        from .tasks import deactivate_price_list_task
+
+        deactivate_price_list_task.delay(self.pk)
+
+    def replace_with(self, new_price_list: "PriceList"):
+        from .tasks import replace_price_list_task
+
+        replace_price_list_task.delay(self.pk, new_price_list.pk)
+
+
+class PriceListItem(models.Model):
+    price_list = models.ForeignKey(
+        PriceList,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    product = models.ForeignKey(
+        "Product",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="price_list_items",
+    )
+    row_index = models.PositiveIntegerField()
+    product_code = models.CharField(max_length=255)
+    brand = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    category = models.CharField(max_length=255, blank=True, default="")
+    sizes_and_qty = models.JSONField(default=dict)
+    rrp = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    sell_price = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    buy_price = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    weight_kg = models.DecimalField(
+        max_digits=8, decimal_places=3, null=True, blank=True
+    )
+    image_url = models.TextField(blank=True, default="")
+    hs_code = models.CharField(max_length=20, blank=True, default="")
+    currency = models.CharField(max_length=3, blank=True, default="")
+    is_valid = models.BooleanField(default=True)
+    validation_errors = models.JSONField(default=list)
+
+    class Meta:
+        unique_together = [["price_list", "row_index"]]

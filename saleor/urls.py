@@ -7,7 +7,12 @@ from django.views.decorators.csrf import csrf_exempt
 from .core.views import jwks
 from .graphql.api import backend, schema
 from .graphql.views import GraphQLView
-from .media_views import serve_export_file, serve_export_file_signed, serve_invoice
+from .media_views import (
+    serve_export_file,
+    serve_export_file_signed,
+    serve_invoice,
+    serve_price_list_signed,
+)
 from .plugins.views import (
     handle_global_plugin_webhook,
     handle_plugin_per_channel_webhook,
@@ -68,6 +73,11 @@ urlpatterns = [
         r"^media/invoices/(?P<invoice_id>\d+)/$",
         serve_invoice,
         name="serve-invoice",
+    ),
+    re_path(
+        r"^media/price_lists/(?P<pk>\d+)/(?P<signed_id>[^/]+)/$",
+        serve_price_list_signed,
+        name="serve-price-list",
     ),
 ]
 

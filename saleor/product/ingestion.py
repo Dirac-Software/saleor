@@ -1658,7 +1658,7 @@ def create_product(
 
     product = Product.objects.create(
         name=product_data.description,
-        slug=slugify(product_data.description),
+        slug=slugify(f"{product_data.description}-{product_data.product_code}"),
         product_type=product_type,
         category=category,
     )
@@ -1670,14 +1670,19 @@ def create_product(
 def create_product_channel_listing(
     product: "Product",
     channel: "Channel",
-    not_for_web: bool = False,
+    visible_in_listings: bool = False,
+    *,
+    is_published: bool = True,
+    available_for_purchase: bool = True,
 ) -> "ProductChannelListing":
     """Create ProductChannelListing for a product.
 
     Args:
         product: Product instance
         channel: Channel to create listing for
-        not_for_web: If True, mark product as unavailable on web (unpublished, not visible)
+        visible_in_listings: If True, show the product in listing/search pages.
+        is_published: If False, product is hidden from the storefront entirely.
+        available_for_purchase: If False, product cannot be added to cart/orders.
 
     Returns:
         Created ProductChannelListing instance
@@ -1691,9 +1696,9 @@ def create_product_channel_listing(
         product=product,
         channel=channel,
         currency=channel.currency_code,
-        is_published=not not_for_web,  # Not published if not_for_web=True
-        visible_in_listings=not not_for_web,  # Not visible if not_for_web=True
-        available_for_purchase_at=None if not_for_web else timezone.now(),
+        is_published=is_published,
+        visible_in_listings=visible_in_listings,
+        available_for_purchase_at=timezone.now() if available_for_purchase else None,
     )
 
     logger.debug(
@@ -1732,18 +1737,24 @@ def create_product_media(product: "Product", image_url: str) -> "ProductMedia | 
         response.raise_for_status()
         image_data = response.content
 
-        # Extract filename from URL or use product slug
-        filename = image_url.split("/")[-1] or f"{product.slug}.jpg"
+        import uuid
+        from urllib.parse import urlparse
 
-        # Create ContentFile with name (required by Django)
+        parsed_url = urlparse(image_url)
+        url_path = parsed_url.path.split("/")[-1]
+        if "." in url_path and not url_path.startswith("."):
+            ext = url_path.split(".")[-1].split("?")[0]
+        else:
+            ext = "jpg"
+
+        filename = f"{uuid.uuid4()}.{ext}"
         image_file = ContentFile(image_data, name=filename)
 
-        # Create ProductMedia
         media = ProductMedia.objects.create(
             product=product,
-            image=image_file,
             alt=product.name,
         )
+        media.image.save(filename, image_file, save=True)
 
         logger.info("Created product media for %s from %s", product.name, image_url)
         return media
@@ -1943,6 +1954,7 @@ def create_variant_channel_listing(
         channel=channel,
         currency=channel.currency_code,
         price_amount=price,
+        discounted_price_amount=price,
     )
 
     logger.debug(
@@ -2080,7 +2092,13 @@ def ingest_new_products(
 
         # 2. Create ProductChannelListings for all channels
         for channel in channels:
-            create_product_channel_listing(product, channel, not_for_web)
+            create_product_channel_listing(
+                product,
+                channel,
+                visible_in_listings=not not_for_web,
+                is_published=not not_for_web,
+                available_for_purchase=not not_for_web,
+            )
 
         # 3. Create ProductMedia (if image URL exists)
         if product_data.image_url:
@@ -2354,16 +2372,9 @@ def ingest_products_from_excel(
         # Validate warehouse for ingestion (raises exception if owned)
         validate_warehouse_for_ingestion(warehouse)
 
-        # Assign to all channels
-        channel_count = assign_warehouse_to_all_channels(warehouse)
-        logger.info("Assigned warehouse to %s channel(s)", channel_count)
-
-        # Assign to all shipping zones
-        zone_count = assign_warehouse_to_all_shipping_zones(warehouse)
         logger.info(
-            "Created warehouse '%s' and assigned to %d shipping zone(s)",
+            "Created warehouse '%s' — auto-assigned to all channels and shipping zones",
             warehouse.name,
-            zone_count,
         )
 
     # Step 3: Check for interactive decisions (now that we have warehouse)
@@ -2461,18 +2472,17 @@ def ingest_products_from_excel(
         products_queryset = Product.objects.filter(id__in=product_ids)
         update_discounted_prices_for_promotion(products_queryset)
 
+        # Step 7: Mark products for search index update
+        if product_ids:
+            logger.info(
+                "Marking %d product(s) for search index update", len(product_ids)
+            )
+            Product.objects.filter(id__in=product_ids).update(search_index_dirty=True)
+
         # Rollback transaction if dry-run
         if config.dry_run:
             logger.info("DRY-RUN MODE: Rolling back all changes")
             transaction.set_rollback(True)
-
-    # Step 7: Mark products for search index update
-    all_product_ids = [p.id for p in created_products + updated_products]
-    if all_product_ids and not config.dry_run:
-        logger.info(
-            "Marking %d product(s) for search index update", len(all_product_ids)
-        )
-        Product.objects.filter(id__in=all_product_ids).update(search_index_dirty=True)
 
     # Step 8: Calculate statistics
     total_variants_created = sum(p.variants.count() for p in created_products)
@@ -2509,6 +2519,9 @@ def ingest_products_from_excel(
             "Skipped: %d products (exist in other warehouses)", skipped_products
         )
     logger.info("Warehouse: %s", warehouse.name)
+    all_product_ids = [p.pk for p in created_products] + [
+        p.pk for p in updated_products
+    ]
     if all_product_ids and not config.dry_run:
         logger.info(
             "Search indexes will be updated in the background for %d product(s)",
@@ -2517,3 +2530,16 @@ def ingest_products_from_excel(
     logger.info("=" * 80)
 
     return result
+
+
+def ingest_config_to_dict(config: IngestConfig) -> dict:
+    """Serialize IngestConfig to a JSON-serializable dict for storage."""
+    return attrs.asdict(config)
+
+
+def ingest_config_from_dict(data: dict) -> IngestConfig:
+    """Deserialize IngestConfig from a stored dict."""
+    d = data.copy()
+    mapping_data = d.pop("column_mapping", None)
+    mapping = SpreadsheetColumnMapping(**mapping_data) if mapping_data else None
+    return IngestConfig(column_mapping=mapping, **d)

@@ -57,6 +57,14 @@ class WarehouseCreateInput(WarehouseInput):
         description="Determine if the warehouse is owned by Dirac.",
         required=False,
     )
+    assign_to_all_channels_and_zones = graphene.Boolean(
+        description=(
+            "When true, automatically assign the warehouse to all channels and "
+            "shipping zones. Defaults to true for non-owned warehouses. "
+            "Has no effect on owned warehouses."
+        ),
+        required=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_PRODUCTS

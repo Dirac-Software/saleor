@@ -34,6 +34,7 @@ class ProductErrorCode(Enum):
     COLUMN_MAPPING_INVALID = "column_mapping_invalid"
     FILE_NOT_FOUND = "file_not_found"
     FILE_EXPIRED = "file_expired"
+    ORDERS_REQUIRE_AMENDMENT = "orders_require_amendment"
 
 
 class CollectionErrorCode(Enum):
