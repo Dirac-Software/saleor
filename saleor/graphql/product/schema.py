@@ -70,6 +70,11 @@ from .mutations import (
     CollectionRemoveProducts,
     CollectionReorderProducts,
     CollectionUpdate,
+    PriceListActivate,
+    PriceListCreate,
+    PriceListDeactivate,
+    PriceListDelete,
+    PriceListReplace,
     ProductCreate,
     ProductDelete,
     ProductIngestionFileUpload,
@@ -141,6 +146,8 @@ from .types import (
     CollectionCountableConnection,
     DigitalContent,
     DigitalContentCountableConnection,
+    PriceList,
+    PriceListCountableConnection,
     Product,
     ProductCountableConnection,
     ProductType,
@@ -169,6 +176,23 @@ class ProductQueries(graphene.ObjectType):
         permissions=[
             ProductPermissions.MANAGE_PRODUCTS,
         ],
+        doc_category=DOC_CATEGORY_PRODUCTS,
+    )
+    price_list = PermissionsField(
+        PriceList,
+        id=graphene.Argument(
+            graphene.ID, description="ID of the price list.", required=True
+        ),
+        description="Look up a price list by ID.",
+        permissions=[ProductPermissions.MANAGE_PRODUCTS],
+        doc_category=DOC_CATEGORY_PRODUCTS,
+    )
+    price_lists = ConnectionField(
+        PriceListCountableConnection,
+        status=graphene.String(description="Filter by status: ACTIVE or INACTIVE."),
+        warehouse_id=graphene.ID(description="Filter by warehouse ID."),
+        description="List of price lists.",
+        permissions=[ProductPermissions.MANAGE_PRODUCTS],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
     categories = FilterConnectionField(
@@ -362,6 +386,42 @@ class ProductQueries(graphene.ObjectType):
         doc_category=DOC_CATEGORY_PRODUCTS,
         deprecation_reason=DEFAULT_DEPRECATION_REASON,
     )
+
+    @staticmethod
+    def resolve_price_list(_root, info: ResolveInfo, *, id):
+        from django.db.models import Count, Q
+
+        from ...product.models import PriceList as PriceListModel
+
+        _, pk = from_global_id_or_error(id, PriceList)
+        return (
+            PriceListModel.objects.select_related("replaced_by")
+            .annotate(
+                _item_count=Count("items"),
+                _valid_item_count=Count("items", filter=Q(items__is_valid=True)),
+            )
+            .filter(pk=pk)
+            .first()
+        )
+
+    @staticmethod
+    def resolve_price_lists(
+        _root, info: ResolveInfo, *, status=None, warehouse_id=None, **kwargs
+    ):
+        from django.db.models import Count, Q
+
+        from ...product.models import PriceList as PriceListModel
+
+        qs = PriceListModel.objects.select_related("replaced_by").annotate(
+            _item_count=Count("items"),
+            _valid_item_count=Count("items", filter=Q(items__is_valid=True)),
+        )
+        if status:
+            qs = qs.filter(status=status)
+        if warehouse_id:
+            _, wh_pk = from_global_id_or_error(warehouse_id, "Warehouse")
+            qs = qs.filter(warehouse_id=wh_pk)
+        return create_connection_slice(qs, info, kwargs, PriceListCountableConnection)
 
     @staticmethod
     def resolve_categories(_root, info: ResolveInfo, *, level=None, **kwargs):
@@ -751,6 +811,12 @@ class ProductMutations(graphene.ObjectType):
 
     variant_media_assign = VariantMediaAssign.Field()
     variant_media_unassign = VariantMediaUnassign.Field()
+
+    price_list_create = PriceListCreate.Field()
+    price_list_activate = PriceListActivate.Field()
+    price_list_deactivate = PriceListDeactivate.Field()
+    price_list_replace = PriceListReplace.Field()
+    price_list_delete = PriceListDelete.Field()
 
     product_ingestion_upload_file = ProductIngestionFileUpload.Field()
     product_ingestion_ingest = ProductIngestionIngest.Field()

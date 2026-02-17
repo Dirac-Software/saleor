@@ -5,6 +5,12 @@ from .digital_contents import (
     DigitalContentCountableConnection,
     DigitalContentUrl,
 )
+from .price_list import (
+    PriceList,
+    PriceListCountableConnection,
+    PriceListItem,
+    PriceListItemCountableConnection,
+)
 from .products import (
     Product,
     ProductCountableConnection,
@@ -30,4 +36,8 @@ __all__ = [
     "DigitalContent",
     "DigitalContentCountableConnection",
     "DigitalContentUrl",
+    "PriceList",
+    "PriceListCountableConnection",
+    "PriceListItem",
+    "PriceListItemCountableConnection",
 ]
