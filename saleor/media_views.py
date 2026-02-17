@@ -126,10 +126,14 @@ def serve_price_list_signed(request, pk, signed_id):
     try:
         price_list_id = signer.unsign(signed_id, max_age=PRICE_LIST_SIGNED_URL_MAX_AGE)
     except SignatureExpired:
-        logger.debug("serve_price_list_signed: link expired for signed_id=%s", signed_id)
+        logger.debug(
+            "serve_price_list_signed: link expired for signed_id=%s", signed_id
+        )
         return HttpResponse("Link expired", status=410)
     except BadSignature:
-        logger.debug("serve_price_list_signed: invalid signature for signed_id=%s", signed_id)
+        logger.debug(
+            "serve_price_list_signed: invalid signature for signed_id=%s", signed_id
+        )
         return HttpResponse("Invalid link", status=400)
 
     logger.debug("serve_price_list_signed: resolved price_list_id=%s", price_list_id)
