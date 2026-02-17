@@ -7,7 +7,12 @@ from django.views.decorators.csrf import csrf_exempt
 from .core.views import jwks
 from .graphql.api import backend, schema
 from .graphql.views import GraphQLView
-from .media_views import serve_export_file, serve_export_file_signed, serve_invoice, serve_price_list_signed
+from .media_views import (
+    serve_export_file,
+    serve_export_file_signed,
+    serve_invoice,
+    serve_price_list_signed,
+)
 from .plugins.views import (
     handle_global_plugin_webhook,
     handle_plugin_per_channel_webhook,

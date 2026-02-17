@@ -183,18 +183,34 @@ def test_price_list_items_filter_invalid(
 
     staff_api_client.user.user_permissions.add(permission_manage_products)
     pl = PriceList.objects.create(
-        warehouse=non_owned_warehouse, name="Filter Test", config={},
+        warehouse=non_owned_warehouse,
+        name="Filter Test",
+        config={},
         processing_completed_at=timezone.now(),
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=0, product_code="VALID-001", brand="B",
-        description="Good", category="Apparel", sizes_and_qty={"S": 1},
-        sell_price=Decimal("10.00"), currency="GBP", is_valid=True,
+        price_list=pl,
+        row_index=0,
+        product_code="VALID-001",
+        brand="B",
+        description="Good",
+        category="Apparel",
+        sizes_and_qty={"S": 1},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=True,
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=1, product_code="BAD-001", brand="B",
-        description="Bad", category="Apparel", sizes_and_qty={},
-        sell_price=Decimal("10.00"), currency="GBP", is_valid=False,
+        price_list=pl,
+        row_index=1,
+        product_code="BAD-001",
+        brand="B",
+        description="Bad",
+        category="Apparel",
+        sizes_and_qty={},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=False,
         validation_errors=["product_code: required"],
     )
 
@@ -202,7 +218,9 @@ def test_price_list_items_filter_invalid(
         "id": graphene.Node.to_global_id("PriceList", pl.pk),
         "filter": {"isValid": False},
     }
-    response = staff_api_client.post_graphql(PRICE_LIST_ITEMS_FILTER_QUERY, variables=variables)
+    response = staff_api_client.post_graphql(
+        PRICE_LIST_ITEMS_FILTER_QUERY, variables=variables
+    )
     content = get_graphql_content(response)
     edges = content["data"]["priceList"]["items"]["edges"]
 
@@ -218,18 +236,34 @@ def test_price_list_items_filter_valid(
 
     staff_api_client.user.user_permissions.add(permission_manage_products)
     pl = PriceList.objects.create(
-        warehouse=non_owned_warehouse, name="Filter Test 2", config={},
+        warehouse=non_owned_warehouse,
+        name="Filter Test 2",
+        config={},
         processing_completed_at=timezone.now(),
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=0, product_code="VALID-001", brand="B",
-        description="Good", category="Apparel", sizes_and_qty={"S": 1},
-        sell_price=Decimal("10.00"), currency="GBP", is_valid=True,
+        price_list=pl,
+        row_index=0,
+        product_code="VALID-001",
+        brand="B",
+        description="Good",
+        category="Apparel",
+        sizes_and_qty={"S": 1},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=True,
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=1, product_code="BAD-001", brand="B",
-        description="Bad", category="Apparel", sizes_and_qty={},
-        sell_price=Decimal("10.00"), currency="GBP", is_valid=False,
+        price_list=pl,
+        row_index=1,
+        product_code="BAD-001",
+        brand="B",
+        description="Bad",
+        category="Apparel",
+        sizes_and_qty={},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=False,
         validation_errors=["product_code: required"],
     )
 
@@ -237,7 +271,9 @@ def test_price_list_items_filter_valid(
         "id": graphene.Node.to_global_id("PriceList", pl.pk),
         "filter": {"isValid": True},
     }
-    response = staff_api_client.post_graphql(PRICE_LIST_ITEMS_FILTER_QUERY, variables=variables)
+    response = staff_api_client.post_graphql(
+        PRICE_LIST_ITEMS_FILTER_QUERY, variables=variables
+    )
     content = get_graphql_content(response)
     edges = content["data"]["priceList"]["items"]["edges"]
 
@@ -253,25 +289,43 @@ def test_price_list_items_no_filter_returns_all(
 
     staff_api_client.user.user_permissions.add(permission_manage_products)
     pl = PriceList.objects.create(
-        warehouse=non_owned_warehouse, name="Filter Test 3", config={},
+        warehouse=non_owned_warehouse,
+        name="Filter Test 3",
+        config={},
         processing_completed_at=timezone.now(),
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=0, product_code="VALID-001", brand="B",
-        description="Good", category="Apparel", sizes_and_qty={"S": 1},
-        sell_price=Decimal("10.00"), currency="GBP", is_valid=True,
+        price_list=pl,
+        row_index=0,
+        product_code="VALID-001",
+        brand="B",
+        description="Good",
+        category="Apparel",
+        sizes_and_qty={"S": 1},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=True,
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=1, product_code="BAD-001", brand="B",
-        description="Bad", category="Apparel", sizes_and_qty={},
-        sell_price=Decimal("10.00"), currency="GBP", is_valid=False,
+        price_list=pl,
+        row_index=1,
+        product_code="BAD-001",
+        brand="B",
+        description="Bad",
+        category="Apparel",
+        sizes_and_qty={},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=False,
         validation_errors=["product_code: required"],
     )
 
     variables = {
         "id": graphene.Node.to_global_id("PriceList", pl.pk),
     }
-    response = staff_api_client.post_graphql(PRICE_LIST_ITEMS_FILTER_QUERY, variables=variables)
+    response = staff_api_client.post_graphql(
+        PRICE_LIST_ITEMS_FILTER_QUERY, variables=variables
+    )
     content = get_graphql_content(response)
     edges = content["data"]["priceList"]["items"]["edges"]
 
@@ -404,7 +458,9 @@ def test_price_list_activate_errors_when_not_processed(
     staff_api_client.user.user_permissions.add(permission_manage_products)
 
     variables = {"id": graphene.Node.to_global_id("PriceList", pl.pk)}
-    response = staff_api_client.post_graphql(PRICE_LIST_ACTIVATE_MUTATION, variables=variables)
+    response = staff_api_client.post_graphql(
+        PRICE_LIST_ACTIVATE_MUTATION, variables=variables
+    )
 
     content = get_graphql_content(response)
     errors = content["data"]["priceListActivate"]["errors"]
@@ -421,7 +477,9 @@ def test_price_list_activate_errors_for_owned_warehouse(
     from saleor.account.models import Address
     from saleor.warehouse.models import Warehouse
 
-    address = Address.objects.create(street_address_1="1 Owned St", city="London", country="GB")
+    address = Address.objects.create(
+        street_address_1="1 Owned St", city="London", country="GB"
+    )
     owned_warehouse = Warehouse.objects.create(
         name="Owned Warehouse",
         slug="owned-warehouse",
@@ -438,7 +496,9 @@ def test_price_list_activate_errors_for_owned_warehouse(
     staff_api_client.user.user_permissions.add(permission_manage_products)
 
     variables = {"id": graphene.Node.to_global_id("PriceList", pl.pk)}
-    response = staff_api_client.post_graphql(PRICE_LIST_ACTIVATE_MUTATION, variables=variables)
+    response = staff_api_client.post_graphql(
+        PRICE_LIST_ACTIVATE_MUTATION, variables=variables
+    )
 
     content = get_graphql_content(response)
     errors = content["data"]["priceListActivate"]["errors"]
@@ -700,9 +760,7 @@ def test_excel_file_url_is_none_when_no_file(
     staff_api_client, permission_manage_products, processed_price_list
 ):
     staff_api_client.user.user_permissions.add(permission_manage_products)
-    variables = {
-        "id": graphene.Node.to_global_id("PriceList", processed_price_list.pk)
-    }
+    variables = {"id": graphene.Node.to_global_id("PriceList", processed_price_list.pk)}
     response = staff_api_client.post_graphql(EXCEL_FILE_URL_QUERY, variables=variables)
     content = get_graphql_content(response)
     assert content["data"]["priceList"]["excelFileUrl"] is None
@@ -732,8 +790,8 @@ PRICE_LIST_REPLACE_FORCE_MUTATION = """
 """
 
 
-def _make_draft_allocation_for_pl(price_list, warehouse):
-    """Create a stock + draft order + allocation for the first product in a price list."""
+def _make_unconfirmed_allocation_for_pl(price_list, warehouse):
+    """Create a stock + unconfirmed order + allocation for the first product in a price list."""
     from decimal import Decimal
 
     from saleor.channel.models import Channel
@@ -773,7 +831,7 @@ def _make_draft_allocation_for_pl(price_list, warehouse):
         },
     )
     order = Order.objects.create(
-        status=OrderStatus.DRAFT,
+        status=OrderStatus.UNCONFIRMED,
         channel=channel,
         currency="GBP",
         origin=OrderOrigin.DRAFT,
@@ -785,21 +843,23 @@ def _make_draft_allocation_for_pl(price_list, warehouse):
         product_name="Mutation Test Product",
         quantity=20,
         currency="GBP",
-        unit_price_net_amount=Decimal("10"),
-        unit_price_gross_amount=Decimal("10"),
-        total_price_net_amount=Decimal("10"),
-        total_price_gross_amount=Decimal("10"),
+        unit_price_net_amount=Decimal(10),
+        unit_price_gross_amount=Decimal(10),
+        total_price_net_amount=Decimal(10),
+        total_price_gross_amount=Decimal(10),
         is_shipping_required=False,
         is_gift_card=False,
     )
-    return Allocation.objects.create(order_line=line, stock=stock, quantity_allocated=20)
+    return Allocation.objects.create(
+        order_line=line, stock=stock, quantity_allocated=20
+    )
 
 
-def test_deactivate_returns_error_when_draft_orders_exist(
+def test_deactivate_returns_error_when_unconfirmed_orders_exist(
     staff_api_client, permission_manage_products, active_price_list, non_owned_warehouse
 ):
     staff_api_client.user.user_permissions.add(permission_manage_products)
-    _make_draft_allocation_for_pl(active_price_list, non_owned_warehouse)
+    _make_unconfirmed_allocation_for_pl(active_price_list, non_owned_warehouse)
 
     variables = {
         "id": graphene.Node.to_global_id("PriceList", active_price_list.pk),
@@ -818,11 +878,11 @@ def test_deactivate_returns_error_when_draft_orders_exist(
     mock_delay.assert_not_called()
 
 
-def test_deactivate_proceeds_with_force_when_draft_orders_exist(
+def test_deactivate_proceeds_with_force_when_unconfirmed_orders_exist(
     staff_api_client, permission_manage_products, active_price_list, non_owned_warehouse
 ):
     staff_api_client.user.user_permissions.add(permission_manage_products)
-    _make_draft_allocation_for_pl(active_price_list, non_owned_warehouse)
+    _make_unconfirmed_allocation_for_pl(active_price_list, non_owned_warehouse)
 
     variables = {
         "id": graphene.Node.to_global_id("PriceList", active_price_list.pk),
@@ -857,13 +917,13 @@ def test_deactivate_proceeds_without_force_when_no_orders_affected(
     mock_delay.assert_called_once_with(active_price_list.pk)
 
 
-def test_replace_returns_error_when_draft_orders_exist(
+def test_replace_returns_error_when_unconfirmed_orders_exist(
     staff_api_client, permission_manage_products, active_price_list, non_owned_warehouse
 ):
     from django.utils import timezone
 
     staff_api_client.user.user_permissions.add(permission_manage_products)
-    _make_draft_allocation_for_pl(active_price_list, non_owned_warehouse)
+    _make_unconfirmed_allocation_for_pl(active_price_list, non_owned_warehouse)
 
     new_pl = PriceList.objects.create(
         warehouse=non_owned_warehouse,
@@ -895,7 +955,7 @@ def test_replace_proceeds_with_force(
     from django.utils import timezone
 
     staff_api_client.user.user_permissions.add(permission_manage_products)
-    _make_draft_allocation_for_pl(active_price_list, non_owned_warehouse)
+    _make_unconfirmed_allocation_for_pl(active_price_list, non_owned_warehouse)
 
     new_pl = PriceList.objects.create(
         warehouse=non_owned_warehouse,

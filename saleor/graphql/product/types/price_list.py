@@ -4,6 +4,8 @@ from django.urls import reverse
 from graphene import relay
 from graphql import ResolveInfo
 
+from saleor.core.utils import build_absolute_uri
+
 from ....product import models
 from ...core.connection import CountableConnection, create_connection_slice
 from ...core.context import ChannelContext, get_database_connection_name
@@ -11,7 +13,6 @@ from ...core.doc_category import DOC_CATEGORY_PRODUCTS
 from ...core.fields import ConnectionField, JSONString
 from ...core.scalars import DateTime
 from ...core.types import ModelObjectType
-from saleor.core.utils import build_absolute_uri
 
 
 class PriceListItemFilterInput(graphene.InputObjectType):
@@ -68,7 +69,9 @@ class PriceListItemCountableConnection(CountableConnection):
 
 class PriceList(ModelObjectType[models.PriceList]):
     id = graphene.GlobalID(required=True, description="The ID of the price list.")
-    name = graphene.String(required=True, description="Human-readable name of the price list.")
+    name = graphene.String(
+        required=True, description="Human-readable name of the price list."
+    )
     status = graphene.String(
         required=True, description="Current status: ACTIVE or INACTIVE."
     )
@@ -131,7 +134,9 @@ class PriceList(ModelObjectType[models.PriceList]):
         if not root.excel_file:
             return None
         signed_id = TimestampSigner().sign(str(root.pk))
-        path = reverse("serve-price-list", kwargs={"pk": root.pk, "signed_id": signed_id})
+        path = reverse(
+            "serve-price-list", kwargs={"pk": root.pk, "signed_id": signed_id}
+        )
         return build_absolute_uri(path)
 
     @staticmethod

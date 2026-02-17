@@ -1,11 +1,14 @@
 """PriceList delete mutation."""
 
+from typing import cast
+
 import graphene
 from django.core.exceptions import ValidationError
 
 from .....permission.enums import ProductPermissions
 from .....product import PriceListStatus
 from .....product.error_codes import ProductErrorCode
+from .....product.models import PriceList
 from ....core import ResolveInfo
 from ....core.doc_category import DOC_CATEGORY_PRODUCTS
 from ....core.mutations import BaseMutation
@@ -30,8 +33,9 @@ class PriceListDelete(BaseMutation):
 
     @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
-        price_list = cls.get_node_or_error(
-            info, data["id"], field="id", only_type="PriceList"
+        price_list = cast(
+            PriceList,
+            cls.get_node_or_error(info, data["id"], field="id", only_type="PriceList"),
         )
         if price_list.status == PriceListStatus.ACTIVE:
             raise ValidationError(

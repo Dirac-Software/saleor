@@ -1,10 +1,13 @@
 """PriceList deactivate mutation."""
 
+from typing import cast
+
 import graphene
 from django.core.exceptions import ValidationError
 
 from .....permission.enums import ProductPermissions
 from .....product.error_codes import ProductErrorCode
+from .....product.models import PriceList
 from .....product.tasks import (
     _count_draft_unconfirmed_orders,
     deactivate_price_list_task,
@@ -45,8 +48,9 @@ class PriceListDeactivate(BaseMutation):
 
     @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
-        price_list = cls.get_node_or_error(
-            info, data["id"], field="id", only_type="PriceList"
+        price_list = cast(
+            PriceList,
+            cls.get_node_or_error(info, data["id"], field="id", only_type="PriceList"),
         )
 
         if not data.get("force"):
