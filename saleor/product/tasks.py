@@ -6,7 +6,7 @@ from uuid import UUID
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, QuerySet
 from django.utils import timezone
 
@@ -466,7 +466,9 @@ def process_price_list_task(price_list_id: int):
     except Exception:
         price_list.processing_completed_at = None
         price_list.processing_failed_at = timezone.now()
-        price_list.save(update_fields=["processing_completed_at", "processing_failed_at"])
+        price_list.save(
+            update_fields=["processing_completed_at", "processing_failed_at"]
+        )
         raise
 
 
@@ -598,9 +600,13 @@ def _activate_item(
                 if not ProductVariantChannelListing.objects.filter(
                     variant=variant, channel=channel
                 ).exists():
-                    create_variant_channel_listing(
-                        variant, channel, product_data, exchange_rates
-                    )
+                    try:
+                        with transaction.atomic():
+                            create_variant_channel_listing(
+                                variant, channel, product_data, exchange_rates
+                            )
+                    except IntegrityError:
+                        pass
 
     return True
 
@@ -666,7 +672,7 @@ def activate_price_list_task(price_list_id: int):
         updated_items = []
         for item in items:
             old_product_id = item.product_id
-            _activate_item(
+            if not _activate_item(
                 item,
                 price_list.warehouse,
                 product_type_map,
@@ -675,15 +681,27 @@ def activate_price_list_task(price_list_id: int):
                 channels,
                 exchange_rates,
                 newly_created=newly_created,
-            )
+            ):
+                logger.warning(
+                    "Skipped PriceListItem %s (product_code=%s) during activation of "
+                    "PriceList %s: missing category or product type",
+                    item.pk,
+                    item.product_code,
+                    price_list_id,
+                )
+                continue
             if item.product_id != old_product_id:
                 updated_items.append(item)
 
         if updated_items:
             PriceListItem.objects.bulk_update(updated_items, ["product_id"])
 
-        activated_product_ids = [i.product_id for i in items if i.product_id is not None]
-        Product.objects.filter(id__in=activated_product_ids).update(search_index_dirty=True)
+        activated_product_ids = [
+            i.product_id for i in items if i.product_id is not None
+        ]
+        Product.objects.filter(id__in=activated_product_ids).update(
+            search_index_dirty=True
+        )
 
         PriceList.objects.filter(pk=price_list_id).update(
             status=PriceListStatus.ACTIVE,
@@ -724,7 +742,7 @@ def _deallocate_draft_unconfirmed(warehouse, product_ids, size_names=None):
     from ..warehouse.models import Allocation, Stock
 
     qs = (
-        Allocation.objects.select_for_update()
+        Allocation.objects.select_for_update(of=("self", "stock"))
         .filter(
             stock__warehouse=warehouse,
             stock__product_variant__product_id__in=product_ids,
@@ -742,7 +760,9 @@ def _deallocate_draft_unconfirmed(warehouse, product_ids, size_names=None):
 
     deltas: dict[int, int] = {}
     for alloc in allocations:
-        deltas[alloc.stock_id] = deltas.get(alloc.stock_id, 0) + alloc.quantity_allocated
+        deltas[alloc.stock_id] = (
+            deltas.get(alloc.stock_id, 0) + alloc.quantity_allocated
+        )
 
     for stock_id, delta in deltas.items():
         Stock.objects.filter(pk=stock_id).update(
@@ -830,6 +850,14 @@ def replace_price_list_task(old_id: int, new_id: int):
                 .order_by("pk")
             )
         }
+        if old_id not in pls or new_id not in pls:
+            logger.warning(
+                "replace_price_list_task: PriceList(s) not found (old=%s, new=%s); aborting",
+                old_id,
+                new_id,
+            )
+            return
+
         old_pl = pls[old_id]
         new_pl = pls[new_id]
 
@@ -841,10 +869,17 @@ def replace_price_list_task(old_id: int, new_id: int):
         if not new_pl.processing_completed_at:
             raise ValueError(f"New PriceList {new_id} has not completed processing")
 
+        if new_pl.status == PriceListStatus.ACTIVE:
+            return
+
         if (
             old_pl.status == PriceListStatus.INACTIVE
-            and new_pl.status == PriceListStatus.ACTIVE
+            and old_pl.replaced_by_id is not None
         ):
+            # A concurrent replace already deactivated old_pl and set replaced_by_id.
+            # Follow the chain so new_pl replaces whatever is now active.
+            if old_pl.replaced_by_id != new_id:
+                replace_price_list_task.delay(old_pl.replaced_by_id, new_id)
             return
 
         warehouse = old_pl.warehouse
@@ -912,7 +947,14 @@ def replace_price_list_task(old_id: int, new_id: int):
                 ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
 
             product_data = _build_product_data_from_item(new_item)
-            product = Product.objects.get(pk=product_id)
+            try:
+                product = Product.objects.get(pk=product_id)
+            except Product.DoesNotExist:
+                logger.warning(
+                    "replace_price_list_task: Product %s not found; skipping",
+                    product_id,
+                )
+                continue
 
             for size, qty in new_item.sizes_and_qty.items():
                 if ProductVariant.objects.filter(
@@ -931,9 +973,13 @@ def replace_price_list_task(old_id: int, new_id: int):
                         if not ProductVariantChannelListing.objects.filter(
                             variant=variant, channel=channel
                         ).exists():
-                            create_variant_channel_listing(
-                                variant, channel, product_data, exchange_rates
-                            )
+                            try:
+                                with transaction.atomic():
+                                    create_variant_channel_listing(
+                                        variant, channel, product_data, exchange_rates
+                                    )
+                            except IntegrityError:
+                                pass
                     Stock.objects.create(
                         product_variant=variant, warehouse=warehouse, quantity=qty
                     )
@@ -943,7 +989,7 @@ def replace_price_list_task(old_id: int, new_id: int):
         for product_id in new_only:
             new_item = new_item_by_product[product_id]
             old_product_id = new_item.product_id
-            _activate_item(
+            if not _activate_item(
                 new_item,
                 warehouse,
                 product_type_map,
@@ -952,7 +998,15 @@ def replace_price_list_task(old_id: int, new_id: int):
                 channels,
                 exchange_rates,
                 newly_created=newly_created,
-            )
+            ):
+                logger.warning(
+                    "Skipped PriceListItem %s (product_code=%s) during replace of "
+                    "PriceList %s: missing category or product type",
+                    new_item.pk,
+                    new_item.product_code,
+                    new_id,
+                )
+                continue
             if new_item.product_id != old_product_id:
                 updated_new_items.append(new_item)
 

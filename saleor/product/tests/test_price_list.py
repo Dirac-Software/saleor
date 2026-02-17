@@ -60,16 +60,18 @@ def price_list_without_file(db, pl_view_warehouse):
 
 def _signed_id(price_list_id):
     from django.core.signing import TimestampSigner
+
     return TimestampSigner().sign(str(price_list_id))
 
 
-def _call_view(signed_id):
+def _call_view(signed_id, pk=0):
     from django.test import RequestFactory
+
     from saleor.media_views import serve_price_list_signed
 
     factory = RequestFactory()
-    request = factory.get(f"/media/price_lists/{signed_id}/")
-    return serve_price_list_signed(request, signed_id=signed_id)
+    request = factory.get(f"/media/price_lists/{pk}/{signed_id}/")
+    return serve_price_list_signed(request, pk=pk, signed_id=signed_id)
 
 
 def test_serve_price_list_valid_signed_url(price_list_with_file):
@@ -83,11 +85,14 @@ def test_serve_price_list_valid_signed_url(price_list_with_file):
 
 
 def test_serve_price_list_expired_link():
-    from django.core.signing import TimestampSigner
-    from freezegun import freeze_time
     import datetime
 
-    with freeze_time(datetime.datetime.now() - datetime.timedelta(days=8)):
+    from django.core.signing import TimestampSigner
+    from freezegun import freeze_time
+
+    with freeze_time(
+        datetime.datetime.now(tz=datetime.UTC) - datetime.timedelta(days=8)
+    ):
         signed_id = TimestampSigner().sign("999")
 
     response = _call_view(signed_id)
@@ -107,6 +112,7 @@ def test_serve_price_list_not_found():
 def test_serve_price_list_no_file_returns_404(price_list_without_file):
     with pytest.raises(Http404):
         _call_view(_signed_id(price_list_without_file.pk))
+
 
 HK_COLUMN_MAP = {
     "0": "brand",
@@ -242,7 +248,11 @@ def required_attributes(db):
     for name, slug, input_type in [
         ("Product Code", "product-code", AttributeInputType.PLAIN_TEXT),
         ("RRP", "rrp", AttributeInputType.NUMERIC),
-        ("Minimum Order Quantity", "minimum-order-quantity", AttributeInputType.NUMERIC),
+        (
+            "Minimum Order Quantity",
+            "minimum-order-quantity",
+            AttributeInputType.NUMERIC,
+        ),
         ("Brand", "brand", AttributeInputType.PLAIN_TEXT),
         ("Size", "size", AttributeInputType.DROPDOWN),
     ]:
@@ -368,7 +378,14 @@ def test_process_task(db, warehouse, hk_excel):
     assert h59015.sizes_and_qty == {"32": 58, "34": 34, "36": 23, "38": 11, "40": 12}
 
     hk5015 = PriceListItem.objects.get(price_list=price_list, product_code="HK5015")
-    assert hk5015.sizes_and_qty == {"XS": 25, "S": 14, "M": 43, "L": 16, "XL": 26, "2XL": 11}
+    assert hk5015.sizes_and_qty == {
+        "XS": 25,
+        "S": 14,
+        "M": 43,
+        "L": 16,
+        "XL": 26,
+        "2XL": 11,
+    }
 
 
 def test_process_invalid_row_sets_is_valid_false(
@@ -420,7 +437,7 @@ def test_process_clears_completed_at_on_failure(db, warehouse, hk_excel):
 
     price_list.excel_file.delete(save=False)
 
-    with pytest.raises(Exception):
+    with pytest.raises(FileNotFoundError):
         process_price_list_task(price_list.pk)
 
     price_list.refresh_from_db()
@@ -873,7 +890,9 @@ def test_activate_increments_existing_stock(db, warehouse):
     assert stock.quantity == 15
 
 
-def test_activate_creates_product_when_no_product_fk(db, warehouse, required_attributes):
+def test_activate_creates_product_when_no_product_fk(
+    db, warehouse, required_attributes
+):
     from saleor.product.models import Category, Product, ProductType
 
     ProductType.objects.get_or_create(
@@ -1238,7 +1257,9 @@ def test_process_then_activate_creates_products_and_stock(
 
     price_list.refresh_from_db()
     assert price_list.processing_completed_at is not None
-    assert PriceListItem.objects.filter(price_list=price_list, is_valid=True).count() == len(HK_ROWS)
+    assert PriceListItem.objects.filter(
+        price_list=price_list, is_valid=True
+    ).count() == len(HK_ROWS)
 
     activate_price_list_task(price_list.pk)
 
@@ -1310,8 +1331,12 @@ def test_activate_creates_channel_listings_only_for_price_list_channels(
     from saleor.product.models import Product
 
     product = Product.objects.get()
-    assert ProductChannelListing.objects.filter(product=product, channel=channel_gbp).exists()
-    assert not ProductChannelListing.objects.filter(product=product, channel=other_channel).exists()
+    assert ProductChannelListing.objects.filter(
+        product=product, channel=channel_gbp
+    ).exists()
+    assert not ProductChannelListing.objects.filter(
+        product=product, channel=other_channel
+    ).exists()
 
 
 def test_activate_creates_product_published_not_visible_in_listings(
@@ -1401,8 +1426,12 @@ def test_activate_matches_existing_product_by_code_and_brand(
     brand_value = AttributeValue.objects.create(
         attribute=required_attributes["Brand"], name="TestBrand", slug="testbrand"
     )
-    AssignedProductAttributeValue.objects.create(product=existing_product, value=code_value)
-    AssignedProductAttributeValue.objects.create(product=existing_product, value=brand_value)
+    AssignedProductAttributeValue.objects.create(
+        product=existing_product, value=code_value
+    )
+    AssignedProductAttributeValue.objects.create(
+        product=existing_product, value=brand_value
+    )
 
     pl, _ = _make_processed_price_list(warehouse, sizes_and_qty={"S": 12}, product=None)
 
@@ -1427,7 +1456,7 @@ def _make_allocation(stock, order_status, qty):
     from decimal import Decimal
 
     from saleor.channel.models import Channel
-    from saleor.order import OrderOrigin, OrderStatus
+    from saleor.order import OrderOrigin
     from saleor.order.models import Order, OrderLine
     from saleor.warehouse.models import Allocation
 
@@ -1452,10 +1481,10 @@ def _make_allocation(stock, order_status, qty):
         product_name="Test",
         quantity=qty,
         currency="GBP",
-        unit_price_net_amount=Decimal("10"),
-        unit_price_gross_amount=Decimal("10"),
-        total_price_net_amount=Decimal("10"),
-        total_price_gross_amount=Decimal("10"),
+        unit_price_net_amount=Decimal(10),
+        unit_price_gross_amount=Decimal(10),
+        total_price_net_amount=Decimal(10),
+        total_price_gross_amount=Decimal(10),
         is_shipping_required=False,
         is_gift_card=False,
     )
@@ -1471,58 +1500,14 @@ def _make_allocation(stock, order_status, qty):
 # ---------------------------------------------------------------------------
 
 
-def test_deactivate_conservation_draft_only(db, warehouse):
+def test_deactivate_conservation_unconfirmed_only(db, warehouse):
     from saleor.order import OrderStatus
     from saleor.product import PriceListStatus
     from saleor.warehouse.models import Allocation
 
-    product, variant, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
-    stock.quantity_allocated = 20
-    stock.save(update_fields=["quantity_allocated"])
-    alloc = _make_allocation(stock, OrderStatus.DRAFT, 20)
-
-    pl, _ = _make_processed_price_list(warehouse, product=product)
-    pl.status = PriceListStatus.ACTIVE
-    pl.save(update_fields=["status"])
-
-    deactivate_price_list_task(pl.pk)
-
-    stock.refresh_from_db()
-    assert stock.quantity == 0
-    assert stock.quantity_allocated == 0
-    assert not Allocation.objects.filter(pk=alloc.pk).exists()
-
-
-def test_deactivate_conservation_mixed_draft_and_unfulfilled(db, warehouse):
-    from saleor.order import OrderStatus
-    from saleor.product import PriceListStatus
-    from saleor.warehouse.models import Allocation
-
-    product, variant, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
-    stock.quantity_allocated = 30
-    stock.save(update_fields=["quantity_allocated"])
-    draft_alloc = _make_allocation(stock, OrderStatus.DRAFT, 20)
-    unfulfilled_alloc = _make_allocation(stock, OrderStatus.UNFULFILLED, 10)
-
-    pl, _ = _make_processed_price_list(warehouse, product=product)
-    pl.status = PriceListStatus.ACTIVE
-    pl.save(update_fields=["status"])
-
-    deactivate_price_list_task(pl.pk)
-
-    stock.refresh_from_db()
-    assert stock.quantity == 10
-    assert stock.quantity_allocated == 10
-    assert not Allocation.objects.filter(pk=draft_alloc.pk).exists()
-    assert Allocation.objects.filter(pk=unfulfilled_alloc.pk).exists()
-
-
-def test_deactivate_conservation_unconfirmed_order(db, warehouse):
-    from saleor.order import OrderStatus
-    from saleor.product import PriceListStatus
-    from saleor.warehouse.models import Allocation
-
-    product, variant, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
     stock.quantity_allocated = 20
     stock.save(update_fields=["quantity_allocated"])
     alloc = _make_allocation(stock, OrderStatus.UNCONFIRMED, 20)
@@ -1539,12 +1524,40 @@ def test_deactivate_conservation_unconfirmed_order(db, warehouse):
     assert not Allocation.objects.filter(pk=alloc.pk).exists()
 
 
+def test_deactivate_conservation_mixed_unconfirmed_and_unfulfilled(db, warehouse):
+    from saleor.order import OrderStatus
+    from saleor.product import PriceListStatus
+    from saleor.warehouse.models import Allocation
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock.quantity_allocated = 30
+    stock.save(update_fields=["quantity_allocated"])
+    draft_alloc = _make_allocation(stock, OrderStatus.UNCONFIRMED, 20)
+    unfulfilled_alloc = _make_allocation(stock, OrderStatus.UNFULFILLED, 10)
+
+    pl, _ = _make_processed_price_list(warehouse, product=product)
+    pl.status = PriceListStatus.ACTIVE
+    pl.save(update_fields=["status"])
+
+    deactivate_price_list_task(pl.pk)
+
+    stock.refresh_from_db()
+    assert stock.quantity == 10
+    assert stock.quantity_allocated == 10
+    assert not Allocation.objects.filter(pk=draft_alloc.pk).exists()
+    assert Allocation.objects.filter(pk=unfulfilled_alloc.pk).exists()
+
+
 def test_deactivate_does_not_touch_unfulfilled_order_allocations(db, warehouse):
     from saleor.order import OrderStatus
     from saleor.product import PriceListStatus
     from saleor.warehouse.models import Allocation
 
-    product, variant, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
     stock.quantity_allocated = 15
     stock.save(update_fields=["quantity_allocated"])
     alloc = _make_allocation(stock, OrderStatus.UNFULFILLED, 15)
@@ -1564,7 +1577,9 @@ def test_deactivate_does_not_touch_unfulfilled_order_allocations(db, warehouse):
 def test_deactivate_conservation_no_orders(db, warehouse):
     from saleor.product import PriceListStatus
 
-    product, variant, stock = _make_product_with_variant_and_stock(warehouse, quantity=50)
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
 
     pl, _ = _make_processed_price_list(warehouse, product=product)
     pl.status = PriceListStatus.ACTIVE
@@ -1577,16 +1592,18 @@ def test_deactivate_conservation_no_orders(db, warehouse):
     assert stock.quantity_allocated == 0
 
 
-def test_deactivate_conservation_multiple_draft_orders_same_stock(db, warehouse):
+def test_deactivate_conservation_multiple_unconfirmed_orders_same_stock(db, warehouse):
     from saleor.order import OrderStatus
     from saleor.product import PriceListStatus
     from saleor.warehouse.models import Allocation
 
-    product, variant, stock = _make_product_with_variant_and_stock(warehouse, quantity=100)
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=100
+    )
     stock.quantity_allocated = 55
     stock.save(update_fields=["quantity_allocated"])
-    alloc1 = _make_allocation(stock, OrderStatus.DRAFT, 30)
-    alloc2 = _make_allocation(stock, OrderStatus.DRAFT, 25)
+    alloc1 = _make_allocation(stock, OrderStatus.UNCONFIRMED, 30)
+    alloc2 = _make_allocation(stock, OrderStatus.UNCONFIRMED, 25)
 
     pl, _ = _make_processed_price_list(warehouse, product=product)
     pl.status = PriceListStatus.ACTIVE
@@ -1607,6 +1624,7 @@ def test_deactivate_conservation_multiple_draft_orders_same_stock(db, warehouse)
 
 def _make_pl_with_item(warehouse, product, sizes_and_qty):
     from decimal import Decimal
+
     from django.utils import timezone
 
     pl = PriceList.objects.create(
@@ -1620,7 +1638,7 @@ def _make_pl_with_item(warehouse, product, sizes_and_qty):
         description="Test",
         category="Apparel",
         sizes_and_qty=sizes_and_qty,
-        sell_price=Decimal("10"),
+        sell_price=Decimal(10),
         currency="GBP",
         is_valid=True,
         product=product,
@@ -1628,7 +1646,7 @@ def _make_pl_with_item(warehouse, product, sizes_and_qty):
     return pl
 
 
-def test_replace_conservation_removed_product_with_draft_order(db, warehouse):
+def test_replace_conservation_removed_product_with_unconfirmed_order(db, warehouse):
     from django.utils import timezone
 
     from saleor.order import OrderStatus
@@ -1639,7 +1657,7 @@ def test_replace_conservation_removed_product_with_draft_order(db, warehouse):
     )
     stock_a.quantity_allocated = 20
     stock_a.save(update_fields=["quantity_allocated"])
-    alloc = _make_allocation(stock_a, OrderStatus.DRAFT, 20)
+    alloc = _make_allocation(stock_a, OrderStatus.UNCONFIRMED, 20)
 
     old_pl = _make_pl_with_item(warehouse, product_a, {"S": 50})
     new_pl = PriceList.objects.create(
@@ -1665,7 +1683,7 @@ def test_replace_conservation_removed_product_mixed_orders(db, warehouse):
     )
     stock_a.quantity_allocated = 30
     stock_a.save(update_fields=["quantity_allocated"])
-    draft_alloc = _make_allocation(stock_a, OrderStatus.DRAFT, 20)
+    draft_alloc = _make_allocation(stock_a, OrderStatus.UNCONFIRMED, 20)
     unfulfilled_alloc = _make_allocation(stock_a, OrderStatus.UNFULFILLED, 10)
 
     old_pl = _make_pl_with_item(warehouse, product_a, {"S": 50})
@@ -1691,7 +1709,7 @@ def test_replace_conservation_retained_product_not_deallocated(db, warehouse):
     )
     stock_b.quantity_allocated = 15
     stock_b.save(update_fields=["quantity_allocated"])
-    alloc = _make_allocation(stock_b, OrderStatus.DRAFT, 15)
+    alloc = _make_allocation(stock_b, OrderStatus.UNCONFIRMED, 15)
 
     old_pl = _make_pl_with_item(warehouse, product_b, {"M": 50})
     new_pl = _make_pl_with_item(warehouse, product_b, {"M": 30})
@@ -1701,11 +1719,11 @@ def test_replace_conservation_retained_product_not_deallocated(db, warehouse):
     stock_b.refresh_from_db()
     assert Allocation.objects.filter(pk=alloc.pk).exists()
     assert stock_b.quantity_allocated == 15
+    assert stock_b.quantity == 30
 
 
-def test_replace_conservation_removed_size_with_draft_order(db, warehouse):
+def test_replace_conservation_removed_size_with_unconfirmed_order(db, warehouse):
     from saleor.order import OrderStatus
-    from saleor.product.models import ProductVariant
     from saleor.warehouse.models import Allocation
 
     product_c, variant_s, stock_s = _make_product_with_variant_and_stock(
@@ -1713,7 +1731,7 @@ def test_replace_conservation_removed_size_with_draft_order(db, warehouse):
     )
     stock_s.quantity_allocated = 10
     stock_s.save(update_fields=["quantity_allocated"])
-    alloc = _make_allocation(stock_s, OrderStatus.DRAFT, 10)
+    alloc = _make_allocation(stock_s, OrderStatus.UNCONFIRMED, 10)
 
     old_pl = _make_pl_with_item(warehouse, product_c, {"S": 30, "M": 20})
     new_pl = _make_pl_with_item(warehouse, product_c, {"M": 20})
@@ -1728,7 +1746,6 @@ def test_replace_conservation_removed_size_with_draft_order(db, warehouse):
 
 def test_replace_conservation_removed_size_mixed_orders(db, warehouse):
     from saleor.order import OrderStatus
-    from saleor.product.models import ProductVariant
     from saleor.warehouse.models import Allocation
 
     product_c, variant_s, stock_s = _make_product_with_variant_and_stock(
@@ -1736,7 +1753,7 @@ def test_replace_conservation_removed_size_mixed_orders(db, warehouse):
     )
     stock_s.quantity_allocated = 25
     stock_s.save(update_fields=["quantity_allocated"])
-    draft_alloc = _make_allocation(stock_s, OrderStatus.DRAFT, 15)
+    draft_alloc = _make_allocation(stock_s, OrderStatus.UNCONFIRMED, 15)
     unfulfilled_alloc = _make_allocation(stock_s, OrderStatus.UNFULFILLED, 10)
 
     old_pl = _make_pl_with_item(warehouse, product_c, {"S": 40, "M": 20})
@@ -1758,11 +1775,13 @@ def test_replace_conservation_removed_size_mixed_orders(db, warehouse):
 
 def test_activate_marks_products_search_index_dirty(db, warehouse):
     from unittest.mock import patch
-    from saleor.product.models import Product
+
     from saleor.product.tasks import update_products_search_vector_task
 
     product, _, _ = _make_product_with_variant_and_stock(warehouse)
-    pl, _ = _make_processed_price_list(warehouse, sizes_and_qty={"S": 5}, product=product)
+    pl, _ = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 5}, product=product
+    )
 
     with patch.object(update_products_search_vector_task, "delay") as mock_delay:
         activate_price_list_task(pl.pk)
@@ -1774,6 +1793,7 @@ def test_activate_marks_products_search_index_dirty(db, warehouse):
 
 def test_deactivate_marks_products_search_index_dirty(db, warehouse):
     from unittest.mock import patch
+
     from saleor.product import PriceListStatus
     from saleor.product.tasks import update_products_search_vector_task
 
@@ -1792,20 +1812,32 @@ def test_deactivate_marks_products_search_index_dirty(db, warehouse):
 
 def test_replace_marks_all_affected_products_search_index_dirty(db, warehouse):
     from unittest.mock import patch
+
     from django.utils import timezone
+
     from saleor.product.tasks import update_products_search_vector_task
 
-    product_a, _, _ = _make_product_with_variant_and_stock(warehouse, size="S", quantity=10)
-    product_b, _, _ = _make_product_with_variant_and_stock(warehouse, size="M", quantity=10)
+    product_a, _, _ = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=10
+    )
+    product_b, _, _ = _make_product_with_variant_and_stock(
+        warehouse, size="M", quantity=10
+    )
 
     old_pl = PriceList.objects.create(
         warehouse=warehouse, config={}, processing_completed_at=timezone.now()
     )
     PriceListItem.objects.create(
-        price_list=old_pl, row_index=0,
-        product_code="A", brand="B", description="A",
-        category="Apparel", sizes_and_qty={"S": 10},
-        sell_price=Decimal("10"), currency="GBP", is_valid=True,
+        price_list=old_pl,
+        row_index=0,
+        product_code="A",
+        brand="B",
+        description="A",
+        category="Apparel",
+        sizes_and_qty={"S": 10},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
         product=product_a,
     )
 
@@ -1813,10 +1845,16 @@ def test_replace_marks_all_affected_products_search_index_dirty(db, warehouse):
         warehouse=warehouse, config={}, processing_completed_at=timezone.now()
     )
     PriceListItem.objects.create(
-        price_list=new_pl, row_index=0,
-        product_code="B", brand="B", description="B",
-        category="Apparel", sizes_and_qty={"M": 10},
-        sell_price=Decimal("10"), currency="GBP", is_valid=True,
+        price_list=new_pl,
+        row_index=0,
+        product_code="B",
+        brand="B",
+        description="B",
+        category="Apparel",
+        sizes_and_qty={"M": 10},
+        sell_price=Decimal(10),
+        currency="GBP",
+        is_valid=True,
         product=product_b,
     )
 
@@ -1869,8 +1907,6 @@ def test_process_marks_duplicate_product_code_invalid(db, warehouse, hk_excel):
         is_valid=True,
     )
 
-    from saleor.product.tasks import process_price_list_task
-
     # Trigger only the deduplication pass (not full processing) by calling it
     # indirectly: re-run the duplicate-marking logic directly on a fresh pl.
     # Simpler: call process_price_list_task on a pl that has a real file.
@@ -1888,7 +1924,9 @@ def test_process_marks_duplicate_product_code_invalid(db, warehouse, hk_excel):
         key = (item.product_code, item.brand)
         if key in seen_keys:
             item.is_valid = False
-            item.validation_errors = ["duplicate product_code+brand in this sheet: DUP-001"]
+            item.validation_errors = [
+                "duplicate product_code+brand in this sheet: DUP-001"
+            ]
             duplicate_items.append(item)
         else:
             seen_keys.add(key)
@@ -1909,13 +1947,40 @@ def test_process_task_marks_duplicate_product_code_invalid(db, warehouse, tmp_pa
     from saleor.product.tasks import process_price_list_task
 
     headers = [
-        "Brand", "Article", "Description", "RRP (GBP)", "Sale Price (GBP)",
-        "Quantity", "Category", "Gender", "Sizing (UK)", "Category.1", "Gender.1",
-        "Rounded RRP (GBP)", "unit_weight_kg", "updated_sizing", "issues", "updated_description",
+        "Brand",
+        "Article",
+        "Description",
+        "RRP (GBP)",
+        "Sale Price (GBP)",
+        "Quantity",
+        "Category",
+        "Gender",
+        "Sizing (UK)",
+        "Category.1",
+        "Gender.1",
+        "Rounded RRP (GBP)",
+        "unit_weight_kg",
+        "updated_sizing",
+        "issues",
+        "updated_description",
     ]
     row = [
-        "Adidas", "IS1637", "TIRO24 C TRPNTW", 40, 9.025, 190, "Apparel", "Women",
-        "XS[20], M[50]", "Apparel", "Women", 40, 0.2, "XS[20], M[50]", None, "TIRO24 C TRPNTW",
+        "Adidas",
+        "IS1637",
+        "TIRO24 C TRPNTW",
+        40,
+        9.025,
+        190,
+        "Apparel",
+        "Women",
+        "XS[20], M[50]",
+        "Apparel",
+        "Women",
+        40,
+        0.2,
+        "XS[20], M[50]",
+        None,
+        "TIRO24 C TRPNTW",
     ]
 
     wb = openpyxl.Workbook()
@@ -1936,9 +2001,14 @@ def test_process_task_marks_duplicate_product_code_invalid(db, warehouse, tmp_pa
                 "sheet_name": "Sheet1 (1)",
                 "header_row": 0,
                 "column_map": {
-                    "0": "brand", "1": "product_code", "2": "description",
-                    "3": "rrp", "4": "sell_price", "6": "category",
-                    "12": "weight_kg", "13": "sizes",
+                    "0": "brand",
+                    "1": "product_code",
+                    "2": "description",
+                    "3": "rrp",
+                    "4": "sell_price",
+                    "6": "category",
+                    "12": "weight_kg",
+                    "13": "sizes",
                 },
                 "default_currency": "GBP",
             },
@@ -1956,9 +2026,9 @@ def test_process_task_marks_duplicate_product_code_invalid(db, warehouse, tmp_pa
 def test_activate_duplicate_product_code_does_not_create_two_products(
     db, warehouse, required_attributes
 ):
-    """If two valid items share a product code (slipped past processing), activation
-    creates only one product and reuses it for the second item."""
+    """If two valid items share a product code (slipped past processing), activation creates only one product and reuses it for the second item."""
     from django.utils import timezone
+
     from saleor.product.models import Category, Product, ProductType
     from saleor.product.tasks import activate_price_list_task
 
@@ -1971,18 +2041,232 @@ def test_activate_duplicate_product_code_does_not_create_two_products(
         warehouse=warehouse, config={}, processing_completed_at=timezone.now()
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=0, product_code="DUP-001", brand="Adidas",
-        description="Duplicate Product", category="Apparel",
-        sizes_and_qty={"S": 10}, sell_price=Decimal("10.00"),
-        currency="GBP", is_valid=True, product=None,
+        price_list=pl,
+        row_index=0,
+        product_code="DUP-001",
+        brand="Adidas",
+        description="Duplicate Product",
+        category="Apparel",
+        sizes_and_qty={"S": 10},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=True,
+        product=None,
     )
     PriceListItem.objects.create(
-        price_list=pl, row_index=1, product_code="DUP-001", brand="Adidas",
-        description="Duplicate Product", category="Apparel",
-        sizes_and_qty={"M": 5}, sell_price=Decimal("10.00"),
-        currency="GBP", is_valid=True, product=None,
+        price_list=pl,
+        row_index=1,
+        product_code="DUP-001",
+        brand="Adidas",
+        description="Duplicate Product",
+        category="Apparel",
+        sizes_and_qty={"M": 5},
+        sell_price=Decimal("10.00"),
+        currency="GBP",
+        is_valid=True,
+        product=None,
     )
 
     activate_price_list_task(pl.pk)
 
     assert Product.objects.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# _deallocate_draft_unconfirmed — unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_deallocate_removes_unconfirmed_allocation_and_updates_stock(db, warehouse):
+    from django.db import transaction
+
+    from saleor.order import OrderStatus
+    from saleor.product.tasks import _deallocate_draft_unconfirmed
+    from saleor.warehouse.models import Allocation
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock.quantity_allocated = 20
+    stock.save(update_fields=["quantity_allocated"])
+    alloc = _make_allocation(stock, OrderStatus.UNCONFIRMED, 20)
+
+    with transaction.atomic():
+        _deallocate_draft_unconfirmed(warehouse, [product.pk])
+
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 0
+    assert not Allocation.objects.filter(pk=alloc.pk).exists()
+
+
+def test_deallocate_removes_draft_allocation_and_updates_stock(db, warehouse):
+    from django.db import transaction
+
+    from saleor.order import OrderStatus
+    from saleor.product.tasks import _deallocate_draft_unconfirmed
+    from saleor.warehouse.models import Allocation
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock.quantity_allocated = 15
+    stock.save(update_fields=["quantity_allocated"])
+    alloc = _make_allocation(stock, OrderStatus.DRAFT, 15)
+
+    with transaction.atomic():
+        _deallocate_draft_unconfirmed(warehouse, [product.pk])
+
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 0
+    assert not Allocation.objects.filter(pk=alloc.pk).exists()
+
+
+def test_deallocate_does_not_touch_unfulfilled_allocations(db, warehouse):
+    from django.db import transaction
+
+    from saleor.order import OrderStatus
+    from saleor.product.tasks import _deallocate_draft_unconfirmed
+    from saleor.warehouse.models import Allocation
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+    stock.quantity_allocated = 10
+    stock.save(update_fields=["quantity_allocated"])
+    alloc = _make_allocation(stock, OrderStatus.UNFULFILLED, 10)
+
+    with transaction.atomic():
+        _deallocate_draft_unconfirmed(warehouse, [product.pk])
+
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 10
+    assert Allocation.objects.filter(pk=alloc.pk).exists()
+
+
+def test_deallocate_aggregates_multiple_allocations_on_same_stock(db, warehouse):
+    from django.db import transaction
+
+    from saleor.order import OrderStatus
+    from saleor.product.tasks import _deallocate_draft_unconfirmed
+    from saleor.warehouse.models import Allocation
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=100
+    )
+    stock.quantity_allocated = 45
+    stock.save(update_fields=["quantity_allocated"])
+    alloc1 = _make_allocation(stock, OrderStatus.UNCONFIRMED, 25)
+    alloc2 = _make_allocation(stock, OrderStatus.UNCONFIRMED, 20)
+
+    with transaction.atomic():
+        _deallocate_draft_unconfirmed(warehouse, [product.pk])
+
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 0
+    assert not Allocation.objects.filter(pk__in=[alloc1.pk, alloc2.pk]).exists()
+
+
+def test_deallocate_size_names_filter_only_removes_matching_sizes(db, warehouse):
+    from django.db import transaction
+
+    from saleor.order import OrderStatus
+    from saleor.product.models import ProductVariant
+    from saleor.product.tasks import _deallocate_draft_unconfirmed
+    from saleor.warehouse.models import Allocation
+
+    product, variant_s, stock_s = _make_product_with_variant_and_stock(
+        warehouse, size="S", quantity=30
+    )
+    variant_m = ProductVariant.objects.create(product=product, sku="test-m", name="M")
+    stock_m = Stock.objects.create(
+        product_variant=variant_m, warehouse=warehouse, quantity=30
+    )
+    stock_s.quantity_allocated = 10
+    stock_s.save(update_fields=["quantity_allocated"])
+    stock_m.quantity_allocated = 10
+    stock_m.save(update_fields=["quantity_allocated"])
+    alloc_s = _make_allocation(stock_s, OrderStatus.UNCONFIRMED, 10)
+    alloc_m = _make_allocation(stock_m, OrderStatus.UNCONFIRMED, 10)
+
+    with transaction.atomic():
+        _deallocate_draft_unconfirmed(warehouse, [product.pk], size_names={"S"})
+
+    stock_s.refresh_from_db()
+    stock_m.refresh_from_db()
+    assert stock_s.quantity_allocated == 0
+    assert not Allocation.objects.filter(pk=alloc_s.pk).exists()
+    assert stock_m.quantity_allocated == 10
+    assert Allocation.objects.filter(pk=alloc_m.pk).exists()
+
+
+def test_deallocate_no_allocations_is_a_noop(db, warehouse):
+    from django.db import transaction
+
+    from saleor.product.tasks import _deallocate_draft_unconfirmed
+
+    product, variant, stock = _make_product_with_variant_and_stock(
+        warehouse, quantity=50
+    )
+
+    with transaction.atomic():
+        _deallocate_draft_unconfirmed(warehouse, [product.pk])
+
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 0
+
+
+# ---------------------------------------------------------------------------
+# process_price_list_task — exception handler
+# ---------------------------------------------------------------------------
+
+
+def test_process_task_sets_processing_failed_at_on_exception(db, warehouse, tmp_path):
+    import openpyxl
+    import pytest
+    from django.core.files import File
+
+    wb = openpyxl.Workbook()
+    path = tmp_path / "test.xlsx"
+    wb.save(path)
+
+    with open(path, "rb") as f:
+        pl = PriceList.objects.create(
+            warehouse=warehouse,
+            excel_file=File(f, name="test.xlsx"),
+            config={},  # missing required "column_map" key — causes KeyError inside task
+        )
+
+    with pytest.raises(KeyError):
+        process_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.processing_failed_at is not None
+    assert pl.processing_completed_at is None
+
+
+def test_process_task_clears_completed_at_when_exception_occurs(
+    db, warehouse, tmp_path
+):
+    import openpyxl
+    import pytest
+    from django.core.files import File
+    from django.utils import timezone
+
+    wb = openpyxl.Workbook()
+    path = tmp_path / "test.xlsx"
+    wb.save(path)
+
+    with open(path, "rb") as f:
+        pl = PriceList.objects.create(
+            warehouse=warehouse,
+            excel_file=File(f, name="test.xlsx"),
+            config={},
+            processing_completed_at=timezone.now(),  # simulate a prior successful run
+        )
+
+    with pytest.raises(KeyError):
+        process_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.processing_completed_at is None
+    assert pl.processing_failed_at is not None

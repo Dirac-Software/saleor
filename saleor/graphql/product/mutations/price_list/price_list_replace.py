@@ -1,10 +1,13 @@
 """PriceList replace mutation."""
 
+from typing import cast
+
 import graphene
 from django.core.exceptions import ValidationError
 
 from .....permission.enums import ProductPermissions
 from .....product.error_codes import ProductErrorCode
+from .....product.models import PriceList
 from .....product.tasks import (
     _count_draft_unconfirmed_orders,
     replace_price_list_task,
@@ -54,17 +57,23 @@ class PriceListReplace(BaseMutation):
 
     @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
-        old_pl = cls.get_node_or_error(
-            info,
-            data["old_price_list_id"],
-            field="old_price_list_id",
-            only_type="PriceList",
+        old_pl = cast(
+            PriceList,
+            cls.get_node_or_error(
+                info,
+                data["old_price_list_id"],
+                field="old_price_list_id",
+                only_type="PriceList",
+            ),
         )
-        new_pl = cls.get_node_or_error(
-            info,
-            data["new_price_list_id"],
-            field="new_price_list_id",
-            only_type="PriceList",
+        new_pl = cast(
+            PriceList,
+            cls.get_node_or_error(
+                info,
+                data["new_price_list_id"],
+                field="new_price_list_id",
+                only_type="PriceList",
+            ),
         )
 
         if not data.get("force"):

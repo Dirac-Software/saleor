@@ -1,13 +1,16 @@
 """PriceList create mutation."""
 
 import logging
+from typing import cast
 
 import graphene
 from django.core.exceptions import ValidationError
 
+from .....channel.models import Channel
 from .....permission.enums import ProductPermissions
 from .....product.error_codes import ProductErrorCode
 from .....product.models import PriceList
+from .....warehouse.models import Warehouse
 from ....core import ResolveInfo
 from ....core.doc_category import DOC_CATEGORY_PRODUCTS
 from ....core.mutations import BaseMutation
@@ -133,10 +136,15 @@ class PriceListCreate(BaseMutation):
                 code=ProductErrorCode.REQUIRED.value,
             )
 
-        channels = []
+        channels: list[Channel] = []
         if channel_ids and default_currency and "channel_ids" not in errors:
             channels = [
-                cls.get_node_or_error(info, cid, field="channel_ids", only_type="Channel")
+                cast(
+                    Channel,
+                    cls.get_node_or_error(
+                        info, cid, field="channel_ids", only_type="Channel"
+                    ),
+                )
                 for cid in channel_ids
             ]
             mismatched_channels = [
@@ -157,7 +165,7 @@ class PriceListCreate(BaseMutation):
                 "No file provided.",
                 code=ProductErrorCode.REQUIRED.value,
             )
-        elif not file.name.lower().endswith((".xlsx", ".xls")):
+        elif not cast(str, file.name).lower().endswith((".xlsx", ".xls")):
             errors["file"] = ValidationError(
                 "File must be an Excel file (.xlsx or .xls).",
                 code=ProductErrorCode.INVALID.value,
@@ -166,11 +174,24 @@ class PriceListCreate(BaseMutation):
         if errors:
             raise ValidationError(errors)
 
-        warehouse = cls.get_node_or_error(
-            info, inp["warehouse_id"], field="warehouse_id", only_type="Warehouse"
+        warehouse = cast(
+            Warehouse,
+            cls.get_node_or_error(
+                info, inp["warehouse_id"], field="warehouse_id", only_type="Warehouse"
+            ),
         )
 
         column_map_input = inp.get("column_map") or {}
+        provided_indices = [idx for idx in column_map_input.values() if idx is not None]
+        if len(provided_indices) != len(set(provided_indices)):
+            raise ValidationError(
+                {
+                    "column_map": ValidationError(
+                        "Each column index must be unique; duplicate indices found.",
+                        code=ProductErrorCode.INVALID.value,
+                    )
+                }
+            )
         column_map = {
             str(idx): field
             for field, idx in column_map_input.items()
