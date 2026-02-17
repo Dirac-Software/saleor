@@ -393,6 +393,101 @@ def test_create_warehouse_with_address_item_from_valid_address_extension_map(
     assert address_db.country_area == cleaned_country_area
 
 
+def test_create_warehouse_non_owned_assigns_to_all_channels_and_zones_by_default(
+    staff_api_client, permission_manage_products, channel_USD, shipping_zone
+):
+    # given
+    variables = {
+        "input": {
+            "name": "Test warehouse",
+            "address": {
+                "streetAddress1": "Teczowa 8",
+                "city": "Wroclaw",
+                "country": "PL",
+                "postalCode": "53-601",
+            },
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        MUTATION_CREATE_WAREHOUSE,
+        variables=variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+
+    # then
+    assert not content["data"]["createWarehouse"]["errors"]
+    warehouse = Warehouse.objects.get()
+    assert channel_USD in warehouse.channels.all()
+    assert shipping_zone in warehouse.shipping_zones.all()
+
+
+def test_create_warehouse_non_owned_skips_assign_when_flag_false(
+    staff_api_client, permission_manage_products, channel_USD, shipping_zone
+):
+    # given
+    variables = {
+        "input": {
+            "name": "Test warehouse",
+            "address": {
+                "streetAddress1": "Teczowa 8",
+                "city": "Wroclaw",
+                "country": "PL",
+                "postalCode": "53-601",
+            },
+            "assignToAllChannelsAndZones": False,
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        MUTATION_CREATE_WAREHOUSE,
+        variables=variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+
+    # then
+    assert not content["data"]["createWarehouse"]["errors"]
+    warehouse = Warehouse.objects.get()
+    assert not warehouse.channels.exists()
+    assert not warehouse.shipping_zones.exists()
+
+
+def test_create_warehouse_owned_never_assigns_to_channels_and_zones(
+    staff_api_client, permission_manage_products, channel_USD, shipping_zone
+):
+    # given
+    variables = {
+        "input": {
+            "name": "Test warehouse",
+            "address": {
+                "streetAddress1": "Teczowa 8",
+                "city": "Wroclaw",
+                "country": "PL",
+                "postalCode": "53-601",
+            },
+            "isOwned": True,
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        MUTATION_CREATE_WAREHOUSE,
+        variables=variables,
+        permissions=[permission_manage_products],
+    )
+    content = get_graphql_content(response)
+
+    # then
+    assert not content["data"]["createWarehouse"]["errors"]
+    warehouse = Warehouse.objects.get()
+    assert not warehouse.channels.exists()
+    assert not warehouse.shipping_zones.exists()
+
+
 def test_create_warehouse_invalid_address_skip_validation(
     staff_api_client,
     permission_manage_products,
