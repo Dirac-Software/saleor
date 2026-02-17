@@ -2162,6 +2162,7 @@ enum WebhookEventTypeEnum @doc(category: "Webhooks") {
   """A fulfillment metadata is updated."""
   FULFILLMENT_METADATA_UPDATED
   FULFILLMENT_TRACKING_NUMBER_UPDATED
+  FULFILLMENT_PROFORMA_INVOICE_GENERATED
 
   """A draft order is created."""
   DRAFT_ORDER_CREATED
@@ -2739,6 +2740,7 @@ enum WebhookEventTypeAsyncEnum @doc(category: "Webhooks") {
   """A fulfillment metadata is updated."""
   FULFILLMENT_METADATA_UPDATED
   FULFILLMENT_TRACKING_NUMBER_UPDATED
+  FULFILLMENT_PROFORMA_INVOICE_GENERATED
 
   """A draft order is created."""
   DRAFT_ORDER_CREATED
@@ -3570,6 +3572,7 @@ enum WebhookSampleEventTypeEnum @doc(category: "Webhooks") {
   FULFILLMENT_APPROVED
   FULFILLMENT_METADATA_UPDATED
   FULFILLMENT_TRACKING_NUMBER_UPDATED
+  FULFILLMENT_PROFORMA_INVOICE_GENERATED
   DRAFT_ORDER_CREATED
   DRAFT_ORDER_UPDATED
   DRAFT_ORDER_DELETED
@@ -35103,6 +35106,30 @@ type FulfillmentMetadataUpdated implements Event @doc(category: "Orders") {
 
   """The order the fulfillment belongs to."""
   order: Order
+}
+
+"""Event sent when proforma invoice is generated for a fulfillment."""
+type FulfillmentProformaInvoiceGenerated implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+
+  """The fulfillment the event relates to."""
+  fulfillment: Fulfillment
+
+  """The order the fulfillment belongs to."""
+  order: Order
+
+  """The proforma invoice that was generated."""
+  proformaInvoice: Invoice
 }
 
 """Event sent when new customer user is created."""
