@@ -4,21 +4,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('account', '0095_repopulate_user_number_of_orders'),
+        ("account", "0095_repopulate_user_number_of_orders"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='user',
-            name='xero_contact_id',
+            model_name="user",
+            name="xero_contact_id",
             field=models.CharField(
                 max_length=255,
                 blank=True,
                 null=True,
                 db_index=True,
-                help_text='Xero contact ID for this customer. Auto-populated from Xero API.',
+                help_text="Xero contact ID for this customer. Auto-populated from Xero API.",
             ),
         ),
     ]

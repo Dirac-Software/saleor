@@ -503,9 +503,7 @@ def test_confirm_poi_does_not_create_fulfillments_for_order(
     assert Fulfillment.objects.filter(order=order).count() == 0
 
 
-def test_complete_receipt_creates_fulfillments(
-    order_with_poi_and_receipt, staff_user
-):
+def test_complete_receipt_creates_fulfillments(order_with_poi_and_receipt, staff_user):
     # given
     order = order_with_poi_and_receipt["order"]
     poi = order_with_poi_and_receipt["poi"]

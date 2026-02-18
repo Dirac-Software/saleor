@@ -4,15 +4,21 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('shipping', '0043_rename_tracking_number_to_url'),
+        ("shipping", "0043_rename_tracking_number_to_url"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='shippingmethod',
-            name='type',
-            field=models.CharField(choices=[('price', 'Price based shipping'), ('weight', 'Weight based shipping'), ('manual', 'Manual shipping')], max_length=30),
+            model_name="shippingmethod",
+            name="type",
+            field=models.CharField(
+                choices=[
+                    ("price", "Price based shipping"),
+                    ("weight", "Weight based shipping"),
+                    ("manual", "Manual shipping"),
+                ],
+                max_length=30,
+            ),
         ),
     ]

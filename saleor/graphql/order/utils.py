@@ -116,7 +116,9 @@ def validate_shipping_method(
             "Shipping method is not valid for chosen shipping address",
             code=OrderErrorCode.SHIPPING_METHOD_NOT_APPLICABLE.value,
         )
-    elif not is_manual_type and not order.shipping_method.shipping_zone.channels.filter(id=order.channel_id):
+    elif not is_manual_type and not order.shipping_method.shipping_zone.channels.filter(
+        id=order.channel_id
+    ):
         error = ValidationError(
             "Shipping method not available in given channel.",
             code=OrderErrorCode.SHIPPING_METHOD_NOT_APPLICABLE.value,

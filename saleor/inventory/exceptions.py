@@ -89,7 +89,7 @@ class AdjustmentAffectsFulfilledOrders(AdjustmentRequiresManualResolution):
             self,
             f"Cannot process adjustment {adjustment.id}: affects UNFULFILLED orders "
             f"{order_numbers}. UNFULFILLED orders cannot be automatically modified. "
-            f"Manual resolution required."
+            f"Manual resolution required.",
         )
 
 
@@ -105,7 +105,7 @@ class AdjustmentAffectsPaidOrders(AdjustmentRequiresManualResolution):
         Exception.__init__(
             self,
             f"Cannot process adjustment {adjustment.id}: affects fully paid orders "
-            f"{order_numbers}. Refund workflow required."
+            f"{order_numbers}. Refund workflow required.",
         )
 
 
