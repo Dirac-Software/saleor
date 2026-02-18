@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.http import FileResponse, Http404, HttpResponse
@@ -5,13 +7,11 @@ from django.views.decorators.http import require_http_methods
 
 from saleor.csv.models import ExportFile
 from saleor.invoice.models import Invoice
+from saleor.product.models import PriceList
 
+PRICE_LIST_SIGNED_URL_MAX_AGE = 604800  # 7 days
 
-class _AnonymousUser:
-    """Fallback for unauthenticated requests."""
-
-    is_authenticated = False
-    is_staff = False
+logger = logging.getLogger(__name__)
 
 
 @require_http_methods(["GET", "HEAD"])
@@ -24,10 +24,9 @@ def serve_export_file(request, file_id):
     except ExportFile.DoesNotExist:
         raise Http404("Export file not found") from None
 
-    # Check permission: must be the owner or staff
-    user = getattr(request, "user", _AnonymousUser())
+    user = getattr(request, "user", None)
 
-    if not user.is_authenticated:
+    if user is None or not user.is_authenticated:
         return HttpResponse("Unauthorized", status=401)
 
     is_owner = export_file.user and export_file.user == user
@@ -96,10 +95,9 @@ def serve_invoice(request, invoice_id):
     except Invoice.DoesNotExist:
         raise Http404("Invoice not found") from None
 
-    # Check permission: must own the order or be staff
-    user = getattr(request, "user", _AnonymousUser())
+    user = getattr(request, "user", None)
 
-    if not user.is_authenticated:
+    if user is None or not user.is_authenticated:
         return HttpResponse("Unauthorized", status=401)
 
     is_order_owner = invoice.order and invoice.order.user and invoice.order.user == user
@@ -119,4 +117,45 @@ def serve_invoice(request, invoice_id):
     # Set content type
     response["Content-Type"] = "application/pdf"
 
+    return response
+
+
+@require_http_methods(["GET", "HEAD"])
+def serve_price_list_signed(request, pk, signed_id):
+    signer = TimestampSigner()
+    try:
+        price_list_id = signer.unsign(signed_id, max_age=PRICE_LIST_SIGNED_URL_MAX_AGE)
+    except SignatureExpired:
+        logger.debug(
+            "serve_price_list_signed: link expired for signed_id=%s", signed_id
+        )
+        return HttpResponse("Link expired", status=410)
+    except BadSignature:
+        logger.debug(
+            "serve_price_list_signed: invalid signature for signed_id=%s", signed_id
+        )
+        return HttpResponse("Invalid link", status=400)
+
+    logger.debug("serve_price_list_signed: resolved price_list_id=%s", price_list_id)
+
+    try:
+        price_list = PriceList.objects.using(
+            settings.DATABASE_CONNECTION_REPLICA_NAME
+        ).get(pk=price_list_id)
+    except PriceList.DoesNotExist:
+        raise Http404("Price list not found") from None
+
+    if not price_list.excel_file:
+        raise Http404("File not available")
+
+    filename = price_list.excel_file.name.split("/")[-1]
+    logger.debug("serve_price_list_signed: serving file %s", filename)
+    response = FileResponse(
+        price_list.excel_file.open("rb"),
+        as_attachment=True,
+        filename=filename,
+    )
+    response["Content-Type"] = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     return response
