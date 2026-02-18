@@ -9,7 +9,7 @@ from .....permission.enums import ProductPermissions
 from .....product.error_codes import ProductErrorCode
 from .....product.models import PriceList
 from .....product.tasks import (
-    count_draft_unconfirmed_orders,
+    _count_draft_unconfirmed_orders,
     replace_price_list_task,
 )
 from ....core import ResolveInfo
@@ -77,7 +77,7 @@ class PriceListReplace(BaseMutation):
         )
 
         if not data.get("force"):
-            affected_count = count_draft_unconfirmed_orders(old_pl.warehouse)
+            affected_count = _count_draft_unconfirmed_orders(old_pl.warehouse)
             if affected_count:
                 raise ValidationError(
                     {

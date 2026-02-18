@@ -9,7 +9,7 @@ from .....permission.enums import ProductPermissions
 from .....product.error_codes import ProductErrorCode
 from .....product.models import PriceList
 from .....product.tasks import (
-    count_draft_unconfirmed_orders,
+    _count_draft_unconfirmed_orders,
     deactivate_price_list_task,
 )
 from ....core import ResolveInfo
@@ -60,7 +60,7 @@ class PriceListDeactivate(BaseMutation):
                 .distinct()
             )
             if product_ids:
-                affected_count = count_draft_unconfirmed_orders(
+                affected_count = _count_draft_unconfirmed_orders(
                     price_list.warehouse, product_ids
                 )
                 if affected_count:

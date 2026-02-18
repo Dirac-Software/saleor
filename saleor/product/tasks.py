@@ -748,7 +748,7 @@ def activate_price_list_task(price_list_id: int):
         PriceList.objects.filter(pk=price_list_id).update(is_processing=False)
 
 
-def count_draft_unconfirmed_orders(warehouse, product_ids=None):
+def _count_draft_unconfirmed_orders(warehouse, product_ids=None):
     """Return count of distinct draft/unconfirmed orders with allocations at warehouse.
 
     If product_ids is given, only considers allocations for those products.
