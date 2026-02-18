@@ -362,7 +362,7 @@ def test_order_line_is_ready_to_fulfill_with_stock_and_deposit_met(
     variant = line.variant
 
     order.deposit_required = True
-    order.deposit_percentage = Decimal("30")
+    order.deposit_percentage = Decimal(30)
     order.total_gross_amount = Decimal("1000.00")
     order.save()
 
@@ -375,7 +375,6 @@ def test_order_line_is_ready_to_fulfill_with_stock_and_deposit_met(
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
     supplier_warehouse = Warehouse.objects.create(
@@ -464,7 +463,7 @@ def test_order_line_is_ready_to_fulfill_with_stock_but_deposit_not_met(
     variant = line.variant
 
     order.deposit_required = True
-    order.deposit_percentage = Decimal("30")
+    order.deposit_percentage = Decimal(30)
     order.total_gross_amount = Decimal("1000.00")
     order.save()
 
@@ -540,7 +539,7 @@ def test_order_line_is_ready_to_fulfill_without_stock(
     order = order_with_lines
 
     order.deposit_required = True
-    order.deposit_percentage = Decimal("30")
+    order.deposit_percentage = Decimal(30)
     order.total_gross_amount = Decimal("1000.00")
     order.save()
 
@@ -553,7 +552,6 @@ def test_order_line_is_ready_to_fulfill_without_stock(
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
     order_id = graphene.Node.to_global_id("Order", order.id)

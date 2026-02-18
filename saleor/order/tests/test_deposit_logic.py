@@ -21,7 +21,6 @@ def create_xero_deposit_payment(order, amount, payment_id=None):
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
 
@@ -89,29 +88,6 @@ def test_total_deposit_paid_ignores_non_xero_payments(order_with_lines):
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
-    )
-
-    assert order.total_deposit_paid == Decimal("100.00")
-
-
-def test_total_deposit_paid_ignores_non_deposit_payments(order_with_lines):
-    order = order_with_lines
-    order.deposit_required = True
-    order.save()
-
-    create_xero_deposit_payment(order, Decimal("100.00"), "PAY-001")
-
-    Payment.objects.create(
-        order=order,
-        gateway=CustomPaymentChoices.XERO,
-        psp_reference="PAY-FINAL",
-        total=Decimal("500.00"),
-        captured_amount=Decimal("500.00"),
-        charge_status=ChargeStatus.FULLY_CHARGED,
-        currency=order.currency,
-        is_active=True,
-        metadata={"is_deposit": False},
     )
 
     assert order.total_deposit_paid == Decimal("100.00")
@@ -133,7 +109,6 @@ def test_total_deposit_paid_ignores_inactive_payments(order_with_lines):
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=False,
-        metadata={"is_deposit": True},
     )
 
     assert order.total_deposit_paid == Decimal("100.00")
@@ -189,7 +164,7 @@ def test_deposit_threshold_met_when_no_percentage(order_with_lines):
         "has_pick",
         "pick_status",
         "has_shipment",
-        "proforma_paid",
+        "has_sufficient_payment",
         "fulfillment_status",
         "expected",
     ),
@@ -207,20 +182,25 @@ def test_fulfillment_can_auto_transition(
     has_pick,
     pick_status,
     has_shipment,
-    proforma_paid,
+    has_sufficient_payment,
     fulfillment_status,
     expected,
 ):
-    from ..models import Pick
+    from ..models import FulfillmentLine, Pick
 
     order = order_with_lines
     order.deposit_required = False
     order.save()
 
-    fulfillment = order.fulfillments.create(
-        status=fulfillment_status,
-        proforma_invoice_paid=proforma_paid,
-    )
+    fulfillment = order.fulfillments.create(status=fulfillment_status)
+
+    if not has_sufficient_payment:
+        # Add a line so the fulfillment has a non-zero total, but no payment,
+        # causing total_deposit_paid (0) < fulfillment_total (> 0).
+        line = order.lines.first()
+        FulfillmentLine.objects.create(
+            fulfillment=fulfillment, order_line=line, quantity=1
+        )
 
     if has_pick:
         Pick.objects.create(

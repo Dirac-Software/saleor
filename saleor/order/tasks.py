@@ -239,3 +239,84 @@ def reduce_user_number_of_orders(user_orders_count: dict[int, int]):
 
         if users_to_update:
             User.objects.bulk_update(users_to_update, ["number_of_orders"])
+
+
+@app.task
+@allow_writer()
+def check_xero_prepayment_statuses_task():
+    """Hourly CRON: check all pending Xero prepayments and record payments if paid."""
+    from decimal import Decimal
+
+    from ..order.utils import record_external_payment
+    from ..payment import CustomPaymentChoices, TransactionKind
+    from ..webhook.event_types import WebhookEventSyncType
+    from ..webhook.utils import get_webhooks_for_event
+    from .models import Fulfillment, FulfillmentStatus
+
+    manager = get_plugins_manager(allow_replica=False)
+
+    if not any(
+        get_webhooks_for_event(WebhookEventSyncType.XERO_CHECK_PREPAYMENT_STATUS)
+    ):
+        return
+
+    # Check deposit prepayments: orders with a stored Xero prepayment ID and no deposit_paid_at
+    pending_deposit_orders = Order.objects.filter(
+        xero_deposit_prepayment_id__isnull=False,
+        deposit_paid_at__isnull=True,
+    ).select_related("channel")
+
+    for order in pending_deposit_orders:
+        if order.xero_deposit_prepayment_id is None:
+            continue
+        response = manager.xero_check_prepayment_status(
+            order.xero_deposit_prepayment_id
+        )
+        if not response or not response.get("isPaid"):
+            continue
+        amount = Decimal(str(response["amountPaid"]))
+        record_external_payment(
+            order=order,
+            amount=amount,
+            gateway=CustomPaymentChoices.XERO,
+            psp_reference=order.xero_deposit_prepayment_id,
+            transaction_kind=TransactionKind.CAPTURE,
+            metadata={"source": "xero_cron", "datePaid": response.get("datePaid", "")},
+            user=None,
+            app=None,
+            manager=manager,
+        )
+        order.refresh_from_db(fields=["deposit_paid_at"])
+
+    # Check proforma prepayments: fulfillments with a stored Xero prepayment ID
+    # that don't already have a recorded payment for that ID
+    pending_proforma_fulfillments = (
+        Fulfillment.objects.filter(
+            xero_proforma_prepayment_id__isnull=False,
+            status=FulfillmentStatus.WAITING_FOR_APPROVAL,
+        )
+        .exclude(order__payments__psp_reference=F("xero_proforma_prepayment_id"))
+        .select_related("order", "order__channel")
+    )
+
+    for fulfillment in pending_proforma_fulfillments:
+        if fulfillment.xero_proforma_prepayment_id is None:
+            continue
+        response = manager.xero_check_prepayment_status(
+            fulfillment.xero_proforma_prepayment_id
+        )
+        if not response or not response.get("isPaid"):
+            continue
+        order = fulfillment.order
+        amount = Decimal(str(response["amountPaid"]))
+        record_external_payment(
+            order=order,
+            amount=amount,
+            gateway=CustomPaymentChoices.XERO,
+            psp_reference=fulfillment.xero_proforma_prepayment_id,
+            transaction_kind=TransactionKind.CAPTURE,
+            metadata={"source": "xero_cron", "datePaid": response.get("datePaid", "")},
+            user=None,
+            app=None,
+            manager=manager,
+        )

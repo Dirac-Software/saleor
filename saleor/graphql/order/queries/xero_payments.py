@@ -1,7 +1,6 @@
-import os
+import logging
 
 import graphene
-import requests
 
 from ....order.error_codes import OrderErrorCode
 from ....permission.enums import OrderPermissions
@@ -9,6 +8,9 @@ from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_ORDERS
 from ...core.scalars import Decimal
 from ...core.types import OrderError
+from ...plugins.dataloaders import get_plugin_manager_promise
+
+logger = logging.getLogger(__name__)
 
 
 class XeroPaymentSummary(graphene.ObjectType):
@@ -34,6 +36,10 @@ class AvailableXeroPayments(graphene.ObjectType):
     class Meta:
         description = "Available Xero payments for an order's customer."
         doc_category = DOC_CATEGORY_ORDERS
+
+
+def get_xero_contact_payments(contact_id: str, manager) -> list:
+    return manager.xero_list_payments(contact_id=contact_id)
 
 
 def resolve_available_xero_payments(
@@ -65,10 +71,11 @@ def resolve_available_xero_payments(
         _, order_uuid = graphene.Node.from_global_id(order_id)
         order = (
             OrderModel.objects.using(database_connection_name)
-            .select_related("user")
+            .select_related("user", "channel")
             .get(id=UUID(order_uuid))
         )
-    except Exception:
+    except (OrderModel.DoesNotExist, ValueError, TypeError):
+        logger.warning("availableXeroPayments: order not found for id=%s", order_id)
         return AvailableXeroPayments(
             payments=[],
             errors=[
@@ -79,8 +86,8 @@ def resolve_available_xero_payments(
             ],
         )
 
-    # Check if order has user with Xero contact ID
     if not order.user:
+        logger.warning("availableXeroPayments: order %s has no customer", order.pk)
         return AvailableXeroPayments(
             payments=[],
             errors=[
@@ -97,24 +104,27 @@ def resolve_available_xero_payments(
             errors=[
                 OrderError(
                     code=OrderErrorCode.INVALID.value,
-                    message="Customer not linked to Xero. Sync a payment first to link customer.",
+                    message=f"Customer {order.user.email} is not linked to Xero.",
                 )
             ],
         )
 
-    # Fetch payments from Xero via dirac service
-    dirac_url = os.getenv("DIRAC_SERVICE_URL", "http://localhost:8086")
+    manager = get_plugin_manager_promise(info.context).get()
+
+    logger.debug(
+        "availableXeroPayments: fetching by contact_id=%s for order=%s",
+        order.user.xero_contact_id,
+        order.pk,
+    )
 
     try:
-        response = requests.get(
-            f"{dirac_url}/api/contact-payments/{order.user.xero_contact_id}",
-            params={"limit": 5},
-            timeout=10,
+        xero_payments = get_xero_contact_payments(order.user.xero_contact_id, manager)
+    except Exception as e:
+        logger.exception(
+            "availableXeroPayments: exception calling xero_list_payments for order=%s contact_id=%s",
+            order.pk,
+            order.user.xero_contact_id,
         )
-        response.raise_for_status()
-        data = response.json()
-        xero_payments = data.get("payments", [])
-    except requests.exceptions.RequestException as e:
         return AvailableXeroPayments(
             payments=[],
             errors=[
@@ -125,7 +135,34 @@ def resolve_available_xero_payments(
             ],
         )
 
-    # Convert to GraphQL types
+    logger.debug(
+        "availableXeroPayments: xero_list_payments returned %d payment(s) for order=%s",
+        len(xero_payments),
+        order.pk,
+    )
+
+    if xero_payments is None or (
+        isinstance(xero_payments, list) and len(xero_payments) == 0
+    ):
+        logger.warning(
+            "availableXeroPayments: no payments returned from Xero for order=%s "
+            "contact_id=%s — check that a XERO_LIST_PAYMENTS webhook is registered",
+            order.pk,
+            order.user.xero_contact_id,
+        )
+        return AvailableXeroPayments(
+            payments=[],
+            errors=[
+                OrderError(
+                    code=OrderErrorCode.NOT_FOUND.value,
+                    message=(
+                        f"No Xero payments found for {order.user.xero_contact_id}. "
+                        "Ensure the XERO_LIST_PAYMENTS webhook is registered in the Xero app."
+                    ),
+                )
+            ],
+        )
+
     payments = [
         XeroPaymentSummary(
             payment_id=p["payment_id"],

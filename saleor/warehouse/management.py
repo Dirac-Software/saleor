@@ -1,3 +1,4 @@
+import functools
 import math
 from collections import defaultdict
 from collections.abc import Iterable
@@ -401,6 +402,21 @@ def allocate_stocks(
             ):
                 order.status = OrderStatus.UNFULFILLED
                 order.save(update_fields=["status", "updated_at"])
+
+                from ..order.actions import order_confirmed
+                from ..plugins.manager import get_plugins_manager
+
+                confirm_manager = get_plugins_manager(allow_replica=False)
+                transaction.on_commit(
+                    functools.partial(
+                        order_confirmed,
+                        order,
+                        None,
+                        None,
+                        confirm_manager,
+                        send_confirmation_email=True,
+                    )
+                )
 
         stocks_to_update_map = {alloc.stock_id: alloc.stock for alloc in allocations}
         quantity_from_allocations: dict[int, int] = defaultdict(int)

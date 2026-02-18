@@ -908,22 +908,34 @@ class Fulfillment(
         description="Proforma invoice associated with this fulfillment.",
         required=False,
     )
-    proforma_invoice_paid = graphene.Boolean(
-        description="Indicates if the proforma invoice has been paid.",
-        required=True,
-    )
-    proforma_invoice_paid_at = DateTime(
-        description="Date and time when proforma invoice was marked as paid.",
-        required=False,
-    )
     deposit_allocated = graphene.Boolean(
         description="Indicates if order deposits have been allocated to this fulfillment.",
         required=True,
     )
+    deposit_allocated_amount = graphene.Field(
+        Money,
+        description="Amount of deposit credit allocated to this fulfillment.",
+        required=False,
+    )
+    xero_quote_id = graphene.String(
+        description="Xero Quote UUID for the proforma quote linked to this fulfillment.",
+        required=False,
+    )
+    xero_quote_number = graphene.String(
+        description="Xero Quote number (e.g. Q-1234).",
+        required=False,
+    )
+    xero_proforma_prepayment_id = graphene.String(
+        description="Xero prepayment UUID for the proforma payment on this fulfillment.",
+        required=False,
+    )
+    quote_pdf_url = graphene.String(
+        description="URL to the quote PDF hosted by the Xero integration app.",
+        required=False,
+    )
     can_transition_to_fulfilled = graphene.Boolean(
         description=(
-            "Indicates if this fulfillment can automatically transition to FULFILLED status. "
-            "True when proforma invoice is paid, deposit is allocated, and inventory is received."
+            "Indicates if this fulfillment can automatically transition to FULFILLED status."
         ),
         required=True,
     )
@@ -1076,33 +1088,27 @@ class Fulfillment(
             return None
 
     @staticmethod
-    def resolve_proforma_invoice_paid(
-        root: SyncWebhookControlContext[models.Fulfillment], _info
-    ):
-        return root.node.proforma_invoice_paid
-
-    @staticmethod
-    def resolve_proforma_invoice_paid_at(
-        root: SyncWebhookControlContext[models.Fulfillment], _info
-    ):
-        return root.node.proforma_invoice_paid_at
-
-    @staticmethod
     def resolve_deposit_allocated(
         root: SyncWebhookControlContext[models.Fulfillment], _info
     ):
         return root.node.deposit_allocated
 
     @staticmethod
-    def resolve_can_transition_to_fulfilled(
+    def resolve_deposit_allocated_amount(
         root: SyncWebhookControlContext[models.Fulfillment], _info
     ):
         fulfillment = root.node
-        return (
-            fulfillment.proforma_invoice_paid
-            and fulfillment.deposit_allocated
-            and fulfillment.has_inventory_received
+        if fulfillment.deposit_allocated_amount is None:
+            return None
+        return prices.Money(
+            fulfillment.deposit_allocated_amount, fulfillment.order.currency
         )
+
+    @staticmethod
+    def resolve_can_transition_to_fulfilled(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        return root.node.can_auto_transition_to_fulfilled()
 
 
 class OrderLine(
@@ -1829,7 +1835,7 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     )
     deposit_payment_id = graphene.String(
         description="Deprecated: Use payments with gateway='xero' instead.",
-        deprecation_reason="Use payments field filtered by gateway='xero' and metadata.is_deposit=true.",
+        deprecation_reason="Use payments field filtered by gateway='xero'.",
     )
     deposit_amount = graphene.Field(
         Money,
@@ -1839,7 +1845,7 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     total_deposit_paid = graphene.Field(
         "saleor.graphql.core.scalars.Decimal",
         required=True,
-        description="Total amount paid from all Xero deposit payments (gateway='xero', metadata.is_deposit=true).",
+        description="Total amount captured from all active Xero payments.",
     )
     deposit_threshold_met = graphene.Boolean(
         required=True,
@@ -1847,6 +1853,14 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     )
     deposit_paid_at = DateTime(
         description="Date and time when deposit threshold was met."
+    )
+    xero_deposit_prepayment_id = graphene.String(
+        description="Xero prepayment UUID for the deposit on this order.",
+        required=False,
+    )
+    xero_bank_account_code = graphene.String(
+        description="Xero bank account code used for deposit prepayments on this order.",
+        required=False,
     )
     tax_exemption = graphene.Boolean(
         description="Returns True if order has to be exempt from taxes.",

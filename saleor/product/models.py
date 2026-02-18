@@ -820,6 +820,7 @@ class PriceList(models.Model):
     attempted_processing_at = models.DateTimeField(null=True, blank=True)
     processing_completed_at = models.DateTimeField(null=True, blank=True)
     processing_failed_at = models.DateTimeField(null=True, blank=True)
+    is_processing = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-created_at"]
@@ -828,22 +829,28 @@ class PriceList(models.Model):
         from .tasks import process_price_list_task
 
         self.attempted_processing_at = timezone.now()
-        self.save(update_fields=["attempted_processing_at"])
+        self.is_processing = True
+        self.save(update_fields=["attempted_processing_at", "is_processing"])
         process_price_list_task.delay(self.pk)
 
     def activate(self):
         from .tasks import activate_price_list_task
 
+        PriceList.objects.filter(pk=self.pk).update(is_processing=True)
         activate_price_list_task.delay(self.pk)
 
     def deactivate(self):
         from .tasks import deactivate_price_list_task
 
+        PriceList.objects.filter(pk=self.pk).update(is_processing=True)
         deactivate_price_list_task.delay(self.pk)
 
     def replace_with(self, new_price_list: "PriceList"):
         from .tasks import replace_price_list_task
 
+        PriceList.objects.filter(pk__in=[self.pk, new_price_list.pk]).update(
+            is_processing=True
+        )
         replace_price_list_task.delay(self.pk, new_price_list.pk)
 
 
@@ -884,3 +891,6 @@ class PriceListItem(models.Model):
 
     class Meta:
         unique_together = [["price_list", "row_index"]]
+        indexes = [
+            models.Index(fields=["price_list", "is_valid"]),
+        ]

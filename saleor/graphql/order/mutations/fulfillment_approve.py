@@ -82,15 +82,18 @@ class FulfillmentApprove(BaseMutation):
         site = get_site_promise(info.context).get()
 
         if not site.settings.fulfillment_allow_unpaid:
-            if hasattr(fulfillment, "proforma_invoice"):
-                if not fulfillment.proforma_invoice_paid:
-                    raise ValidationError(
-                        "Cannot fulfill with unpaid proforma invoice.",
-                        code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
-                    )
-            elif not fulfillment.order.is_fully_paid():
+            from ....order.proforma import calculate_fulfillment_total
+
+            order = fulfillment.order
+            prior_total = sum(
+                calculate_fulfillment_total(f)
+                for f in order.fulfillments.exclude(pk=fulfillment.pk)
+                if f.status != FulfillmentStatus.CANCELED
+            )
+            current_total = calculate_fulfillment_total(fulfillment)
+            if order.total_deposit_paid < prior_total + current_total:
                 raise ValidationError(
-                    "Cannot fulfill unpaid order.",
+                    "Cannot fulfill: cumulative payments do not cover fulfillment totals.",
                     code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
                 )
 

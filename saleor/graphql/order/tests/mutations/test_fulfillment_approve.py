@@ -745,7 +745,7 @@ def test_fulfillment_approve_order_unpaid(
 
 @patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
 @patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
-def test_fulfillment_approve_with_proforma_paid_but_order_not_fully_paid(
+def test_fulfillment_approve_with_sufficient_partial_payment(
     mock_email_fulfillment,
     mock_fulfillment_approved,
     staff_api_client,
@@ -757,8 +757,9 @@ def test_fulfillment_approve_with_proforma_paid_but_order_not_fully_paid(
 
     from django.utils import timezone
 
-    from .....invoice import InvoiceType
-    from .....invoice.models import Invoice
+    from .....order.proforma import calculate_fulfillment_total
+    from .....payment import ChargeStatus, CustomPaymentChoices
+    from .....payment.models import Payment
     from .....shipping import IncoTerm, ShipmentType
     from .....shipping.models import Shipment
 
@@ -769,17 +770,16 @@ def test_fulfillment_approve_with_proforma_paid_but_order_not_fully_paid(
     fulfillment = partial_fulfillment_awaiting_approval
     order = fulfillment.order
 
-    Invoice.objects.create(
+    fulfillment_total = calculate_fulfillment_total(fulfillment)
+    Payment.objects.create(
         order=order,
-        number="PROFORMA-PARTIAL-001",
-        type=InvoiceType.PROFORMA,
-        fulfillment=fulfillment,
-    )
-
-    fulfillment.proforma_invoice_paid = True
-    fulfillment.proforma_invoice_paid_at = timezone.now()
-    fulfillment.save(
-        update_fields=["proforma_invoice_paid", "proforma_invoice_paid_at"]
+        gateway=CustomPaymentChoices.XERO,
+        psp_reference="TEST-PARTIAL-001",
+        total=fulfillment_total,
+        captured_amount=fulfillment_total,
+        charge_status=ChargeStatus.FULLY_CHARGED,
+        currency=order.currency,
+        is_active=True,
     )
 
     warehouse = fulfillment.lines.first().stock.warehouse

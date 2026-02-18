@@ -91,6 +91,9 @@ from ...webhook.payloads import (
     generate_thumbnail_payload,
     generate_transaction_session_payload,
     generate_translation_payload,
+    generate_xero_check_prepayment_status_payload,
+    generate_xero_list_bank_accounts_payload,
+    generate_xero_list_payments_payload,
 )
 from ...webhook.response_schemas.transaction import (
     PaymentGatewayInitializeSessionSchema,
@@ -1640,27 +1643,21 @@ class WebhookPlugin(BasePlugin):
         return previous_value
 
     def fulfillment_proforma_invoice_generated(
-        self, fulfillment: "Fulfillment", previous_value: None = None
+        self,
+        fulfillment: "Fulfillment",
+        invoice: "Invoice",
+        previous_value: None = None,
     ) -> None:
         if not self.active:
             return previous_value
         event_type = WebhookEventAsyncType.FULFILLMENT_PROFORMA_INVOICE_GENERATED
         if webhooks := get_webhooks_for_event(event_type):
-            from ...webhook.payloads import generate_proforma_invoice_payload
-
-            invoice_data_generator = partial(
-                generate_proforma_invoice_payload, fulfillment, self.requestor
-            )
             self.trigger_webhooks_async(
                 None,
                 event_type,
                 webhooks,
-                {
-                    "fulfillment": fulfillment,
-                    "invoice": fulfillment.proforma_invoice,
-                },
+                invoice,
                 self.requestor,
-                legacy_data_generator=invoice_data_generator,
             )
         return previous_value
 
@@ -3806,6 +3803,134 @@ class WebhookPlugin(BasePlugin):
             allow_replica=self.allow_replica,
             pregenerated_subscription_payloads=pregenerated_subscription_payloads,
         )
+
+    def xero_list_payments(
+        self,
+        contact_id: str | None,
+        email: str | None,
+        domain: str | None,
+        previous_value: list,
+    ) -> list:
+        webhooks = get_webhooks_for_event(WebhookEventSyncType.XERO_LIST_PAYMENTS)
+        result = list(previous_value)
+        for webhook in webhooks:
+            payload_str = generate_xero_list_payments_payload(contact_id, email, domain)
+            response_data = trigger_webhook_sync(
+                event_type=WebhookEventSyncType.XERO_LIST_PAYMENTS,
+                payload=payload_str,
+                webhook=webhook,
+                allow_replica=False,
+                subscribable_object=None,
+                requestor=self.requestor,
+                pregenerated_subscription_payload=json.loads(payload_str),
+            )
+            if response_data is not None:
+                result.extend(response_data.get("payments", []))
+        return result
+
+    def xero_order_confirmed(self, order: "Order", previous_value: None) -> None:
+        webhooks = get_webhooks_for_event(WebhookEventSyncType.XERO_ORDER_CONFIRMED)
+        for webhook in webhooks:
+            response_data = trigger_webhook_sync(
+                event_type=WebhookEventSyncType.XERO_ORDER_CONFIRMED,
+                payload="",
+                webhook=webhook,
+                allow_replica=False,
+                subscribable_object=order,
+                requestor=self.requestor,
+            )
+            if response_data is None:
+                continue
+            xero_deposit_prepayment_id = response_data.get("xeroDepositPrepaymentId")
+            if xero_deposit_prepayment_id:
+                order.xero_deposit_prepayment_id = xero_deposit_prepayment_id
+                order.save(update_fields=["xero_deposit_prepayment_id"])
+        return previous_value
+
+    def xero_fulfillment_created(self, fulfillment, previous_value: None) -> None:
+        webhooks = get_webhooks_for_event(WebhookEventSyncType.XERO_FULFILLMENT_CREATED)
+        for webhook in webhooks:
+            response_data = trigger_webhook_sync(
+                event_type=WebhookEventSyncType.XERO_FULFILLMENT_CREATED,
+                payload="",
+                webhook=webhook,
+                allow_replica=False,
+                subscribable_object=fulfillment,
+                requestor=self.requestor,
+            )
+            if response_data is None:
+                continue
+            update_fields = []
+            if xero_quote_id := response_data.get("xeroQuoteId"):
+                fulfillment.xero_quote_id = xero_quote_id
+                update_fields.append("xero_quote_id")
+            if xero_quote_number := response_data.get("xeroQuoteNumber"):
+                fulfillment.xero_quote_number = xero_quote_number
+                update_fields.append("xero_quote_number")
+            if xero_proforma_prepayment_id := response_data.get(
+                "xeroProformaPrepaymentId"
+            ):
+                fulfillment.xero_proforma_prepayment_id = xero_proforma_prepayment_id
+                update_fields.append("xero_proforma_prepayment_id")
+            if quote_pdf_url := response_data.get("quotePdfUrl"):
+                fulfillment.quote_pdf_url = quote_pdf_url
+                update_fields.append("quote_pdf_url")
+            if update_fields:
+                fulfillment.save(update_fields=update_fields)
+        return previous_value
+
+    def xero_list_bank_accounts(self, domain: str, previous_value: list) -> list:
+        webhooks = get_webhooks_for_event(WebhookEventSyncType.XERO_LIST_BANK_ACCOUNTS)
+        for webhook in webhooks:
+            payload_str = generate_xero_list_bank_accounts_payload(domain)
+            response_data = trigger_webhook_sync(
+                event_type=WebhookEventSyncType.XERO_LIST_BANK_ACCOUNTS,
+                payload=payload_str,
+                webhook=webhook,
+                allow_replica=False,
+                subscribable_object=None,
+                requestor=self.requestor,
+                pregenerated_subscription_payload=json.loads(payload_str),
+            )
+            if response_data is not None:
+                return response_data.get("bank_accounts", [])
+        return previous_value
+
+    def xero_check_prepayment_status(
+        self, prepayment_id: str, previous_value: dict | None
+    ) -> dict | None:
+        webhooks = get_webhooks_for_event(
+            WebhookEventSyncType.XERO_CHECK_PREPAYMENT_STATUS
+        )
+        for webhook in webhooks:
+            payload_str = generate_xero_check_prepayment_status_payload(prepayment_id)
+            response_data = trigger_webhook_sync(
+                event_type=WebhookEventSyncType.XERO_CHECK_PREPAYMENT_STATUS,
+                payload=payload_str,
+                webhook=webhook,
+                allow_replica=False,
+                subscribable_object=None,
+                requestor=self.requestor,
+                pregenerated_subscription_payload=json.loads(payload_str),
+            )
+            if response_data is not None:
+                return response_data
+        return previous_value
+
+    def fulfillment_fulfilled(self, fulfillment, previous_value: None) -> None:
+        if not self.active:
+            return previous_value
+        event_type = WebhookEventAsyncType.FULFILLMENT_FULFILLED
+        if webhooks := get_webhooks_for_event(event_type):
+            self.trigger_webhooks_async(
+                None,
+                event_type,
+                webhooks,
+                fulfillment,
+                self.requestor,
+                queue=settings.ORDER_WEBHOOK_EVENTS_CELERY_QUEUE_NAME,
+            )
+        return previous_value
 
     def is_event_active(self, event: str, channel: str | None = None):
         map_event = {

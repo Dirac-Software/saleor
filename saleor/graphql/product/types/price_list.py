@@ -86,6 +86,10 @@ class PriceList(ModelObjectType[models.PriceList]):
         description="When processing completed successfully."
     )
     processing_failed_at = DateTime(description="When processing last failed.")
+    is_processing = graphene.Boolean(
+        required=True,
+        description="Whether an async task is currently running for this price list.",
+    )
     warehouse = graphene.Field(
         "saleor.graphql.warehouse.types.Warehouse",
         required=True,

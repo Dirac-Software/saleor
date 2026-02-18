@@ -471,12 +471,11 @@ class FulfillmentFilter(MetadataFilterBase):
         input_class=FulfillmentStatusEnum, method=filter_fulfillment_status
     )
     warehouse = GlobalIDMultipleChoiceFilter(method=filter_fulfillment_warehouse)
-    proforma_invoice_paid = django_filters.BooleanFilter()
     deposit_allocated = django_filters.BooleanFilter(method="filter_deposit_allocated")
 
     class Meta:
         model = Fulfillment
-        fields = ["status", "warehouse", "proforma_invoice_paid"]
+        fields = ["status", "warehouse"]
 
     def filter_deposit_allocated(self, queryset, name, value):
         if value is True:
@@ -576,10 +575,6 @@ class FulfillmentFilterInput(BaseInputObjectType):
     metadata = MetadataFilterInput(description="Filter by metadata fields.")
     warehouse = FulfillmentWarehouseFilterInput(
         description="Filter by fulfillment warehouse.",
-        required=False,
-    )
-    proforma_invoice_paid = graphene.Boolean(
-        description="Filter by whether proforma invoice has been paid.",
         required=False,
     )
     deposit_allocated = graphene.Boolean(

@@ -222,6 +222,9 @@ class CustomerInput(UserInput, UserAddressInput):
     is_confirmed = graphene.Boolean(
         required=False, description="User account is confirmed."
     )
+    xero_contact_id = graphene.String(
+        description="Xero contact ID for this customer.", required=False
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_USERS

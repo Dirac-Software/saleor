@@ -26,6 +26,10 @@ class OrderSetDepositRequired(BaseMutation):
             required=False,
             description="Percentage of total required as deposit (0-100).",
         )
+        xero_bank_account_code = graphene.String(
+            required=False,
+            description="Xero bank account code to use for deposit prepayments.",
+        )
 
     class Meta:
         description = "Set whether an order requires a deposit before fulfillment."
@@ -35,9 +39,11 @@ class OrderSetDepositRequired(BaseMutation):
         error_type_field = "order_errors"
 
     @classmethod
-    def clean_input(cls, required, percentage):
-        if required and percentage is not None:
-            if not (DecimalType(0) <= percentage <= DecimalType(100)):
+    def clean_input(cls, required, percentage, xero_bank_account_code):
+        if required:
+            if percentage is not None and not (
+                DecimalType(0) <= percentage <= DecimalType(100)
+            ):
                 raise ValidationError(
                     {
                         "percentage": ValidationError(
@@ -46,17 +52,41 @@ class OrderSetDepositRequired(BaseMutation):
                         )
                     }
                 )
+            if not xero_bank_account_code:
+                raise ValidationError(
+                    {
+                        "xero_bank_account_code": ValidationError(
+                            "A Xero bank account must be selected when enabling deposit.",
+                            code=OrderErrorCode.INVALID.value,
+                        )
+                    }
+                )
 
     @classmethod
     def perform_mutation(  # type: ignore[override]
-        cls, _root, info: ResolveInfo, /, *, id, required, percentage=None
+        cls,
+        _root,
+        info: ResolveInfo,
+        /,
+        *,
+        id,
+        required,
+        percentage=None,
+        xero_bank_account_code=None,
     ):
         order = cls.get_node_or_error(info, id, only_type=Order)
         cls.check_channel_permissions(info, [order.channel_id])
-        cls.clean_input(required, percentage)
+        cls.clean_input(required, percentage, xero_bank_account_code)
 
         order.deposit_required = required
         order.deposit_percentage = percentage if required else None
-        order.save(update_fields=["deposit_required", "deposit_percentage"])
+        order.xero_bank_account_code = xero_bank_account_code if required else None
+        order.save(
+            update_fields=[
+                "deposit_required",
+                "deposit_percentage",
+                "xero_bank_account_code",
+            ]
+        )
 
         return OrderSetDepositRequired(order=SyncWebhookControlContext(order))

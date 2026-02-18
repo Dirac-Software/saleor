@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
             name="deposit_paid_at",
             field=models.DateTimeField(
                 blank=True,
-                help_text="Timestamp when the deposit threshold was met. Deposit payments are tracked as Payment objects with gateway='xero' and metadata.is_deposit=true.",
+                help_text="Timestamp when the deposit threshold was met by cumulative Xero payments.",
                 null=True,
             ),
         ),

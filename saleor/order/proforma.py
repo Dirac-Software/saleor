@@ -71,12 +71,6 @@ def generate_proforma_invoice(fulfillment, manager):
 
     order = fulfillment.order
 
-    fulfillment_total = calculate_fulfillment_total(fulfillment)
-    deposit_credit = calculate_deposit_allocation(order, fulfillment_total)
-
-    fulfillment.deposit_allocated_amount = deposit_credit
-    fulfillment.save(update_fields=["deposit_allocated_amount"])
-
     invoice = Invoice.objects.create(
         order=order,
         fulfillment=fulfillment,
@@ -91,6 +85,6 @@ def generate_proforma_invoice(fulfillment, manager):
         parameters={"invoice_type": InvoiceType.PROFORMA},
     )
 
-    call_event(manager.fulfillment_proforma_invoice_generated, fulfillment)
+    call_event(manager.fulfillment_proforma_invoice_generated, fulfillment, invoice)
 
     return invoice

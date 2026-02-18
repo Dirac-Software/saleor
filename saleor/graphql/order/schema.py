@@ -48,11 +48,9 @@ from .mutations.draft_order_delete import DraftOrderDelete
 from .mutations.draft_order_update import DraftOrderUpdate
 from .mutations.fulfillment_approve import FulfillmentApprove
 from .mutations.fulfillment_cancel import FulfillmentCancel
-from .mutations.fulfillment_mark_proforma_paid import FulfillmentMarkProformaInvoicePaid
 from .mutations.fulfillment_refund_products import FulfillmentRefundProducts
 from .mutations.fulfillment_return_products import FulfillmentReturnProducts
 from .mutations.fulfillment_update_tracking import FulfillmentUpdateTracking
-from .mutations.order_add_xero_payment import OrderSyncXeroPayment
 from .mutations.order_cancel import OrderCancel
 from .mutations.order_capture import OrderCapture
 from .mutations.order_confirm import OrderConfirm
@@ -79,6 +77,10 @@ from .mutations.order_void import OrderVoid
 from .mutations.pick_complete import PickComplete
 from .mutations.pick_start import PickStart
 from .mutations.pick_update_item import PickUpdateItem
+from .queries.xero_bank_accounts import (
+    AvailableXeroBankAccounts,
+    resolve_available_xero_bank_accounts,
+)
 from .queries.xero_payments import (
     AvailableXeroPayments,
     resolve_available_xero_payments,
@@ -248,6 +250,17 @@ class OrderQueries(graphene.ObjectType):
         permissions=[OrderPermissions.MANAGE_ORDERS],
         doc_category=DOC_CATEGORY_ORDERS,
     )
+    available_xero_bank_accounts = PermissionsField(
+        AvailableXeroBankAccounts,
+        description="List available Xero bank accounts for creating deposit prepayments.",
+        order_id=graphene.Argument(
+            graphene.ID,
+            required=True,
+            description="ID of the order (used to resolve the Xero tenant via its channel).",
+        ),
+        permissions=[OrderPermissions.MANAGE_ORDERS],
+        doc_category=DOC_CATEGORY_ORDERS,
+    )
     available_xero_payments = PermissionsField(
         AvailableXeroPayments,
         description="List available Xero payments for an order's customer (last 5).",
@@ -348,6 +361,10 @@ class OrderQueries(graphene.ObjectType):
         return resolve_order_by_token(info, token)
 
     @staticmethod
+    def resolve_available_xero_bank_accounts(_root, info: ResolveInfo, *, order_id):
+        return resolve_available_xero_bank_accounts(_root, info, order_id)
+
+    @staticmethod
     def resolve_available_xero_payments(_root, info: ResolveInfo, *, order_id):
         return resolve_available_xero_payments(_root, info, order_id)
 
@@ -405,8 +422,6 @@ class OrderMutations(graphene.ObjectType):
     order_fulfillment_update_tracking = FulfillmentUpdateTracking.Field()
     order_fulfillment_refund_products = FulfillmentRefundProducts.Field()
     order_fulfillment_return_products = FulfillmentReturnProducts.Field()
-    order_fulfillment_mark_proforma_paid = FulfillmentMarkProformaInvoicePaid.Field()
-
     order_grant_refund_create = OrderGrantRefundCreate.Field()
     order_grant_refund_update = OrderGrantRefundUpdate.Field()
 
@@ -427,7 +442,6 @@ class OrderMutations(graphene.ObjectType):
     order_mark_as_paid = OrderMarkAsPaid.Field()
     order_refund = OrderRefund.Field()
     order_set_deposit_required = OrderSetDepositRequired.Field()
-    order_sync_xero_payment = OrderSyncXeroPayment.Field()
     order_update = OrderUpdate.Field()
     order_update_shipping = OrderUpdateShipping.Field()
     order_update_shipping_cost = OrderUpdateShippingCost.Field()

@@ -887,6 +887,10 @@ class BasePlugin:
     # Webhook-related functionality will be moved from the plugin to core modules.
     invoice_sent: Callable[["Invoice", str, Any], Any]
 
+    fulfillment_proforma_invoice_generated: Callable[
+        ["Fulfillment", "Invoice", Any], None
+    ]
+
     validate_deposit_payment: Callable[[str, "Order"], dict[str, Any]]
 
     list_payment_sources: Callable[[str, Any], list["CustomerSource"]]
@@ -1916,3 +1920,29 @@ class BasePlugin:
 
     def is_event_active(self, event: str, channel: str | None = None):
         return hasattr(self, event)
+
+    def xero_list_payments(
+        self,
+        contact_id: str | None,
+        email: str | None,
+        domain: str | None,
+        previous_value: list,
+    ) -> list:
+        return NotImplemented
+
+    def xero_order_confirmed(self, order, previous_value: None) -> None:
+        return NotImplemented
+
+    def xero_fulfillment_created(self, fulfillment, previous_value: None) -> None:
+        return NotImplemented
+
+    def xero_check_prepayment_status(
+        self, prepayment_id: str, previous_value: dict | None
+    ) -> dict | None:
+        return NotImplemented
+
+    def xero_list_bank_accounts(self, domain: str, previous_value: list) -> list:
+        return NotImplemented
+
+    def fulfillment_fulfilled(self, fulfillment, previous_value: None) -> None:
+        return NotImplemented

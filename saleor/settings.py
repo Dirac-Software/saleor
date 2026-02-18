@@ -455,7 +455,7 @@ LOGGING = {
             "level": "INFO",
             "propagate": False,
         },
-        "saleor": {"level": "DEBUG", "propagate": True},
+        "saleor": {"level": "DEBUG" if DEBUG else "INFO", "propagate": True},
         "saleor.graphql.errors.handled": {
             "handlers": ["default"],
             "level": "INFO",
@@ -728,6 +728,11 @@ CELERY_BEAT_SCHEDULE = {
     "expire-orders": {
         "task": "saleor.order.tasks.expire_orders_task",
         "schedule": BEAT_EXPIRE_ORDERS_AFTER_TIMEDELTA,
+    },
+    "check-xero-prepayment-statuses": {
+        "task": "saleor.order.tasks.check_xero_prepayment_statuses_task",
+        "schedule": datetime.timedelta(hours=1),
+        "options": {"expires": 3600},
     },
     "remove-apps-marked-as-removed": {
         "task": "saleor.app.tasks.remove_apps_task",

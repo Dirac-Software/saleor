@@ -829,3 +829,81 @@ def test_customer_confirm_assign_gift_cards_and_orders(
 
     order.refresh_from_db()
     assert order.user == customer_user
+
+
+CUSTOMER_UPDATE_XERO_MUTATION = """
+    mutation UpdateCustomer($id: ID!, $input: CustomerInput!) {
+        customerUpdate(id: $id, input: $input) {
+            errors {
+                field
+                message
+            }
+            user {
+                id
+                xeroContactId
+            }
+        }
+    }
+"""
+
+
+@pytest.mark.django_db
+def test_customer_update_sets_xero_contact_id(
+    staff_api_client, customer_user, permission_manage_users
+):
+    # given
+    user_id = graphene.Node.to_global_id("User", customer_user.id)
+    xero_contact_id = "a871a956-05b5-4e2a-9419-7aeb478ca647"
+
+    variables = {
+        "id": user_id,
+        "input": {"xeroContactId": xero_contact_id},
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        CUSTOMER_UPDATE_XERO_MUTATION,
+        variables,
+        permissions=[permission_manage_users],
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["customerUpdate"]
+
+    assert not data["errors"]
+    assert data["user"]["xeroContactId"] == xero_contact_id
+
+    customer_user.refresh_from_db()
+    assert customer_user.xero_contact_id == xero_contact_id
+
+
+@pytest.mark.django_db
+def test_customer_update_xero_contact_id_overwrites_existing(
+    staff_api_client, customer_user, permission_manage_users
+):
+    # given
+    customer_user.xero_contact_id = "old-contact-id"
+    customer_user.save(update_fields=["xero_contact_id"])
+
+    user_id = graphene.Node.to_global_id("User", customer_user.id)
+    new_xero_contact_id = "new-contact-id"
+
+    variables = {
+        "id": user_id,
+        "input": {"xeroContactId": new_xero_contact_id},
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        CUSTOMER_UPDATE_XERO_MUTATION,
+        variables,
+        permissions=[permission_manage_users],
+    )
+
+    # then
+    content = get_graphql_content(response)
+    assert not content["data"]["customerUpdate"]["errors"]
+
+    customer_user.refresh_from_db()
+    assert customer_user.xero_contact_id == new_xero_contact_id

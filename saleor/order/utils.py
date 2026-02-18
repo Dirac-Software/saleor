@@ -1445,7 +1445,7 @@ def record_external_payment(
 
     Use this for payments processed outside Saleor (Xero, manual, etc.)
     """
-    from ..payment import ChargeStatus, TransactionKind
+    from ..payment import ChargeStatus
     from ..payment.models import Payment, Transaction
     from . import events
 
@@ -1474,6 +1474,14 @@ def record_external_payment(
 
     update_order_charge_data(order)
     update_order_authorize_data(order)
+
+    if (
+        order.deposit_required
+        and order.deposit_threshold_met
+        and not order.deposit_paid_at
+    ):
+        order.deposit_paid_at = timezone.now()
+        order.save(update_fields=["deposit_paid_at"])
 
     if user or app:
         events.order_manually_marked_as_paid_event(

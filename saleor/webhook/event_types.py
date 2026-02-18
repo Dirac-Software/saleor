@@ -88,6 +88,7 @@ class WebhookEventAsyncType:
     FULFILLMENT_CREATED = "fulfillment_created"
     FULFILLMENT_CANCELED = "fulfillment_canceled"
     FULFILLMENT_APPROVED = "fulfillment_approved"
+    FULFILLMENT_FULFILLED = "fulfillment_fulfilled"
     FULFILLMENT_METADATA_UPDATED = "fulfillment_metadata_updated"
     FULFILLMENT_TRACKING_NUMBER_UPDATED = "fulfillment_tracking_number_updated"
     FULFILLMENT_PROFORMA_INVOICE_GENERATED = "fulfillment_proforma_invoice_generated"
@@ -428,6 +429,10 @@ class WebhookEventAsyncType:
         },
         FULFILLMENT_APPROVED: {
             "name": "Fulfillment approved",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        FULFILLMENT_FULFILLED: {
+            "name": "Fulfillment fulfilled",
             "permission": OrderPermissions.MANAGE_ORDERS,
         },
         FULFILLMENT_METADATA_UPDATED: {
@@ -840,6 +845,12 @@ class WebhookEventSyncType:
         "payment_method_process_tokenization_session"
     )
 
+    XERO_LIST_PAYMENTS = "xero_list_payments"
+    XERO_LIST_BANK_ACCOUNTS = "xero_list_bank_accounts"
+    XERO_ORDER_CONFIRMED = "xero_order_confirmed"
+    XERO_FULFILLMENT_CREATED = "xero_fulfillment_created"
+    XERO_CHECK_PREPAYMENT_STATUS = "xero_check_prepayment_status"
+
     EVENT_MAP: dict[str, dict[str, Any]] = {
         PAYMENT_LIST_GATEWAYS: {
             "name": "List payment gateways",
@@ -932,6 +943,26 @@ class WebhookEventSyncType:
         PAYMENT_METHOD_PROCESS_TOKENIZATION_SESSION: {
             "name": "Process payment method tokenization.",
             "permission": PaymentPermissions.HANDLE_PAYMENTS,
+        },
+        XERO_LIST_PAYMENTS: {
+            "name": "List Xero payments.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        XERO_LIST_BANK_ACCOUNTS: {
+            "name": "List Xero bank accounts.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        XERO_ORDER_CONFIRMED: {
+            "name": "Xero: order confirmed — create deposit prepayment.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        XERO_FULFILLMENT_CREATED: {
+            "name": "Xero: fulfillment created — create quote and proforma prepayment.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        XERO_CHECK_PREPAYMENT_STATUS: {
+            "name": "Xero: check prepayment payment status.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
         },
     }
 

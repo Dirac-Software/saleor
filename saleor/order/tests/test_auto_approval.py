@@ -3,6 +3,8 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
+from ...payment import ChargeStatus, CustomPaymentChoices
+from ...payment.models import Payment
 from ...shipping.models import Shipment
 from .. import FulfillmentStatus, PickStatus
 from ..actions import (
@@ -12,6 +14,19 @@ from ..actions import (
     start_pick,
     update_pick_item,
 )
+
+
+def _create_xero_payment(order, amount):
+    return Payment.objects.create(
+        order=order,
+        gateway=CustomPaymentChoices.XERO,
+        psp_reference=f"TEST-{amount}",
+        total=amount,
+        captured_amount=amount,
+        charge_status=ChargeStatus.FULLY_CHARGED,
+        currency=order.currency,
+        is_active=True,
+    )
 
 
 @pytest.fixture
@@ -37,6 +52,7 @@ def test_auto_approve_when_pick_completed_last(
     staff_user,
 ):
     fulfillment = full_fulfillment_awaiting_approval
+    _create_xero_payment(fulfillment.order, Decimal("99999.00"))
 
     fulfillment.shipment = shipment_for_fulfillment
     fulfillment.save(update_fields=["shipment"])
@@ -62,6 +78,7 @@ def test_auto_approve_when_shipment_assigned_last(
     staff_user,
 ):
     fulfillment = full_fulfillment_awaiting_approval
+    _create_xero_payment(fulfillment.order, Decimal("99999.00"))
 
     pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
     start_pick(pick, user=staff_user)
@@ -156,25 +173,13 @@ def test_no_auto_approve_when_already_fulfilled(
     assert fulfillment.status == FulfillmentStatus.FULFILLED
 
 
-def test_no_auto_approve_when_proforma_not_paid(
+def test_no_auto_approve_when_payments_insufficient(
     full_fulfillment_awaiting_approval,
     shipment_for_fulfillment,
     staff_user,
 ):
-    from ...invoice import InvoiceType
-    from ...invoice.models import Invoice
-
     fulfillment = full_fulfillment_awaiting_approval
-
-    Invoice.objects.create(
-        order=fulfillment.order,
-        number="PROFORMA-TEST",
-        type=InvoiceType.PROFORMA,
-        fulfillment=fulfillment,
-    )
-
-    fulfillment.proforma_invoice_paid = False
-    fulfillment.save(update_fields=["proforma_invoice_paid"])
+    # No Xero payment created — total_deposit_paid=0 < fulfillment total > 0
 
     fulfillment.shipment = shipment_for_fulfillment
     fulfillment.save(update_fields=["shipment"])
@@ -220,32 +225,21 @@ def test_no_auto_approve_when_deposit_not_allocated(
     assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
 
 
-def test_auto_approve_when_all_conditions_met_with_proforma_and_deposit(
+def test_auto_approve_when_all_conditions_met_with_deposit(
     full_fulfillment_awaiting_approval,
     shipment_for_fulfillment,
     staff_user,
 ):
-    from ...invoice import InvoiceType
-    from ...invoice.models import Invoice
-
     fulfillment = full_fulfillment_awaiting_approval
     order = fulfillment.order
-
-    Invoice.objects.create(
-        order=order,
-        number="PROFORMA-TEST",
-        type=InvoiceType.PROFORMA,
-        fulfillment=fulfillment,
-    )
 
     order.deposit_required = True
     order.save(update_fields=["deposit_required"])
 
-    fulfillment.proforma_invoice_paid = True
+    _create_xero_payment(order, Decimal("99999.00"))
+
     fulfillment.deposit_allocated_amount = Decimal("100.00")
-    fulfillment.save(
-        update_fields=["proforma_invoice_paid", "deposit_allocated_amount"]
-    )
+    fulfillment.save(update_fields=["deposit_allocated_amount"])
 
     fulfillment.shipment = shipment_for_fulfillment
     fulfillment.save(update_fields=["shipment"])

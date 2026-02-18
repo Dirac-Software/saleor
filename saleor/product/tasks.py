@@ -1,8 +1,12 @@
 import logging
+import os
+import tempfile
 from collections import defaultdict
 from collections.abc import Iterable
 from uuid import UUID
 
+import attrs
+import pandas as pd
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
@@ -20,8 +24,17 @@ from ..plugins.manager import get_plugins_manager
 from ..warehouse.management import deactivate_preorder_for_variant
 from ..webhook.event_types import WebhookEventAsyncType
 from ..webhook.utils import get_webhooks_for_event
+from . import PriceListStatus
 from .lock_objects import product_qs_select_for_update
-from .models import Product, ProductChannelListing, ProductType, ProductVariant
+from .models import (
+    Category,
+    PriceList,
+    PriceListItem,
+    Product,
+    ProductChannelListing,
+    ProductType,
+    ProductVariant,
+)
 from .search import update_products_search_vector
 from .utils.product import mark_products_in_channels_as_dirty
 from .utils.variant_prices import update_discounted_prices_for_promotion
@@ -346,13 +359,6 @@ def collection_product_updated_task(product_ids):
 @app.task
 @allow_writer()
 def process_price_list_task(price_list_id: int):
-    import os
-    import tempfile
-
-    import pandas as pd
-    from django.utils import timezone
-
-    from .models import PriceList, PriceListItem
     from .price_list_parsing import parse_sheet
 
     price_list = PriceList.objects.get(pk=price_list_id)
@@ -374,94 +380,93 @@ def process_price_list_task(price_list_id: int):
         finally:
             os.unlink(temp_path)
 
-        from .models import Category, ProductType
-
         _raw_categories = set(
             Category.objects.filter(
                 name__in=ProductType.objects.values("name")
             ).values_list("name", flat=True)
         )
-        # Pass None (skip validation) when no product types/categories are configured,
-        # so that items aren't incorrectly marked invalid in a fresh environment.
         valid_categories = _raw_categories if _raw_categories else None
 
-        parsed_rows = parse_sheet(df, column_map, default_currency, valid_categories)
-
-        PriceListItem.objects.filter(price_list=price_list).delete()
-
-        PriceListItem.objects.bulk_create(
-            [
-                PriceListItem(
-                    price_list=price_list,
-                    row_index=row.row_index,
-                    product_code=row.product_code,
-                    brand=row.brand,
-                    description=row.description,
-                    category=row.category,
-                    sizes_and_qty=row.sizes_and_qty,
-                    rrp=row.rrp,
-                    sell_price=row.sell_price,
-                    buy_price=row.buy_price,
-                    weight_kg=row.weight_kg,
-                    image_url=row.image_url,
-                    hs_code=row.hs_code,
-                    currency=row.currency,
-                    is_valid=row.is_valid,
-                    validation_errors=row.validation_errors,
-                )
-                for row in parsed_rows
-            ]
+        parsed_rows = parse_sheet(
+            df, column_map, default_currency, valid_categories, header_row=header_row
         )
 
-        # Mark duplicate (product_code, brand) rows as invalid
-        all_items = list(price_list.items.all())
+        # Deduplicate (product_code, brand) in memory before touching the DB
         seen_keys: set[tuple[str, str]] = set()
-        duplicate_items = []
-        for item in all_items:
-            if not item.is_valid:
-                continue
-            key = (item.product_code, item.brand)
-            if key in seen_keys:
-                item.is_valid = False
-                item.validation_errors = list(item.validation_errors) + [
-                    f"duplicate product_code+brand in this sheet: {item.product_code}"
+        deduped = []
+        for row in parsed_rows:
+            if row.is_valid:
+                key = (row.product_code, row.brand)
+                if key in seen_keys:
+                    row = attrs.evolve(
+                        row,
+                        is_valid=False,
+                        validation_errors=list(row.validation_errors)
+                        + [
+                            f"duplicate product_code+brand in this sheet: {row.product_code}"
+                        ],
+                    )
+                else:
+                    seen_keys.add(key)
+            deduped.append(row)
+
+        with transaction.atomic():
+            PriceListItem.objects.filter(price_list=price_list).delete()
+            PriceListItem.objects.bulk_create(
+                [
+                    PriceListItem(
+                        price_list=price_list,
+                        row_index=row.row_index,
+                        product_code=row.product_code,
+                        brand=row.brand,
+                        description=row.description,
+                        category=row.category,
+                        sizes_and_qty=row.sizes_and_qty,
+                        rrp=row.rrp,
+                        sell_price=row.sell_price,
+                        buy_price=row.buy_price,
+                        weight_kg=row.weight_kg,
+                        image_url=row.image_url,
+                        hs_code=row.hs_code,
+                        currency=row.currency,
+                        is_valid=row.is_valid,
+                        validation_errors=row.validation_errors,
+                    )
+                    for row in deduped
                 ]
-                duplicate_items.append(item)
-            else:
-                seen_keys.add(key)
-        if duplicate_items:
-            PriceListItem.objects.bulk_update(
-                duplicate_items, ["is_valid", "validation_errors"]
             )
 
-        # Batch-populate product FK for valid items
-        items = list(price_list.items.filter(is_valid=True))
-        if items:
-            from .ingestion import MissingDatabaseSetup, get_products_by_code_and_brand
-
-            try:
-                codes = [i.product_code for i in items]
-                product_map = get_products_by_code_and_brand(codes)
-                updates = []
-                for item in items:
-                    p = product_map.get((item.product_code, item.brand))
-                    if p:
-                        item.product_id = p.pk
-                        updates.append(item)
-                if updates:
-                    PriceListItem.objects.bulk_update(updates, ["product_id"])
-            except MissingDatabaseSetup:
-                logger.warning(
-                    "Skipping product FK population for price list %s: "
-                    "required attributes not found in database.",
-                    price_list_id,
+            # Batch-populate product FK for valid items
+            valid_items = list(price_list.items.filter(is_valid=True))
+            if valid_items:
+                from .ingestion import (
+                    MissingDatabaseSetup,
+                    get_products_by_code_and_brand,
                 )
 
-        price_list.processing_completed_at = timezone.now()
-        price_list.processing_failed_at = None
-        price_list.save(
-            update_fields=["processing_completed_at", "processing_failed_at"]
-        )
+                try:
+                    codes = [i.product_code for i in valid_items]
+                    product_map = get_products_by_code_and_brand(codes)
+                    updates = []
+                    for item in valid_items:
+                        p = product_map.get((item.product_code, item.brand))
+                        if p:
+                            item.product_id = p.pk
+                            updates.append(item)
+                    if updates:
+                        PriceListItem.objects.bulk_update(updates, ["product_id"])
+                except MissingDatabaseSetup:
+                    logger.warning(
+                        "Skipping product FK population for price list %s: "
+                        "required attributes not found in database.",
+                        price_list_id,
+                    )
+
+            price_list.processing_completed_at = timezone.now()
+            price_list.processing_failed_at = None
+            price_list.save(
+                update_fields=["processing_completed_at", "processing_failed_at"]
+            )
 
     except Exception:
         price_list.processing_completed_at = None
@@ -470,6 +475,8 @@ def process_price_list_task(price_list_id: int):
             update_fields=["processing_completed_at", "processing_failed_at"]
         )
         raise
+    finally:
+        PriceList.objects.filter(pk=price_list_id).update(is_processing=False)
 
 
 def _build_product_data_from_item(item):
@@ -484,10 +491,10 @@ def _build_product_data_from_item(item):
         sizes=sizes,
         qty=qty,
         brand=item.brand,
-        rrp=float(item.rrp) if item.rrp is not None else None,
-        price=float(item.sell_price) if item.sell_price is not None else None,
+        rrp=item.rrp,
+        price=item.sell_price,
         currency=item.currency,
-        weight_kg=float(item.weight_kg) if item.weight_kg is not None else None,
+        weight_kg=item.weight_kg,
         image_url=item.image_url or None,
     )
 
@@ -581,7 +588,26 @@ def _activate_item(
                 product_variant=variant, warehouse=warehouse, quantity=qty
             )
     else:
+        from .ingestion import convert_price
+
         product_data = _build_product_data_from_item(item)
+        product = Product.objects.get(pk=item.product_id)
+
+        # Ensure ProductChannelListing exists and is published for each channel
+        for channel in channels:
+            if not ProductChannelListing.objects.filter(
+                product=product, channel=channel
+            ).exists():
+                try:
+                    with transaction.atomic():
+                        create_product_channel_listing(product, channel)
+                except IntegrityError:
+                    pass
+
+        ProductChannelListing.objects.filter(
+            product_id=item.product_id, is_published=False
+        ).update(is_published=True, available_for_purchase_at=timezone.now())
+
         for size, qty in item.sizes_and_qty.items():
             variant, created = ProductVariant.objects.get_or_create(
                 product_id=item.product_id,
@@ -597,9 +623,10 @@ def _activate_item(
                     product_variant=variant, warehouse=warehouse, quantity=qty
                 )
             for channel in channels:
-                if not ProductVariantChannelListing.objects.filter(
+                existing_listing = ProductVariantChannelListing.objects.filter(
                     variant=variant, channel=channel
-                ).exists():
+                ).first()
+                if existing_listing is None:
                     try:
                         with transaction.atomic():
                             create_variant_channel_listing(
@@ -607,6 +634,16 @@ def _activate_item(
                             )
                     except IntegrityError:
                         pass
+                elif existing_listing.discounted_price_amount is None:
+                    price = convert_price(
+                        product_data.price,
+                        product_data.currency,
+                        channel.currency_code,
+                        exchange_rates,
+                    )
+                    ProductVariantChannelListing.objects.filter(
+                        pk=existing_listing.pk
+                    ).update(discounted_price_amount=price)
 
     return True
 
@@ -614,105 +651,107 @@ def _activate_item(
 @app.task
 @allow_writer()
 def activate_price_list_task(price_list_id: int):
-    from django.utils import timezone
-
-    from . import PriceListStatus
     from .ingestion import MissingDatabaseSetup, get_products_by_code_and_brand
-    from .models import PriceList, PriceListItem
 
-    with transaction.atomic():
-        price_list = (
-            PriceList.objects.select_for_update()
-            .select_related("warehouse")
-            .get(pk=price_list_id)
-        )
-
-        if price_list.status == PriceListStatus.ACTIVE:
-            return
-
-        if not price_list.processing_completed_at:
-            raise ValueError(f"PriceList {price_list_id} has not completed processing")
-        assert not price_list.warehouse.is_owned, (
-            f"Warehouse {price_list.warehouse_id} is owned; cannot activate price list"
-        )
-
-        # Auto-replace: if another list is active for this warehouse, delegate to replace.
-        existing_active_id = (
-            PriceList.objects.filter(
-                status=PriceListStatus.ACTIVE, warehouse=price_list.warehouse
+    try:
+        with transaction.atomic():
+            price_list = (
+                PriceList.objects.select_for_update()
+                .select_related("warehouse")
+                .get(pk=price_list_id)
             )
-            .exclude(pk=price_list_id)
-            .values_list("pk", flat=True)
-            .first()
-        )
-        if existing_active_id is not None:
-            replace_price_list_task.delay(existing_active_id, price_list_id)
-            return
 
-        items = list(price_list.items.filter(is_valid=True))
+            if price_list.status == PriceListStatus.ACTIVE:
+                return
 
-        unresolved = [i for i in items if i.product_id is None]
-        if unresolved:
-            try:
-                codes = [i.product_code for i in unresolved]
-                product_map = get_products_by_code_and_brand(codes)
-                for item in unresolved:
-                    p = product_map.get((item.product_code, item.brand))
-                    if p:
-                        item.product_id = p.pk
-            except MissingDatabaseSetup:
-                pass
-
-        categories = {i.category for i in items if i.category}
-        product_type_map, category_map, attribute_map, channels, exchange_rates = (
-            _load_activation_context(categories, price_list.channels.all())
-        )
-
-        newly_created: dict = {}
-        updated_items = []
-        for item in items:
-            old_product_id = item.product_id
-            if not _activate_item(
-                item,
-                price_list.warehouse,
-                product_type_map,
-                category_map,
-                attribute_map,
-                channels,
-                exchange_rates,
-                newly_created=newly_created,
-            ):
-                logger.warning(
-                    "Skipped PriceListItem %s (product_code=%s) during activation of "
-                    "PriceList %s: missing category or product type",
-                    item.pk,
-                    item.product_code,
-                    price_list_id,
+            if not price_list.processing_completed_at:
+                raise ValueError(
+                    f"PriceList {price_list_id} has not completed processing"
                 )
-                continue
-            if item.product_id != old_product_id:
-                updated_items.append(item)
+            if price_list.warehouse.is_owned:
+                raise ValueError(
+                    f"Warehouse {price_list.warehouse_id} is owned; cannot activate price list"
+                )
 
-        if updated_items:
-            PriceListItem.objects.bulk_update(updated_items, ["product_id"])
+            # Auto-replace: if another list is active for this warehouse, delegate to replace.
+            existing_active_id = (
+                PriceList.objects.filter(
+                    status=PriceListStatus.ACTIVE, warehouse=price_list.warehouse
+                )
+                .exclude(pk=price_list_id)
+                .values_list("pk", flat=True)
+                .first()
+            )
+            if existing_active_id is not None:
+                replace_price_list_task.delay(existing_active_id, price_list_id)
+                return
 
-        activated_product_ids = [
-            i.product_id for i in items if i.product_id is not None
-        ]
-        Product.objects.filter(id__in=activated_product_ids).update(
-            search_index_dirty=True
-        )
+            items = list(price_list.items.filter(is_valid=True))
 
-        PriceList.objects.filter(pk=price_list_id).update(
-            status=PriceListStatus.ACTIVE,
-            activated_at=timezone.now(),
-            deactivated_at=None,
-        )
+            unresolved = [i for i in items if i.product_id is None]
+            if unresolved:
+                try:
+                    codes = [i.product_code for i in unresolved]
+                    product_map = get_products_by_code_and_brand(codes)
+                    for item in unresolved:
+                        p = product_map.get((item.product_code, item.brand))
+                        if p:
+                            item.product_id = p.pk
+                except MissingDatabaseSetup:
+                    pass
 
-    update_products_search_vector_task.delay()
+            categories = {i.category for i in items if i.category}
+            product_type_map, category_map, attribute_map, channels, exchange_rates = (
+                _load_activation_context(categories, price_list.channels.all())
+            )
+
+            newly_created: dict = {}
+            updated_items = []
+            for item in items:
+                old_product_id = item.product_id
+                if not _activate_item(
+                    item,
+                    price_list.warehouse,
+                    product_type_map,
+                    category_map,
+                    attribute_map,
+                    channels,
+                    exchange_rates,
+                    newly_created=newly_created,
+                ):
+                    logger.warning(
+                        "Skipped PriceListItem %s (product_code=%s) during activation of "
+                        "PriceList %s: missing category or product type",
+                        item.pk,
+                        item.product_code,
+                        price_list_id,
+                    )
+                    continue
+                if item.product_id != old_product_id:
+                    updated_items.append(item)
+
+            if updated_items:
+                PriceListItem.objects.bulk_update(updated_items, ["product_id"])
+
+            activated_product_ids = [
+                i.product_id for i in items if i.product_id is not None
+            ]
+            Product.objects.filter(id__in=activated_product_ids).update(
+                search_index_dirty=True
+            )
+
+            PriceList.objects.filter(pk=price_list_id).update(
+                status=PriceListStatus.ACTIVE,
+                activated_at=timezone.now(),
+                deactivated_at=None,
+            )
+
+        update_products_search_vector_task.delay()
+    finally:
+        PriceList.objects.filter(pk=price_list_id).update(is_processing=False)
 
 
-def _count_draft_unconfirmed_orders(warehouse, product_ids=None):
+def count_draft_unconfirmed_orders(warehouse, product_ids=None):
     """Return count of distinct draft/unconfirmed orders with allocations at warehouse.
 
     If product_ids is given, only considers allocations for those products.
@@ -728,6 +767,28 @@ def _count_draft_unconfirmed_orders(warehouse, product_ids=None):
     if product_ids is not None:
         qs = qs.filter(stock__product_variant__product_id__in=product_ids)
     return qs.values("order_line__order_id").distinct().count()
+
+
+def _hide_zero_stock_products(product_ids: list) -> None:
+    """Set is_published=False on channel listings for products with no stock anywhere.
+
+    Must be called after stock has already been zeroed. Only hides products whose
+    total quantity across ALL warehouses is now 0 — products with stock elsewhere
+    remain live.
+    """
+    from django.db.models import Sum
+    from django.db.models.functions import Coalesce
+
+    zero_stock_ids = list(
+        Product.objects.filter(id__in=product_ids)
+        .annotate(total_qty=Coalesce(Sum("variants__stocks__quantity"), 0))
+        .filter(total_qty=0)
+        .values_list("id", flat=True)
+    )
+    if zero_stock_ids:
+        ProductChannelListing.objects.filter(product_id__in=zero_stock_ids).update(
+            is_published=False, available_for_purchase_at=None
+        )
 
 
 def _deallocate_draft_unconfirmed(warehouse, product_ids, size_names=None):
@@ -777,43 +838,47 @@ def _deallocate_draft_unconfirmed(warehouse, product_ids, size_names=None):
 def deactivate_price_list_task(price_list_id: int):
     from django.db.models import F, Value
     from django.db.models.functions import Greatest
-    from django.utils import timezone
 
     from ..warehouse.models import Stock
-    from . import PriceListStatus
-    from .models import PriceList
 
-    with transaction.atomic():
-        price_list = (
-            PriceList.objects.select_for_update()
-            .select_related("warehouse")
-            .get(pk=price_list_id)
-        )
+    try:
+        with transaction.atomic():
+            price_list = (
+                PriceList.objects.select_for_update()
+                .select_related("warehouse")
+                .get(pk=price_list_id)
+            )
 
-        if price_list.status == PriceListStatus.INACTIVE:
-            return
+            if price_list.status == PriceListStatus.INACTIVE:
+                return
 
-        product_ids = list(
-            price_list.items.filter(is_valid=True, product_id__isnull=False)
-            .values_list("product_id", flat=True)
-            .distinct()
-        )
+            product_ids = list(
+                price_list.items.filter(is_valid=True, product_id__isnull=False)
+                .values_list("product_id", flat=True)
+                .distinct()
+            )
 
-        _deallocate_draft_unconfirmed(price_list.warehouse, product_ids)
+            _deallocate_draft_unconfirmed(price_list.warehouse, product_ids)
 
-        Stock.objects.filter(
-            product_variant__product_id__in=product_ids,
-            warehouse=price_list.warehouse,
-        ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
+            # Set quantity = quantity_allocated so available stock (quantity - allocated) = 0,
+            # preventing new allocations without zeroing out existing ones.
+            Stock.objects.filter(
+                product_variant__product_id__in=product_ids,
+                warehouse=price_list.warehouse,
+            ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
 
-        Product.objects.filter(id__in=product_ids).update(search_index_dirty=True)
+            _hide_zero_stock_products(product_ids)
 
-        PriceList.objects.filter(pk=price_list_id).update(
-            status=PriceListStatus.INACTIVE,
-            deactivated_at=timezone.now(),
-        )
+            Product.objects.filter(id__in=product_ids).update(search_index_dirty=True)
 
-    update_products_search_vector_task.delay()
+            PriceList.objects.filter(pk=price_list_id).update(
+                status=PriceListStatus.INACTIVE,
+                deactivated_at=timezone.now(),
+            )
+
+        update_products_search_vector_task.delay()
+    finally:
+        PriceList.objects.filter(pk=price_list_id).update(is_processing=False)
 
 
 @app.task
@@ -821,158 +886,163 @@ def deactivate_price_list_task(price_list_id: int):
 def replace_price_list_task(old_id: int, new_id: int):
     from django.db.models import F, Value
     from django.db.models.functions import Greatest
-    from django.utils import timezone
 
     from ..warehouse.models import Stock
-    from . import PriceListStatus
     from .ingestion import (
         MissingDatabaseSetup,
         create_variant,
         create_variant_channel_listing,
         get_products_by_code_and_brand,
     )
-    from .models import (
-        PriceList,
-        PriceListItem,
-        Product,
-        ProductVariant,
-        ProductVariantChannelListing,
-    )
 
-    with transaction.atomic():
-        # Lock both rows in consistent pk order to prevent deadlock
-        pls = {
-            pl.pk: pl
-            for pl in (
-                PriceList.objects.select_for_update()
-                .select_related("warehouse")
-                .filter(pk__in=[old_id, new_id])
-                .order_by("pk")
-            )
-        }
-        if old_id not in pls or new_id not in pls:
-            logger.warning(
-                "replace_price_list_task: PriceList(s) not found (old=%s, new=%s); aborting",
-                old_id,
-                new_id,
-            )
-            return
-
-        old_pl = pls[old_id]
-        new_pl = pls[new_id]
-
-        if old_pl.warehouse_id != new_pl.warehouse_id:
-            raise ValueError(
-                f"Cannot replace: price lists belong to different warehouses "
-                f"({old_pl.warehouse_id} vs {new_pl.warehouse_id})"
-            )
-        if not new_pl.processing_completed_at:
-            raise ValueError(f"New PriceList {new_id} has not completed processing")
-
-        if new_pl.status == PriceListStatus.ACTIVE:
-            return
-
-        if (
-            old_pl.status == PriceListStatus.INACTIVE
-            and old_pl.replaced_by_id is not None
-        ):
-            # A concurrent replace already deactivated old_pl and set replaced_by_id.
-            # Follow the chain so new_pl replaces whatever is now active.
-            if old_pl.replaced_by_id != new_id:
-                replace_price_list_task.delay(old_pl.replaced_by_id, new_id)
-            return
-
-        warehouse = old_pl.warehouse
-
-        old_items = list(old_pl.items.filter(is_valid=True))
-        new_items = list(new_pl.items.filter(is_valid=True))
-
-        unresolved_new = [i for i in new_items if i.product_id is None]
-        if unresolved_new:
-            try:
-                codes = [i.product_code for i in unresolved_new]
-                product_map = get_products_by_code_and_brand(codes)
-                resolved_new = []
-                for item in unresolved_new:
-                    p = product_map.get((item.product_code, item.brand))
-                    if p:
-                        item.product_id = p.pk
-                        resolved_new.append(item)
-                if resolved_new:
-                    PriceListItem.objects.bulk_update(resolved_new, ["product_id"])
-            except MissingDatabaseSetup:
-                pass
-
-        old_product_ids = {i.product_id for i in old_items if i.product_id is not None}
-        new_product_ids = {i.product_id for i in new_items if i.product_id is not None}
-
-        old_only = old_product_ids - new_product_ids
-        both = old_product_ids & new_product_ids
-        new_only = new_product_ids - old_product_ids
-
-        new_item_by_product = {
-            i.product_id: i for i in new_items if i.product_id is not None
-        }
-        old_item_by_product = {
-            i.product_id: i for i in old_items if i.product_id is not None
-        }
-
-        categories = {i.category for i in new_items if i.category}
-        product_type_map, category_map, attribute_map, channels, exchange_rates = (
-            _load_activation_context(categories, new_pl.channels.all())
-        )
-
-        if old_only:
-            _deallocate_draft_unconfirmed(warehouse, list(old_only))
-            Stock.objects.filter(
-                product_variant__product_id__in=old_only,
-                warehouse=warehouse,
-            ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
-
-        for product_id in both:
-            new_item = new_item_by_product[product_id]
-            old_item = old_item_by_product[product_id]
-            new_sizes = set(new_item.sizes_and_qty.keys())
-            old_sizes = set(old_item.sizes_and_qty.keys())
-
-            removed_sizes = old_sizes - new_sizes
-            if removed_sizes:
-                _deallocate_draft_unconfirmed(
-                    warehouse, [product_id], size_names=removed_sizes
+    try:
+        with transaction.atomic():
+            # Lock both rows in consistent pk order to prevent deadlock
+            pls = {
+                pl.pk: pl
+                for pl in (
+                    PriceList.objects.select_for_update()
+                    .select_related("warehouse")
+                    .filter(pk__in=[old_id, new_id])
+                    .order_by("pk")
                 )
+            }
+            if old_id not in pls or new_id not in pls:
+                logger.warning(
+                    "replace_price_list_task: PriceList(s) not found (old=%s, new=%s); aborting",
+                    old_id,
+                    new_id,
+                )
+                return
+
+            old_pl = pls[old_id]
+            new_pl = pls[new_id]
+
+            if old_pl.warehouse_id != new_pl.warehouse_id:
+                raise ValueError(
+                    f"Cannot replace: price lists belong to different warehouses "
+                    f"({old_pl.warehouse_id} vs {new_pl.warehouse_id})"
+                )
+            if not new_pl.processing_completed_at:
+                raise ValueError(f"New PriceList {new_id} has not completed processing")
+
+            if new_pl.status == PriceListStatus.ACTIVE:
+                return
+
+            if (
+                old_pl.status == PriceListStatus.INACTIVE
+                and old_pl.replaced_by_id is not None
+            ):
+                # A concurrent replace already deactivated old_pl and set replaced_by_id.
+                # Follow the chain so new_pl replaces whatever is now active.
+                if old_pl.replaced_by_id != new_id:
+                    replace_price_list_task.delay(old_pl.replaced_by_id, new_id)
+                return
+
+            warehouse = old_pl.warehouse
+
+            old_items = list(old_pl.items.filter(is_valid=True))
+            new_items = list(new_pl.items.filter(is_valid=True))
+
+            unresolved_new = [i for i in new_items if i.product_id is None]
+            if unresolved_new:
+                try:
+                    codes = [i.product_code for i in unresolved_new]
+                    product_map = get_products_by_code_and_brand(codes)
+                    resolved_new = []
+                    for item in unresolved_new:
+                        p = product_map.get((item.product_code, item.brand))
+                        if p:
+                            item.product_id = p.pk
+                            resolved_new.append(item)
+                    if resolved_new:
+                        PriceListItem.objects.bulk_update(resolved_new, ["product_id"])
+                except MissingDatabaseSetup:
+                    pass
+
+            old_product_ids = {
+                i.product_id for i in old_items if i.product_id is not None
+            }
+            new_product_ids = {
+                i.product_id for i in new_items if i.product_id is not None
+            }
+
+            old_only = old_product_ids - new_product_ids
+            both = old_product_ids & new_product_ids
+            new_only = new_product_ids - old_product_ids
+
+            new_item_by_product = {
+                i.product_id: i for i in new_items if i.product_id is not None
+            }
+            old_item_by_product = {
+                i.product_id: i for i in old_items if i.product_id is not None
+            }
+
+            categories = {i.category for i in new_items if i.category}
+            product_type_map, category_map, attribute_map, channels, exchange_rates = (
+                _load_activation_context(categories, new_pl.channels.all())
+            )
+
+            if old_only:
+                _deallocate_draft_unconfirmed(warehouse, list(old_only))
                 Stock.objects.filter(
-                    product_variant__product_id=product_id,
-                    product_variant__name__in=removed_sizes,
+                    product_variant__product_id__in=old_only,
                     warehouse=warehouse,
                 ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
+                _hide_zero_stock_products(list(old_only))
 
-            product_data = _build_product_data_from_item(new_item)
-            try:
-                product = Product.objects.get(pk=product_id)
-            except Product.DoesNotExist:
-                logger.warning(
-                    "replace_price_list_task: Product %s not found; skipping",
-                    product_id,
+            # Prefetch products and existing variants for all `both` products to avoid N+1
+            both_products = (
+                {p.pk: p for p in Product.objects.filter(pk__in=both)} if both else {}
+            )
+            existing_variant_names: set[tuple[int, str]] = (
+                set(
+                    ProductVariant.objects.filter(product_id__in=both).values_list(
+                        "product_id", "name"
+                    )
                 )
-                continue
+                if both
+                else set()
+            )
 
-            for size, qty in new_item.sizes_and_qty.items():
-                if ProductVariant.objects.filter(
-                    product_id=product_id, name=size
-                ).exists():
+            for product_id in both:
+                new_item = new_item_by_product[product_id]
+                old_item = old_item_by_product[product_id]
+                new_sizes = set(new_item.sizes_and_qty.keys())
+                old_sizes = set(old_item.sizes_and_qty.keys())
+
+                removed_sizes = old_sizes - new_sizes
+                if removed_sizes:
+                    _deallocate_draft_unconfirmed(
+                        warehouse, [product_id], size_names=removed_sizes
+                    )
                     Stock.objects.filter(
                         product_variant__product_id=product_id,
-                        product_variant__name=size,
+                        product_variant__name__in=removed_sizes,
                         warehouse=warehouse,
-                    ).update(quantity=Greatest(F("quantity_allocated"), Value(qty)))
-                else:
-                    variant = create_variant(
-                        product, size, weight_kg=product_data.weight_kg
+                    ).update(quantity=Greatest(Value(0), F("quantity_allocated")))
+
+                product_data = _build_product_data_from_item(new_item)
+                product = both_products.get(product_id)
+                if product is None:
+                    logger.warning(
+                        "replace_price_list_task: Product %s not found; skipping",
+                        product_id,
                     )
-                    for channel in channels:
-                        if not ProductVariantChannelListing.objects.filter(
-                            variant=variant, channel=channel
-                        ).exists():
+                    continue
+
+                for size, qty in new_item.sizes_and_qty.items():
+                    if (product_id, size) in existing_variant_names:
+                        Stock.objects.filter(
+                            product_variant__product_id=product_id,
+                            product_variant__name=size,
+                            warehouse=warehouse,
+                        ).update(quantity=Greatest(F("quantity_allocated"), Value(qty)))
+                    else:
+                        variant = create_variant(
+                            product, size, weight_kg=product_data.weight_kg
+                        )
+                        for channel in channels:
                             try:
                                 with transaction.atomic():
                                     create_variant_channel_listing(
@@ -980,52 +1050,56 @@ def replace_price_list_task(old_id: int, new_id: int):
                                     )
                             except IntegrityError:
                                 pass
-                    Stock.objects.create(
-                        product_variant=variant, warehouse=warehouse, quantity=qty
+                        Stock.objects.create(
+                            product_variant=variant, warehouse=warehouse, quantity=qty
+                        )
+
+            newly_created: dict = {}
+            updated_new_items = []
+            for product_id in new_only:
+                new_item = new_item_by_product[product_id]
+                old_product_id = new_item.product_id
+                if not _activate_item(
+                    new_item,
+                    warehouse,
+                    product_type_map,
+                    category_map,
+                    attribute_map,
+                    channels,
+                    exchange_rates,
+                    newly_created=newly_created,
+                ):
+                    logger.warning(
+                        "Skipped PriceListItem %s (product_code=%s) during replace of "
+                        "PriceList %s: missing category or product type",
+                        new_item.pk,
+                        new_item.product_code,
+                        new_id,
                     )
+                    continue
+                if new_item.product_id != old_product_id:
+                    updated_new_items.append(new_item)
 
-        newly_created: dict = {}
-        updated_new_items = []
-        for product_id in new_only:
-            new_item = new_item_by_product[product_id]
-            old_product_id = new_item.product_id
-            if not _activate_item(
-                new_item,
-                warehouse,
-                product_type_map,
-                category_map,
-                attribute_map,
-                channels,
-                exchange_rates,
-                newly_created=newly_created,
-            ):
-                logger.warning(
-                    "Skipped PriceListItem %s (product_code=%s) during replace of "
-                    "PriceList %s: missing category or product type",
-                    new_item.pk,
-                    new_item.product_code,
-                    new_id,
-                )
-                continue
-            if new_item.product_id != old_product_id:
-                updated_new_items.append(new_item)
+            if updated_new_items:
+                PriceListItem.objects.bulk_update(updated_new_items, ["product_id"])
 
-        if updated_new_items:
-            PriceListItem.objects.bulk_update(updated_new_items, ["product_id"])
+            all_affected_ids = list(old_product_ids | new_product_ids)
+            Product.objects.filter(id__in=all_affected_ids).update(
+                search_index_dirty=True
+            )
 
-        all_affected_ids = list(old_product_ids | new_product_ids)
-        Product.objects.filter(id__in=all_affected_ids).update(search_index_dirty=True)
+            now = timezone.now()
+            PriceList.objects.filter(pk=old_id).update(
+                status=PriceListStatus.INACTIVE,
+                deactivated_at=now,
+                replaced_by_id=new_id,
+            )
+            PriceList.objects.filter(pk=new_id).update(
+                status=PriceListStatus.ACTIVE,
+                activated_at=now,
+                deactivated_at=None,
+            )
 
-        now = timezone.now()
-        PriceList.objects.filter(pk=old_id).update(
-            status=PriceListStatus.INACTIVE,
-            deactivated_at=now,
-            replaced_by_id=new_id,
-        )
-        PriceList.objects.filter(pk=new_id).update(
-            status=PriceListStatus.ACTIVE,
-            activated_at=now,
-            deactivated_at=None,
-        )
-
-    update_products_search_vector_task.delay()
+        update_products_search_vector_task.delay()
+    finally:
+        PriceList.objects.filter(pk__in=[old_id, new_id]).update(is_processing=False)

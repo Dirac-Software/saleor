@@ -97,7 +97,9 @@ def _clean_permissions(
 def clean_manifest_data(manifest_data, raise_for_saleor_version=False):
     errors: T_ERRORS = defaultdict(list)
 
-    logger.info(f"[MANIFEST VALIDATION] Starting validation for manifest: {manifest_data}")
+    logger.debug(
+        "[MANIFEST VALIDATION] Starting validation for manifest: %s", manifest_data
+    )
 
     _validate_required_fields(manifest_data, errors)
 
@@ -166,7 +168,9 @@ def clean_manifest_data(manifest_data, raise_for_saleor_version=False):
         _clean_webhooks(manifest_data, errors)
 
     if errors:
-        logger.error(f"[MANIFEST VALIDATION] Validation failed with errors: {dict(errors)}")
+        logger.debug(
+            "[MANIFEST VALIDATION] Validation failed with errors: %s", dict(errors)
+        )
         raise ValidationError(errors)
 
 
@@ -301,22 +305,35 @@ def _validate_required_fields(manifest_data, errors):
     extension_required_fields = {"label", "url", "mount"}
     webhook_required_fields = {"name", "targetUrl", "query"}
 
-    logger.info(f"[MANIFEST VALIDATION] Validating manifest data: {list(manifest_data.keys())}")
+    logger.debug(
+        "[MANIFEST VALIDATION] Validating manifest data: %s", list(manifest_data.keys())
+    )
 
     if manifest_missing_fields := manifest_required_fields.difference(manifest_data):
-        logger.error(f"[MANIFEST VALIDATION] Missing manifest fields: {manifest_missing_fields}")
+        logger.debug(
+            "[MANIFEST VALIDATION] Missing manifest fields: %s", manifest_missing_fields
+        )
         for missing_field in manifest_missing_fields:
             errors[missing_field].append(
                 ValidationError("Field required.", code=AppErrorCode.REQUIRED.value)
             )
 
     app_extensions_data = manifest_data.get("extensions", [])
-    logger.info(f"[MANIFEST VALIDATION] Found {len(app_extensions_data)} extensions")
+    logger.debug("[MANIFEST VALIDATION] Found %d extensions", len(app_extensions_data))
     for idx, extension in enumerate(app_extensions_data):
         extension_fields = set(extension.keys())
-        logger.info(f"[MANIFEST VALIDATION] Extension {idx}: has fields {extension_fields}, requires {extension_required_fields}")
+        logger.debug(
+            "[MANIFEST VALIDATION] Extension %d: has fields %s, requires %s",
+            idx,
+            extension_fields,
+            extension_required_fields,
+        )
         if missing_fields := extension_required_fields.difference(extension_fields):
-            logger.error(f"[MANIFEST VALIDATION] Extension {idx} missing fields: {missing_fields}")
+            logger.debug(
+                "[MANIFEST VALIDATION] Extension %d missing fields: %s",
+                idx,
+                missing_fields,
+            )
             errors["extensions"].append(
                 ValidationError(
                     "Missing required fields for app extension: "
@@ -326,12 +343,23 @@ def _validate_required_fields(manifest_data, errors):
             )
 
     webhooks = manifest_data.get("webhooks", [])
-    logger.info(f"[MANIFEST VALIDATION] Found {len(webhooks)} webhooks")
+    logger.debug("[MANIFEST VALIDATION] Found %d webhooks", len(webhooks))
     for idx, webhook in enumerate(webhooks):
         webhook_fields = set(webhook.keys())
-        logger.info(f"[MANIFEST VALIDATION] Webhook {idx} '{webhook.get('name', 'unnamed')}': has fields {webhook_fields}, requires {webhook_required_fields}")
+        logger.debug(
+            "[MANIFEST VALIDATION] Webhook %d '%s': has fields %s, requires %s",
+            idx,
+            webhook.get("name", "unnamed"),
+            webhook_fields,
+            webhook_required_fields,
+        )
         if missing_fields := webhook_required_fields.difference(webhook_fields):
-            logger.error(f"[MANIFEST VALIDATION] Webhook {idx} '{webhook.get('name', 'unnamed')}' missing fields: {missing_fields}")
+            logger.debug(
+                "[MANIFEST VALIDATION] Webhook %d '%s' missing fields: %s",
+                idx,
+                webhook.get("name", "unnamed"),
+                missing_fields,
+            )
             errors["webhooks"].append(
                 ValidationError(
                     f"Missing required fields for webhook: "

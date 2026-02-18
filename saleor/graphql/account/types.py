@@ -472,6 +472,9 @@ class User(ModelObjectType[models.User]):
     external_reference = graphene.String(
         description="External ID of this user.", required=False
     )
+    xero_contact_id = graphene.String(
+        description="Xero contact ID for this user.", required=False
+    )
 
     last_login = DateTime(
         description="The date when the user last time log in to the system."

@@ -90,7 +90,6 @@ def test_order_fulfill_succeeds_when_deposit_validated(
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
     site_settings.fulfillment_auto_approve = False

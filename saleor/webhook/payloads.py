@@ -1038,6 +1038,12 @@ def generate_proforma_invoice_payload(
     invoice = fulfillment.proforma_invoice
     order = fulfillment.order
 
+    # Fetch site settings once before the loop to avoid N+1 queries
+    from ..site.models import Site
+
+    site = Site.objects.get_current()
+    code_attribute_slug = site.settings.invoice_product_code_attribute or "product-code"
+
     # Calculate totals
     fulfillment_total = Decimal(0)
     lines_data = []
@@ -1055,14 +1061,6 @@ def generate_proforma_invoice_payload(
         product_code = None
 
         if variant and variant.product:
-            # Look for product code attribute using site settings
-            from ..site.models import Site
-
-            site = Site.objects.get_current()
-            code_attribute_slug = (
-                site.settings.invoice_product_code_attribute or "product-code"
-            )
-
             for attr in variant.product.attributevalues.all():
                 if attr.value.attribute.slug == code_attribute_slug:
                     product_code = attr.value.name if attr.value else None
@@ -1695,3 +1693,17 @@ def generate_thumbnail_payload(thumbnail: Thumbnail):
 def generate_product_media_payload(media: ProductMedia):
     product_media_id = graphene.Node.to_global_id("ProductMedia", media.id)
     return json.dumps({"id": product_media_id})
+
+
+def generate_xero_list_payments_payload(
+    contact_id: str | None, email: str | None, domain: str | None
+) -> str:
+    return json.dumps({"contact_id": contact_id, "email": email, "domain": domain})
+
+
+def generate_xero_list_bank_accounts_payload(domain: str) -> str:
+    return json.dumps({"domain": domain})
+
+
+def generate_xero_check_prepayment_status_payload(prepayment_id: str) -> str:
+    return json.dumps({"prepaymentId": prepayment_id})

@@ -428,9 +428,20 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
         null=True,
         blank=True,
         help_text=(
-            "Timestamp when the deposit threshold was met. "
-            "Deposit payments are tracked as Payment objects with gateway='xero' and metadata.is_deposit=true."
+            "Timestamp when the deposit threshold was met by cumulative Xero payments."
         ),
+    )
+    xero_deposit_prepayment_id = models.CharField(
+        max_length=36,
+        null=True,
+        blank=True,
+        help_text="Xero prepayment UUID for the deposit on this order.",
+    )
+    xero_bank_account_code = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Xero bank account code used for deposit prepayments on this order.",
     )
 
     objects = OrderManager()
@@ -493,7 +504,6 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
         result = self.payments.filter(
             gateway=CustomPaymentChoices.XERO,
             is_active=True,
-            metadata__is_deposit=True,
         ).aggregate(total=Sum("captured_amount"))
         return result["total"] or Decimal(0)
 
@@ -924,22 +934,33 @@ class Fulfillment(ModelWithMetadata):
         blank=True,
     )
 
-    proforma_invoice_paid = models.BooleanField(default=False)
-    proforma_invoice_paid_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text=(
-            "Timestamp when proforma invoice was marked as paid. "
-            "IMPORTANT: This field is manually set by users, as the system does not "
-            "track payments internally. It is subject to user error and should NOT "
-            "be used for accounting purposes. Its sole purpose is to unblock fulfillment "
-            "workflow by indicating payment has been received."
-        ),
-    )
     deposit_allocated_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
         default=Decimal(0),
+    )
+    xero_quote_id = models.CharField(
+        max_length=36,
+        null=True,
+        blank=True,
+        help_text="Xero Quote UUID for the proforma quote linked to this fulfillment.",
+    )
+    xero_quote_number = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Xero Quote number (e.g. Q-1234).",
+    )
+    xero_proforma_prepayment_id = models.CharField(
+        max_length=36,
+        null=True,
+        blank=True,
+        help_text="Xero prepayment UUID for the proforma payment on this fulfillment.",
+    )
+    quote_pdf_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="URL to the quote PDF hosted by the Xero integration app.",
     )
 
     class Meta(ModelWithMetadata.Meta):
@@ -1081,10 +1102,16 @@ class Fulfillment(ModelWithMetadata):
         if not self.shipment_id:
             return False
 
-        if not self.proforma_invoice_paid:
-            return False
+        from .proforma import calculate_fulfillment_total
 
-        if self.order.deposit_required and not self.deposit_allocated:
+        order = self.order
+        prior_total = sum(
+            calculate_fulfillment_total(f)
+            for f in order.fulfillments.exclude(pk=self.pk)
+            if f.status != FulfillmentStatus.CANCELED
+        )
+        current_total = calculate_fulfillment_total(self)
+        if order.total_deposit_paid < prior_total + current_total:
             return False
 
         return True

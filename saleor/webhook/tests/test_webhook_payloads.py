@@ -2864,7 +2864,11 @@ def test_generate_proforma_invoice_payload(
     from decimal import Decimal
 
     from ...attribute import AttributeType
-    from ...attribute.models import Attribute, AssignedProductAttributeValue, AttributeValue
+    from ...attribute.models import (
+        AssignedProductAttributeValue,
+        Attribute,
+        AttributeValue,
+    )
     from ...payment import ChargeStatus, CustomPaymentChoices
     from ...payment.models import Payment
     from ..payloads import generate_proforma_invoice_payload
@@ -2886,7 +2890,6 @@ def test_generate_proforma_invoice_payload(
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
     # Create product code attribute
@@ -2914,8 +2917,8 @@ def test_generate_proforma_invoice_payload(
     fulfillment.save()
 
     # Create proforma invoice for the fulfillment
-    from ...invoice.models import Invoice
     from ...invoice import InvoiceType
+    from ...invoice.models import Invoice
 
     Invoice.objects.create(
         order=order,

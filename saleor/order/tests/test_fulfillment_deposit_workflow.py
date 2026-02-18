@@ -6,7 +6,6 @@ from ...invoice import InvoiceType
 from ...payment import ChargeStatus, CustomPaymentChoices
 from ...payment.models import Payment
 from ..models import Fulfillment, FulfillmentLine
-from .fixtures.order import order_with_lines
 
 
 @pytest.fixture
@@ -35,7 +34,7 @@ def order_with_three_lines(order_with_lines, product_list):
                 undiscounted_total_price_net_amount=Decimal("100.00") * (i + 1),
                 undiscounted_total_price_gross_amount=Decimal("100.00") * (i + 1),
                 currency="USD",
-                tax_rate=Decimal("0"),
+                tax_rate=Decimal(0),
             )
 
     lines = list(order.lines.all()[:3])
@@ -64,6 +63,20 @@ def order_with_three_lines(order_with_lines, product_list):
     return order
 
 
+def _allocate_and_generate(order, fulfillment, manager):
+    from saleor.order.proforma import (
+        calculate_deposit_allocation,
+        calculate_fulfillment_total,
+        generate_proforma_invoice,
+    )
+
+    fulfillment_total = calculate_fulfillment_total(fulfillment)
+    deposit_credit = calculate_deposit_allocation(order, fulfillment_total)
+    fulfillment.deposit_allocated_amount = deposit_credit
+    fulfillment.save(update_fields=["deposit_allocated_amount"])
+    return generate_proforma_invoice(fulfillment, manager)
+
+
 @pytest.mark.django_db
 def test_multiple_partial_fulfillments_with_deposit_allocation(
     order_with_three_lines, warehouse, address
@@ -77,7 +90,6 @@ def test_multiple_partial_fulfillments_with_deposit_allocation(
         Receipt,
         ReceiptLine,
     )
-    from saleor.order.proforma import generate_proforma_invoice
     from saleor.shipping import ShipmentType
     from saleor.shipping.models import Shipment
     from saleor.warehouse.models import Allocation, AllocationSource, Warehouse
@@ -99,7 +111,6 @@ def test_multiple_partial_fulfillments_with_deposit_allocation(
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
     assert order.total_deposit_paid == Decimal("96.00")
@@ -166,7 +177,7 @@ def test_multiple_partial_fulfillments_with_deposit_allocation(
         order_line=lines[0], fulfillment=fulfillment1, quantity=10
     )
 
-    invoice1 = generate_proforma_invoice(fulfillment1, manager)
+    invoice1 = _allocate_and_generate(order, fulfillment1, manager)
 
     assert invoice1.type == InvoiceType.PROFORMA
     assert invoice1.order == order
@@ -188,7 +199,7 @@ def test_multiple_partial_fulfillments_with_deposit_allocation(
         order_line=lines[1], fulfillment=fulfillment2, quantity=5
     )
 
-    invoice2 = generate_proforma_invoice(fulfillment2, manager)
+    invoice2 = _allocate_and_generate(order, fulfillment2, manager)
 
     assert invoice2.type == InvoiceType.PROFORMA
     assert invoice2.order == order
@@ -211,7 +222,7 @@ def test_multiple_partial_fulfillments_with_deposit_allocation(
         order_line=lines[2], fulfillment=fulfillment3, quantity=8
     )
 
-    invoice3 = generate_proforma_invoice(fulfillment3, manager)
+    invoice3 = _allocate_and_generate(order, fulfillment3, manager)
 
     assert invoice3.type == InvoiceType.PROFORMA
     assert invoice3.order == order
@@ -252,7 +263,6 @@ def test_deposit_allocation_exhausted_before_final_fulfillment(
         Receipt,
         ReceiptLine,
     )
-    from saleor.order.proforma import generate_proforma_invoice
     from saleor.shipping import ShipmentType
     from saleor.shipping.models import Shipment
     from saleor.warehouse.models import Allocation, AllocationSource, Warehouse
@@ -274,7 +284,6 @@ def test_deposit_allocation_exhausted_before_final_fulfillment(
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
-        metadata={"is_deposit": True},
     )
 
     assert order.total_deposit_paid == Decimal("64.00")
@@ -336,7 +345,7 @@ def test_deposit_allocation_exhausted_before_final_fulfillment(
     FulfillmentLine.objects.create(
         order_line=lines[0], fulfillment=fulfillment1, quantity=10
     )
-    generate_proforma_invoice(fulfillment1, manager)
+    _allocate_and_generate(order, fulfillment1, manager)
 
     fulfillment2 = Fulfillment.objects.create(
         order=order, status="waiting_for_approval"
@@ -344,7 +353,7 @@ def test_deposit_allocation_exhausted_before_final_fulfillment(
     FulfillmentLine.objects.create(
         order_line=lines[1], fulfillment=fulfillment2, quantity=5
     )
-    generate_proforma_invoice(fulfillment2, manager)
+    _allocate_and_generate(order, fulfillment2, manager)
 
     fulfillment1.refresh_from_db()
     fulfillment2.refresh_from_db()
@@ -359,7 +368,7 @@ def test_deposit_allocation_exhausted_before_final_fulfillment(
     FulfillmentLine.objects.create(
         order_line=lines[2], fulfillment=fulfillment3, quantity=8
     )
-    generate_proforma_invoice(fulfillment3, manager)
+    _allocate_and_generate(order, fulfillment3, manager)
 
     fulfillment3.refresh_from_db()
 

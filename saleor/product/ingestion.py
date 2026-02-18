@@ -287,10 +287,10 @@ class ProductData:
     sizes: tuple[str, ...]
     qty: tuple[int, ...]
     brand: str
-    rrp: float | None
-    price: float | None
+    rrp: Decimal | None
+    price: Decimal | None
     currency: str  # Currency for RRP and Price (must be GBP)
-    weight_kg: float | None  # Weight in kilograms
+    weight_kg: Decimal | None  # Weight in kilograms
     image_url: str | None
 
 
@@ -432,29 +432,20 @@ def get_size_to_variant_map(product: "Product") -> dict[str, "ProductVariant"]:
             "Please create a 'Size' attribute before ingesting products."
         )
 
-    # Get existing variants for this product
-    existing_variants = ProductVariant.objects.filter(product=product).prefetch_related(
-        "attributes__assignment__attribute"
-    )
+    existing_variants = list(ProductVariant.objects.filter(product=product))
+    if not existing_variants:
+        return {}
 
-    # Build a map of size -> variant
-    size_to_variant = {}
+    variant_ids = [v.pk for v in existing_variants]
+    size_map: dict[int, str] = {
+        sa.variant_id: sa.value.name
+        for sa in AssignedVariantAttributeValue.objects.filter(
+            variant_id__in=variant_ids, value__attribute=size_attr
+        ).select_related("value")
+        if sa.variant_id is not None
+    }
 
-    for variant in existing_variants:
-        # Get the size attribute value for this variant
-        size_assignment = (
-            AssignedVariantAttributeValue.objects.filter(
-                variant=variant, value__attribute=size_attr
-            )
-            .select_related("value")
-            .first()
-        )
-
-        if size_assignment:
-            size_value = size_assignment.value.name
-            size_to_variant[size_value] = variant
-
-    return size_to_variant
+    return {size_map[v.pk]: v for v in existing_variants if v.pk in size_map}
 
 
 def get_products_by_code_and_brand(
@@ -490,35 +481,34 @@ def get_products_by_code_and_brand(
             "Please create a 'Brand' attribute before ingesting products."
         )
 
-    # Find products by code
     matching_codes = AttributeValue.objects.filter(
         attribute=product_code_attr, name__in=product_codes
     ).prefetch_related("productvalueassignment__product")
 
-    # Build a map: (product_code, brand) -> Product
-    code_brand_to_product: dict[tuple[str, str], Product] = {}
+    # Collect all (product, code_name) pairs via the prefetch
+    product_code_pairs: list[tuple[Product, str]] = [
+        (assignment.product, code_value.name)
+        for code_value in matching_codes
+        for assignment in code_value.productvalueassignment.all()
+    ]
 
-    for code_value in matching_codes:
-        for assignment in code_value.productvalueassignment.all():
-            product = assignment.product
+    if not product_code_pairs:
+        return {}
 
-            # Get the brand for this product
-            brand_assignment = (
-                AssignedProductAttributeValue.objects.filter(
-                    product=product, value__attribute=brand_attr
-                )
-                .select_related("value")
-                .first()
-            )
+    # Batch-fetch all brand assignments in one query
+    product_ids = [product.pk for product, _ in product_code_pairs]
+    brand_map: dict[int, str] = {
+        ba.product_id: ba.value.name
+        for ba in AssignedProductAttributeValue.objects.filter(
+            product_id__in=product_ids, value__attribute=brand_attr
+        ).select_related("value")
+    }
 
-            if brand_assignment:
-                brand_name = brand_assignment.value.name
-
-                # Create a key from code + brand
-                key = (code_value.name, brand_name)
-                code_brand_to_product[key] = product
-
-    return code_brand_to_product
+    return {
+        (code_name, brand_map[product.pk]): product
+        for product, code_name in product_code_pairs
+        if product.pk in brand_map
+    }
 
 
 def create_warehouse_with_address(
@@ -792,10 +782,12 @@ def process_excel_row(
     logger.info("Product %s: Currency=%s", code, currency)
 
     # Create ProductData instance
-    assert code is not None  # Validated above
-    assert description is not None  # Validated above
-    assert category is not None  # Validated above
-    assert brand is not None  # Validated above
+    if code is None or description is None or category is None or brand is None:
+        raise ValueError(
+            f"Required field is None after validation — "
+            f"code={code!r}, description={description!r}, "
+            f"category={category!r}, brand={brand!r}"
+        )
     product_data = ProductData(
         product_code=code,
         description=description,
@@ -803,10 +795,10 @@ def process_excel_row(
         sizes=sizes,
         qty=quantities,
         brand=brand,
-        rrp=rrp,
-        price=price,
+        rrp=Decimal(str(rrp)) if rrp is not None else None,
+        price=Decimal(str(price)) if price is not None else None,
         currency=currency,
-        weight_kg=weight_kg,
+        weight_kg=Decimal(str(weight_kg)) if weight_kg is not None else None,
         image_url=image_url,
     )
 
@@ -1625,9 +1617,16 @@ def create_product(
     """
     from saleor.product.models import Product
 
+    base_slug = slugify(f"{product_data.description}-{product_data.product_code}")
+    slug = base_slug
+    counter = 1
+    while Product.objects.filter(slug=slug).exists():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
     product = Product.objects.create(
         name=product_data.description,
-        slug=slugify(product_data.description),
+        slug=slug,
         product_type=product_type,
         category=category,
     )
@@ -1907,7 +1906,7 @@ def create_variant_channel_listing(
         )
 
     price = convert_price(
-        product_data.price,
+        float(product_data.price),
         product_data.currency,
         channel.currency_code,
         exchange_rates,
@@ -1918,6 +1917,7 @@ def create_variant_channel_listing(
         channel=channel,
         currency=channel.currency_code,
         price_amount=price,
+        discounted_price_amount=price,
     )
 
     logger.debug(
@@ -2066,7 +2066,13 @@ def ingest_new_products(
 
         # 5. Create variants for each size
         for size, qty in zip(product_data.sizes, product_data.qty, strict=False):
-            variant = create_variant(product, size, weight_kg=product_data.weight_kg)
+            variant = create_variant(
+                product,
+                size,
+                weight_kg=float(product_data.weight_kg)
+                if product_data.weight_kg is not None
+                else None,
+            )
 
             # 6. Assign variant-level attributes
             assign_variant_attributes(
@@ -2143,7 +2149,7 @@ def update_variant_channel_listing_prices(
             )
 
         new_price = convert_price(
-            product_data.price,
+            float(product_data.price),
             product_data.currency,
             channel.currency_code,
             exchange_rates,
@@ -2232,7 +2238,11 @@ def update_existing_products(
             else:
                 # Variant doesn't exist - create it
                 variant = create_variant(
-                    existing_product, size, weight_kg=product_data.weight_kg
+                    existing_product,
+                    size,
+                    weight_kg=float(product_data.weight_kg)
+                    if product_data.weight_kg is not None
+                    else None,
                 )
 
                 # Assign variant attributes
@@ -2347,7 +2357,7 @@ def ingest_products_from_excel(
     # Step 4: Get channels and exchange rates
     logger.info("\n=== Step 4: Fetching Channels and Exchange Rates ===")
     channels = list(Channel.objects.all())
-    logger.info("Found %d channels: {[c.name for c in channels]}", len(channels))
+    logger.info("Found %d channels: %s", len(channels), [c.name for c in channels])
 
     exchange_rates = get_exchange_rates()
 

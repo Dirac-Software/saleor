@@ -1344,12 +1344,15 @@ class PluginsManager(PaymentInterface):
             channel_slug=fulfillment.order.channel.slug,
         )
 
-    def fulfillment_proforma_invoice_generated(self, fulfillment: "Fulfillment"):
+    def fulfillment_proforma_invoice_generated(
+        self, fulfillment: "Fulfillment", invoice: "Invoice"
+    ):
         default_value = None
         return self.__run_method_on_plugins(
             "fulfillment_proforma_invoice_generated",
             default_value,
             fulfillment,
+            invoice,
             channel_slug=fulfillment.order.channel.slug,
         )
 
@@ -2955,6 +2958,41 @@ class PluginsManager(PaymentInterface):
             available_shipping_methods,
             pregenerated_subscription_payloads=pregenerated_subscription_payloads,
             channel_slug=channel.slug,
+        )
+
+    def xero_list_payments(
+        self,
+        contact_id: str | None = None,
+        email: str | None = None,
+        domain: str | None = None,
+    ) -> list:
+        return self.__run_method_on_plugins(
+            "xero_list_payments", [], contact_id, email, domain, channel_slug=None
+        )
+
+    def xero_order_confirmed(self, order: "Order") -> None:
+        self.__run_method_on_plugins(
+            "xero_order_confirmed", None, order, channel_slug=None
+        )
+
+    def xero_fulfillment_created(self, fulfillment) -> None:
+        self.__run_method_on_plugins(
+            "xero_fulfillment_created", None, fulfillment, channel_slug=None
+        )
+
+    def xero_check_prepayment_status(self, prepayment_id: str) -> dict | None:
+        return self.__run_method_on_plugins(
+            "xero_check_prepayment_status", None, prepayment_id, channel_slug=None
+        )
+
+    def xero_list_bank_accounts(self, domain: str) -> list:
+        return self.__run_method_on_plugins(
+            "xero_list_bank_accounts", [], domain, channel_slug=None
+        )
+
+    def fulfillment_fulfilled(self, fulfillment) -> None:
+        self.__run_method_on_plugins(
+            "fulfillment_fulfilled", None, fulfillment, channel_slug=None
         )
 
     def is_event_active_for_any_plugin(
