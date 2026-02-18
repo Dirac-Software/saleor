@@ -351,7 +351,7 @@ logging.captureWarnings(True)
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "root": {"level": "INFO", "handlers": ["default"]},
+    "root": {"level": os.environ.get("LOG_LEVEL", "INFO"), "handlers": ["default"]},
     "formatters": {
         "django.server": {
             "()": "django.utils.log.ServerFormatter",

@@ -355,6 +355,39 @@ type Query {
   ): ShippingZoneCountableConnection @doc(category: "Shipping")
 
   """
+  Look up digital content by ID.
+  
+  Requires one of the following permissions: MANAGE_PRODUCTS.
+  """
+  digitalContent(
+    """ID of the digital content."""
+    id: ID!
+  ): DigitalContent @doc(category: "Products")
+
+  """
+  List of digital content.
+  
+  Requires one of the following permissions: MANAGE_PRODUCTS.
+  """
+  digitalContents(
+    """Return the elements in the list that come before the specified cursor."""
+    before: String
+
+    """Return the elements in the list that come after the specified cursor."""
+    after: String
+
+    """
+    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    first: Int
+
+    """
+    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
+    """
+    last: Int
+  ): DigitalContentCountableConnection @doc(category: "Products")
+
+  """
   Look up a price list by ID.
   
   Requires one of the following permissions: MANAGE_PRODUCTS.
@@ -392,39 +425,6 @@ type Query {
     """
     last: Int
   ): PriceListCountableConnection @doc(category: "Products")
-
-  """
-  Look up digital content by ID.
-  
-  Requires one of the following permissions: MANAGE_PRODUCTS.
-  """
-  digitalContent(
-    """ID of the digital content."""
-    id: ID!
-  ): DigitalContent @doc(category: "Products")
-
-  """
-  List of digital content.
-  
-  Requires one of the following permissions: MANAGE_PRODUCTS.
-  """
-  digitalContents(
-    """Return the elements in the list that come before the specified cursor."""
-    before: String
-
-    """Return the elements in the list that come after the specified cursor."""
-    after: String
-
-    """
-    Retrieve the first n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
-    """
-    first: Int
-
-    """
-    Retrieve the last n elements from the list. Note that the system only allows fetching a maximum of 100 objects in a single query.
-    """
-    last: Int
-  ): DigitalContentCountableConnection @doc(category: "Products")
 
   """List of the shop's categories."""
   categories(
@@ -13619,6 +13619,24 @@ input ShippingZoneFilterInput @doc(category: "Shipping") {
   channels: [ID!]
 }
 
+"""A connection to a list of digital content items."""
+type DigitalContentCountableConnection @doc(category: "Products") {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+  edges: [DigitalContentCountableEdge!]!
+
+  """A total count of items in the collection."""
+  totalCount: Int
+}
+
+type DigitalContentCountableEdge @doc(category: "Products") {
+  """The item at the end of the edge."""
+  node: DigitalContent!
+
+  """A cursor for use in pagination."""
+  cursor: String!
+}
+
 """A price list sourced from an Excel file, belonging to a warehouse."""
 type PriceList implements Node {
   """The ID of the price list."""
@@ -13783,24 +13801,6 @@ type PriceListCountableConnection @doc(category: "Products") {
 type PriceListCountableEdge @doc(category: "Products") {
   """The item at the end of the edge."""
   node: PriceList!
-
-  """A cursor for use in pagination."""
-  cursor: String!
-}
-
-"""A connection to a list of digital content items."""
-type DigitalContentCountableConnection @doc(category: "Products") {
-  """Pagination data for this connection."""
-  pageInfo: PageInfo!
-  edges: [DigitalContentCountableEdge!]!
-
-  """A total count of items in the collection."""
-  totalCount: Int
-}
-
-type DigitalContentCountableEdge @doc(category: "Products") {
-  """The item at the end of the edge."""
-  node: DigitalContent!
 
   """A cursor for use in pagination."""
   cursor: String!
@@ -17493,26 +17493,6 @@ type Mutation {
   ): VariantMediaUnassign @doc(category: "Products")
 
   """
-  Upload and analyze an Excel file for product ingestion. Returns file ID and available columns for mapping configuration. 
-  
-  Requires one of the following permissions: MANAGE_PRODUCTS.
-  """
-  productIngestionUploadFile(
-    """Fields required to upload Excel file for analysis."""
-    input: ProductIngestionFileUploadInput!
-  ): ProductIngestionFileUpload @doc(category: "Products")
-
-  """
-  Ingest products from uploaded Excel file. Creates new products and variants, updates existing ones. Handles stock, pricing, attributes, and channel listings. 
-  
-  Requires one of the following permissions: MANAGE_PRODUCTS.
-  """
-  productIngestionIngest(
-    """Configuration for product ingestion."""
-    input: ProductIngestionConfigInput!
-  ): ProductIngestionIngest @doc(category: "Products")
-
-  """
   Create a price list from an Excel file and queue it for processing. The file is saved to storage and parsed asynchronously. Check processing_completed_at / processing_failed_at for status. 
   
   Requires one of the following permissions: MANAGE_PRODUCTS.
@@ -17571,6 +17551,26 @@ type Mutation {
     """ID of the price list to delete."""
     id: ID!
   ): PriceListDelete @doc(category: "Products")
+
+  """
+  Upload and analyze an Excel file for product ingestion. Returns file ID and available columns for mapping configuration. 
+  
+  Requires one of the following permissions: MANAGE_PRODUCTS.
+  """
+  productIngestionUploadFile(
+    """Fields required to upload Excel file for analysis."""
+    input: ProductIngestionFileUploadInput!
+  ): ProductIngestionFileUpload @doc(category: "Products")
+
+  """
+  Ingest products from uploaded Excel file. Creates new products and variants, updates existing ones. Handles stock, pricing, attributes, and channel listings. 
+  
+  Requires one of the following permissions: MANAGE_PRODUCTS.
+  """
+  productIngestionIngest(
+    """Configuration for product ingestion."""
+    input: ProductIngestionConfigInput!
+  ): ProductIngestionIngest @doc(category: "Products")
 
   """
   Captures the authorized payment amount. 
@@ -21460,6 +21460,11 @@ input WarehouseCreateInput @doc(category: "Products") {
 
   """Determine if the warehouse is owned by Dirac."""
   isOwned: Boolean
+
+  """
+  When true, automatically assign the warehouse to all channels and shipping zones. Defaults to true for non-owned warehouses. Has no effect on owned warehouses.
+  """
+  assignToAllChannelsAndZones: Boolean
 }
 
 """
@@ -24972,6 +24977,134 @@ type VariantMediaUnassign @doc(category: "Products") {
 }
 
 """
+Create a price list from an Excel file and queue it for processing. The file is saved to storage and parsed asynchronously. Check processing_completed_at / processing_failed_at for status. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type PriceListCreate @doc(category: "Products") {
+  """The created price list."""
+  priceList: PriceList
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+input PriceListCreateInput @doc(category: "Products") {
+  """Warehouse this price list belongs to."""
+  warehouseId: ID!
+
+  """Human-readable name for the price list."""
+  name: String
+
+  """Channels this price list should be active in. At least one required."""
+  channelIds: [ID!]
+
+  """Excel file (.xlsx or .xls) containing the price list."""
+  file: Upload
+
+  """Name of the sheet to read from the Excel file."""
+  sheetName: String = "Sheet1"
+
+  """Row number containing column headers (0-indexed)."""
+  headerRow: Int = 0
+
+  """Maps column indices to price list item fields."""
+  columnMap: PriceListColumnMapInput!
+
+  """Currency code for all prices in this sheet (e.g. 'GBP')."""
+  defaultCurrency: String!
+
+  """Google Drive URL for the source sheet. Used for tracking only."""
+  googleDriveUrl: String
+}
+
+"""Maps integer column indices (0-based) to price list item fields."""
+input PriceListColumnMapInput @doc(category: "Products") {
+  """Column index for product code."""
+  productCode: Int
+
+  """Column index for brand."""
+  brand: Int
+
+  """Column index for description."""
+  description: Int
+
+  """Column index for category."""
+  category: Int
+
+  """Column index for sizes with quantities (e.g. 'XS[20], M[50]')."""
+  sizes: Int
+
+  """Column index for RRP."""
+  rrp: Int
+
+  """Column index for sell price (the price shown on the web)."""
+  sellPrice: Int
+
+  """Column index for weight in kg."""
+  weightKg: Int
+
+  """Column index for image URL."""
+  imageUrl: Int
+
+  """Column index for buy/cost price."""
+  buyPrice: Int
+
+  """Column index for HS code (UK)."""
+  hsCode: Int
+}
+
+"""
+Trigger activation of a processed price list. If another price list is currently active for the same warehouse, it will be replaced automatically. Runs asynchronously. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type PriceListActivate @doc(category: "Products") {
+  """The price list being activated."""
+  priceList: PriceList
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+"""
+Trigger deactivation of an active price list. Zeros warehouse stock for all items. Runs asynchronously. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type PriceListDeactivate @doc(category: "Products") {
+  """The price list being deactivated."""
+  priceList: PriceList
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+"""
+Replace an active price list with a new one for the same warehouse. Performs a diff-based stock handover. Runs asynchronously. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type PriceListReplace @doc(category: "Products") {
+  """The price list being replaced (will become INACTIVE)."""
+  oldPriceList: PriceList
+
+  """The new price list taking over (will become ACTIVE)."""
+  newPriceList: PriceList
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+"""
+Delete a price list. Only permitted when status is INACTIVE or processing never completed. 
+
+Requires one of the following permissions: MANAGE_PRODUCTS.
+"""
+type PriceListDelete @doc(category: "Products") {
+  """ID of the deleted price list."""
+  priceListId: ID
+  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [ProductError!]!
+}
+
+"""
 Upload and analyze an Excel file for product ingestion. Returns file ID and available columns for mapping configuration. 
 
 Requires one of the following permissions: MANAGE_PRODUCTS.
@@ -25118,134 +25251,6 @@ input SpreadsheetColumnMappingInput @doc(category: "Products") {
 enum StockUpdateModeEnum {
   REPLACE
   ADD
-}
-
-"""
-Create a price list from an Excel file and queue it for processing. The file is saved to storage and parsed asynchronously. Check processing_completed_at / processing_failed_at for status. 
-
-Requires one of the following permissions: MANAGE_PRODUCTS.
-"""
-type PriceListCreate @doc(category: "Products") {
-  """The created price list."""
-  priceList: PriceList
-  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [ProductError!]!
-}
-
-input PriceListCreateInput @doc(category: "Products") {
-  """Warehouse this price list belongs to."""
-  warehouseId: ID!
-
-  """Human-readable name for the price list."""
-  name: String
-
-  """Channels this price list should be active in. At least one required."""
-  channelIds: [ID!]
-
-  """Excel file (.xlsx or .xls) containing the price list."""
-  file: Upload
-
-  """Name of the sheet to read from the Excel file."""
-  sheetName: String = "Sheet1"
-
-  """Row number containing column headers (0-indexed)."""
-  headerRow: Int = 0
-
-  """Maps column indices to price list item fields."""
-  columnMap: PriceListColumnMapInput!
-
-  """Currency code for all prices in this sheet (e.g. 'GBP')."""
-  defaultCurrency: String!
-
-  """Google Drive URL for the source sheet. Used for tracking only."""
-  googleDriveUrl: String
-}
-
-"""Maps integer column indices (0-based) to price list item fields."""
-input PriceListColumnMapInput @doc(category: "Products") {
-  """Column index for product code."""
-  productCode: Int
-
-  """Column index for brand."""
-  brand: Int
-
-  """Column index for description."""
-  description: Int
-
-  """Column index for category."""
-  category: Int
-
-  """Column index for sizes with quantities (e.g. 'XS[20], M[50]')."""
-  sizes: Int
-
-  """Column index for RRP."""
-  rrp: Int
-
-  """Column index for sell price (the price shown on the web)."""
-  sellPrice: Int
-
-  """Column index for weight in kg."""
-  weightKg: Int
-
-  """Column index for image URL."""
-  imageUrl: Int
-
-  """Column index for buy/cost price."""
-  buyPrice: Int
-
-  """Column index for HS code (UK)."""
-  hsCode: Int
-}
-
-"""
-Trigger activation of a processed price list. If another price list is currently active for the same warehouse, it will be replaced automatically. Runs asynchronously. 
-
-Requires one of the following permissions: MANAGE_PRODUCTS.
-"""
-type PriceListActivate @doc(category: "Products") {
-  """The price list being activated."""
-  priceList: PriceList
-  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [ProductError!]!
-}
-
-"""
-Trigger deactivation of an active price list. Zeros warehouse stock for all items. Runs asynchronously. 
-
-Requires one of the following permissions: MANAGE_PRODUCTS.
-"""
-type PriceListDeactivate @doc(category: "Products") {
-  """The price list being deactivated."""
-  priceList: PriceList
-  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [ProductError!]!
-}
-
-"""
-Replace an active price list with a new one for the same warehouse. Performs a diff-based stock handover. Runs asynchronously. 
-
-Requires one of the following permissions: MANAGE_PRODUCTS.
-"""
-type PriceListReplace @doc(category: "Products") {
-  """The price list being replaced (will become INACTIVE)."""
-  oldPriceList: PriceList
-
-  """The new price list taking over (will become ACTIVE)."""
-  newPriceList: PriceList
-  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [ProductError!]!
-}
-
-"""
-Delete a price list. Only permitted when status is INACTIVE or processing never completed. 
-
-Requires one of the following permissions: MANAGE_PRODUCTS.
-"""
-type PriceListDelete @doc(category: "Products") {
-  """ID of the deleted price list."""
-  priceListId: ID
-  productErrors: [ProductError!]! @deprecated(reason: "Use `errors` field instead.")
-  errors: [ProductError!]!
 }
 
 """

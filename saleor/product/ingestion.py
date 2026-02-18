@@ -76,6 +76,10 @@ class MissingRequiredFields(SheetIntegrityError):
     """One or more rows have missing required fields."""
 
 
+class OwnedWarehouseIngestionError(SheetIntegrityError):
+    """Attempting to ingest products to an owned warehouse."""
+
+
 class InteractiveDecisionRequired(Exception):
     """Base exception for decisions that can be made interactively or via config.
 
@@ -313,7 +317,7 @@ def parse_sizes_and_qty(
     """Parse sizes and quantities from strings.
 
     Uses regex to find all size[qty] patterns, regardless of separator.
-    Supports: "6.5[1], 7[1]" or "S[5] M[10] L[3]" or any mix of separators.
+    Supports: "6.5[1], 7[1]" or "S[5] M[10] L[3]" or "5 [2], 4 [10]" (with spaces).
 
     Args:
         sizes_str: String containing sizes and quantities
@@ -338,7 +342,7 @@ def parse_sizes_and_qty(
         error_msg = (
             f"No valid size[qty] patterns found in: '{sizes_str}'"
             + (f" in product {product_code}" if product_code else "")
-            + ". Expected format: 'size[quantity]' (e.g., '8[5], 9[3]' or 'S[5] M[10]')"
+            + ". Expected format: 'size[quantity]' (e.g., '8[5], 9[3]' or 'S[5] M[10]' or '5 [2], 4 [10]')"
         )
         raise SizeQtyUnparseable(error_msg)
 
@@ -511,6 +515,32 @@ def get_products_by_code_and_brand(
     }
 
 
+def validate_warehouse_for_ingestion(warehouse: Warehouse) -> None:
+    """Validate that warehouse can accept product ingestion.
+
+    Product ingestion is only allowed for non-owned warehouses (is_owned=False).
+    Owned warehouses (is_owned=True) have inventory tracked at the unit level
+    and must use purchase orders for stock management.
+
+    Args:
+        warehouse: Warehouse to validate
+
+    Raises:
+        OwnedWarehouseIngestionError: If warehouse is owned (is_owned=True)
+
+    """
+    if warehouse.is_owned:
+        raise OwnedWarehouseIngestionError(
+            f"Cannot ingest products to owned warehouse '{warehouse.name}'. "
+            f"Owned warehouses track inventory at the unit level and must use "
+            f"purchase orders for stock management. Only non-owned warehouses "
+            f"(is_owned=False) can accept product ingestion via this command."
+        )
+    logger.info(
+        "Warehouse '%s' validated for ingestion (is_owned=False)", warehouse.name
+    )
+
+
 def create_warehouse_with_address(
     warehouse_name: str, address_string: str, country_code: str
 ) -> Warehouse:
@@ -546,11 +576,12 @@ def create_warehouse_with_address(
         country=country_code,
     )
 
-    # Create warehouse
+    # Create warehouse (default is_owned=False for new warehouses)
     warehouse = Warehouse.objects.create(
         name=warehouse_name,
         slug=warehouse_slug,
         address=address,
+        is_owned=False,
     )
 
     logger.info("Created warehouse: %s (slug: %s)", warehouse_name, warehouse_slug)
@@ -1638,14 +1669,19 @@ def create_product(
 def create_product_channel_listing(
     product: "Product",
     channel: "Channel",
-    not_for_web: bool = False,
+    visible_in_listings: bool = False,
+    *,
+    is_published: bool = True,
+    available_for_purchase: bool = True,
 ) -> "ProductChannelListing":
     """Create ProductChannelListing for a product.
 
     Args:
         product: Product instance
         channel: Channel to create listing for
-        not_for_web: If True, mark product as unavailable on web (unpublished, not visible)
+        visible_in_listings: If True, show the product in listing/search pages.
+        is_published: If False, product is hidden from the storefront entirely.
+        available_for_purchase: If False, product cannot be added to cart/orders.
 
     Returns:
         Created ProductChannelListing instance
@@ -1659,9 +1695,9 @@ def create_product_channel_listing(
         product=product,
         channel=channel,
         currency=channel.currency_code,
-        is_published=not not_for_web,  # Not published if not_for_web=True
-        visible_in_listings=False,  # Never shown in public listings (B2B/wholesale products)
-        available_for_purchase_at=None if not_for_web else timezone.now(),
+        is_published=is_published,
+        visible_in_listings=visible_in_listings,
+        available_for_purchase_at=timezone.now() if available_for_purchase else None,
     )
 
     logger.debug(
@@ -2055,7 +2091,13 @@ def ingest_new_products(
 
         # 2. Create ProductChannelListings for all channels
         for channel in channels:
-            create_product_channel_listing(product, channel, not_for_web)
+            create_product_channel_listing(
+                product,
+                channel,
+                visible_in_listings=not not_for_web,
+                is_published=not not_for_web,
+                available_for_purchase=not not_for_web,
+            )
 
         # 3. Create ProductMedia (if image URL exists)
         if product_data.image_url:
@@ -2315,6 +2357,9 @@ def ingest_products_from_excel(
     try:
         warehouse = Warehouse.objects.get(slug=warehouse_slug)
         logger.info("Using existing warehouse '%s'", warehouse.name)
+
+        # Validate warehouse for ingestion (raises exception if owned)
+        validate_warehouse_for_ingestion(warehouse)
     except Warehouse.DoesNotExist:
         # Create address first (required for warehouse)
         from saleor.account.models import Address
@@ -2325,23 +2370,20 @@ def ingest_products_from_excel(
             country=config.warehouse_country,
         )
 
-        # Now create warehouse with address
+        # Now create warehouse with address (default is_owned=False)
         warehouse = Warehouse.objects.create(
             slug=warehouse_slug,
             name=config.warehouse_name,
             address=address,
+            is_owned=False,
         )
 
-        # Assign to all channels
-        channel_count = assign_warehouse_to_all_channels(warehouse)
-        logger.info("Assigned warehouse to %s channel(s)", channel_count)
+        # Validate warehouse for ingestion (raises exception if owned)
+        validate_warehouse_for_ingestion(warehouse)
 
-        # Assign to all shipping zones
-        zone_count = assign_warehouse_to_all_shipping_zones(warehouse)
         logger.info(
-            "Created warehouse '%s' and assigned to %d shipping zone(s)",
+            "Created warehouse '%s' — auto-assigned to all channels and shipping zones",
             warehouse.name,
-            zone_count,
         )
 
     # Step 3: Check for interactive decisions (now that we have warehouse)
@@ -2439,18 +2481,17 @@ def ingest_products_from_excel(
         products_queryset = Product.objects.filter(id__in=product_ids)
         update_discounted_prices_for_promotion(products_queryset)
 
+        # Step 7: Mark products for search index update
+        if product_ids:
+            logger.info(
+                "Marking %d product(s) for search index update", len(product_ids)
+            )
+            Product.objects.filter(id__in=product_ids).update(search_index_dirty=True)
+
         # Rollback transaction if dry-run
         if config.dry_run:
             logger.info("DRY-RUN MODE: Rolling back all changes")
             transaction.set_rollback(True)
-
-    # Step 7: Mark products for search index update
-    all_product_ids = [p.id for p in created_products + updated_products]
-    if all_product_ids and not config.dry_run:
-        logger.info(
-            "Marking %d product(s) for search index update", len(all_product_ids)
-        )
-        Product.objects.filter(id__in=all_product_ids).update(search_index_dirty=True)
 
     # Step 8: Calculate statistics
     total_variants_created = sum(p.variants.count() for p in created_products)
@@ -2487,6 +2528,9 @@ def ingest_products_from_excel(
             "Skipped: %d products (exist in other warehouses)", skipped_products
         )
     logger.info("Warehouse: %s", warehouse.name)
+    all_product_ids = [p.pk for p in created_products] + [
+        p.pk for p in updated_products
+    ]
     if all_product_ids and not config.dry_run:
         logger.info(
             "Search indexes will be updated in the background for %d product(s)",
@@ -2495,3 +2539,16 @@ def ingest_products_from_excel(
     logger.info("=" * 80)
 
     return result
+
+
+def ingest_config_to_dict(config: IngestConfig) -> dict:
+    """Serialize IngestConfig to a JSON-serializable dict for storage."""
+    return attrs.asdict(config)
+
+
+def ingest_config_from_dict(data: dict) -> IngestConfig:
+    """Deserialize IngestConfig from a stored dict."""
+    d = data.copy()
+    mapping_data = d.pop("column_mapping", None)
+    mapping = SpreadsheetColumnMapping(**mapping_data) if mapping_data else None
+    return IngestConfig(column_mapping=mapping, **d)

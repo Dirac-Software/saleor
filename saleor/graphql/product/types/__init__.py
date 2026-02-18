@@ -40,4 +40,8 @@ __all__ = [
     "DigitalContent",
     "DigitalContentCountableConnection",
     "DigitalContentUrl",
+    "PriceList",
+    "PriceListCountableConnection",
+    "PriceListItem",
+    "PriceListItemCountableConnection",
 ]

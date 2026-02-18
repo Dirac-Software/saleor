@@ -467,7 +467,6 @@ def process_price_list_task(price_list_id: int):
             price_list.save(
                 update_fields=["processing_completed_at", "processing_failed_at"]
             )
-
     except Exception:
         price_list.processing_completed_at = None
         price_list.processing_failed_at = timezone.now()
@@ -607,7 +606,6 @@ def _activate_item(
         ProductChannelListing.objects.filter(
             product_id=item.product_id, is_published=False
         ).update(is_published=True, available_for_purchase_at=timezone.now())
-
         for size, qty in item.sizes_and_qty.items():
             variant, created = ProductVariant.objects.get_or_create(
                 product_id=item.product_id,
@@ -644,7 +642,6 @@ def _activate_item(
                     ProductVariantChannelListing.objects.filter(
                         pk=existing_listing.pk
                     ).update(discounted_price_amount=price)
-
     return True
 
 

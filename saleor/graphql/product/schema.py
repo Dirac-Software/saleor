@@ -159,23 +159,6 @@ from .utils import check_for_sorting_by_rank
 
 
 class ProductQueries(graphene.ObjectType):
-    price_list = PermissionsField(
-        PriceList,
-        id=graphene.Argument(
-            graphene.ID, description="ID of the price list.", required=True
-        ),
-        description="Look up a price list by ID.",
-        permissions=[ProductPermissions.MANAGE_PRODUCTS],
-        doc_category=DOC_CATEGORY_PRODUCTS,
-    )
-    price_lists = ConnectionField(
-        PriceListCountableConnection,
-        status=graphene.String(description="Filter by status: ACTIVE or INACTIVE."),
-        warehouse_id=graphene.ID(description="Filter by warehouse ID."),
-        description="List of price lists.",
-        permissions=[ProductPermissions.MANAGE_PRODUCTS],
-        doc_category=DOC_CATEGORY_PRODUCTS,
-    )
     digital_content = PermissionsField(
         DigitalContent,
         description="Look up digital content by ID.",
@@ -193,6 +176,23 @@ class ProductQueries(graphene.ObjectType):
         permissions=[
             ProductPermissions.MANAGE_PRODUCTS,
         ],
+        doc_category=DOC_CATEGORY_PRODUCTS,
+    )
+    price_list = PermissionsField(
+        PriceList,
+        id=graphene.Argument(
+            graphene.ID, description="ID of the price list.", required=True
+        ),
+        description="Look up a price list by ID.",
+        permissions=[ProductPermissions.MANAGE_PRODUCTS],
+        doc_category=DOC_CATEGORY_PRODUCTS,
+    )
+    price_lists = ConnectionField(
+        PriceListCountableConnection,
+        status=graphene.String(description="Filter by status: ACTIVE or INACTIVE."),
+        warehouse_id=graphene.ID(description="Filter by warehouse ID."),
+        description="List of price lists.",
+        permissions=[ProductPermissions.MANAGE_PRODUCTS],
         doc_category=DOC_CATEGORY_PRODUCTS,
     )
     categories = FilterConnectionField(
@@ -819,11 +819,11 @@ class ProductMutations(graphene.ObjectType):
     variant_media_assign = VariantMediaAssign.Field()
     variant_media_unassign = VariantMediaUnassign.Field()
 
-    product_ingestion_upload_file = ProductIngestionFileUpload.Field()
-    product_ingestion_ingest = ProductIngestionIngest.Field()
-
     price_list_create = PriceListCreate.Field()
     price_list_activate = PriceListActivate.Field()
     price_list_deactivate = PriceListDeactivate.Field()
     price_list_replace = PriceListReplace.Field()
     price_list_delete = PriceListDelete.Field()
+
+    product_ingestion_upload_file = ProductIngestionFileUpload.Field()
+    product_ingestion_ingest = ProductIngestionIngest.Field()

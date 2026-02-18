@@ -1,6 +1,6 @@
 """Tests for product ingestion utilities."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -92,6 +92,26 @@ def test_parse_sizes_and_qty_space_separated_with_numbers():
 
     assert sizes == ("8", "9", "10")
     assert quantities == (5, 10, 3)
+
+
+def test_parse_sizes_and_qty_with_space_before_bracket():
+    """Test parsing sizes with space before bracket: '5 [2], 4 [10]'."""
+    sizes_str = "5 [2], 4 [10], 6.5 [3]"
+
+    sizes, quantities = parse_sizes_and_qty(sizes_str)
+
+    assert sizes == ("5", "4", "6.5")
+    assert quantities == (2, 10, 3)
+
+
+def test_parse_sizes_and_qty_mixed_spacing():
+    """Test parsing with mixed spacing: some with space, some without."""
+    sizes_str = "S[5] M [10] L[3] XL [7]"
+
+    sizes, quantities = parse_sizes_and_qty(sizes_str)
+
+    assert sizes == ("S", "M", "L", "XL")
+    assert quantities == (5, 10, 3, 7)
 
 
 def test_spreadsheet_column_mapping_defaults():
@@ -239,6 +259,23 @@ def test_get_products_by_code_and_brand_no_attribute(simple_product):
         get_products_by_code_and_brand(["TEST-001"])
 
 
+def test_get_products_by_code_and_brand_no_brand_attribute(
+    simple_product, product_code_attribute
+):
+    Attribute.objects.filter(name="Brand").delete()
+
+    with pytest.raises(MissingDatabaseSetup, match="Brand attribute not found"):
+        get_products_by_code_and_brand(["TEST-001"])
+
+
+def test_get_products_by_code_and_brand_no_match(
+    simple_product, product_code_attribute, brand_attribute
+):
+    result = get_products_by_code_and_brand(["DOES-NOT-EXIST"])
+
+    assert result == {}
+
+
 @pytest.fixture
 def size_attribute():
     """Create Size attribute fixture."""
@@ -317,9 +354,7 @@ def test_create_product_media_success(simple_product, mocker):
     mock_response.content = fake_image_data
     mock_response.raise_for_status = Mock()
 
-    mocker.patch.object(
-        type(HTTPClient), "send_request", return_value=mock_response
-    )
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
 
     media = create_product_media(simple_product, image_url)
 
