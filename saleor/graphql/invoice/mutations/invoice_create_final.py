@@ -4,7 +4,6 @@ from django.core.exceptions import ValidationError
 from ....invoice import InvoiceType as InvoiceTypeEnum
 from ....invoice.models import Invoice
 from ....order.error_codes import OrderErrorCode
-from ....order.models import Fulfillment
 from ....permission.enums import OrderPermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_ORDERS

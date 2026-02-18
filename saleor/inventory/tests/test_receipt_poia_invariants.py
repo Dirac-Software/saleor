@@ -9,8 +9,9 @@ The temporal ordering guarantee:
 Exception: POIAs created AFTER receipt (shrinkage, cycle counts) can affect fulfillments.
 """
 
-import pytest
 from decimal import Decimal
+
+import pytest
 
 from ...inventory.stock_management import complete_receipt
 from ...order import OrderStatus
@@ -26,8 +27,7 @@ def assert_receipt_poia_invariant(poia):
     """
     affected_sources = poia.purchase_order_item.allocation_sources.all()
     affected_orders = {
-        source.allocation.order_line.order
-        for source in affected_sources
+        source.allocation.order_line.order for source in affected_sources
     }
 
     fulfillments = Fulfillment.objects.filter(order__in=affected_orders)
@@ -60,14 +60,21 @@ def setup_order_with_poi_allocation(order_line, poi, stock, order_status, fully_
     return order
 
 
-@pytest.mark.parametrize("order_status,fully_paid,should_auto_process", [
-    # UNCONFIRMED orders
-    (OrderStatus.UNCONFIRMED, False, True),   # Unpaid: auto-deallocate
-    (OrderStatus.UNCONFIRMED, True,  False),  # Fully paid: pending (no refund workflow)
-    # UNFULFILLED orders (confirmed, no fulfillments yet)
-    (OrderStatus.UNFULFILLED, False, False),  # Locked: pending (needs manual edit)
-    (OrderStatus.UNFULFILLED, True,  False),  # Locked + paid: pending
-])
+@pytest.mark.parametrize(
+    ("order_status", "fully_paid", "should_auto_process"),
+    [
+        # UNCONFIRMED orders
+        (OrderStatus.UNCONFIRMED, False, True),  # Unpaid: auto-deallocate
+        (
+            OrderStatus.UNCONFIRMED,
+            True,
+            False,
+        ),  # Fully paid: pending (no refund workflow)
+        # UNFULFILLED orders (confirmed, no fulfillments yet)
+        (OrderStatus.UNFULFILLED, False, False),  # Locked: pending (needs manual edit)
+        (OrderStatus.UNFULFILLED, True, False),  # Locked + paid: pending
+    ],
+)
 @pytest.mark.django_db
 def test_receipt_poia_never_affects_fulfillments(
     order_status,
@@ -78,8 +85,7 @@ def test_receipt_poia_never_affects_fulfillments(
     owned_warehouse,
     staff_user,
 ):
-    """
-    Exhaustive test: Receipt POIAs never affect fulfillments regardless of order state.
+    """Exhaustive test: Receipt POIAs never affect fulfillments regardless of order state.
 
     In all cases:
     - No fulfillments exist when POIA is processed (the core invariant)
@@ -100,6 +106,7 @@ def test_receipt_poia_never_affects_fulfillments(
 
     # Start receipt and record shortage
     from ..stock_management import receive_item, start_receipt
+
     receipt = start_receipt(poi.shipment, user=staff_user)
     receive_item(
         receipt=receipt,

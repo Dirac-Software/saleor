@@ -1,6 +1,6 @@
 import pytest
 
-from ...order import FulfillmentStatus, OrderStatus, PickStatus
+from ...order import OrderStatus
 from ...order.models import Fulfillment
 from ...warehouse.models import Allocation
 from ..stock_management import confirm_purchase_order_item

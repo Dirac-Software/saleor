@@ -1,11 +1,9 @@
 import graphene
-import pytest
 
 from ....invoice import InvoiceType
 from ....invoice.models import Invoice
-from ...tests.utils import get_graphql_content
 from ....order.error_codes import OrderErrorCode
-
+from ...tests.utils import get_graphql_content
 
 INVOICE_CREATE_FINAL_MUTATION = """
     mutation InvoiceCreateFinal(
@@ -129,7 +127,7 @@ def test_invoice_by_xero_id(
     xero_invoice_id = "INV-XERO-456"
 
     # Create invoice
-    invoice = Invoice.objects.create(
+    Invoice.objects.create(
         order=fulfillment.order,
         fulfillment=fulfillment,
         xero_invoice_id=xero_invoice_id,
@@ -153,9 +151,7 @@ def test_invoice_by_xero_id(
     )
 
 
-def test_invoice_by_xero_id_not_found(
-    staff_api_client, permission_group_manage_orders
-):
+def test_invoice_by_xero_id_not_found(staff_api_client, permission_group_manage_orders):
     """Test querying non-existent invoice returns None."""
     permission_group_manage_orders.user_set.add(staff_api_client.user)
 

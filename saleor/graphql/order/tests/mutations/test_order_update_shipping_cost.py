@@ -6,7 +6,6 @@ import pytest
 from .....order.error_codes import OrderErrorCode
 from ....tests.utils import get_graphql_content
 
-
 ORDER_UPDATE_SHIPPING_COST_MUTATION = """
     mutation OrderUpdateShippingCost($orderId: ID!, $input: OrderUpdateShippingCostInput!) {
         orderUpdateShippingCost(id: $orderId, input: $input) {
@@ -157,10 +156,10 @@ def test_draft_order_with_manual_shipping_can_be_completed(
     order.save(update_fields=["shipping_address"])
 
     # This should NOT raise ValidationError about missing shipping method
-    from .....plugins.manager import get_plugins_manager
-
     # Validate order can be completed without shipping method errors
     from django.core.exceptions import ValidationError
+
+    from .....plugins.manager import get_plugins_manager
 
     try:
         validate_draft_order(

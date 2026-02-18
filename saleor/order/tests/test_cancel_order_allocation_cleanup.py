@@ -1,10 +1,8 @@
-import pytest
-from unittest.mock import patch
 from decimal import Decimal
+from unittest.mock import patch
 
 from ...plugins.manager import get_plugins_manager
 from ...warehouse.models import Allocation, Stock
-from .. import OrderStatus
 from ..actions import cancel_order
 
 
@@ -15,8 +13,7 @@ def test_cancel_order_deletes_allocations_completely(
     nonowned_warehouse,
     django_capture_on_commit_callbacks,
 ):
-    """
-    Test that canceling an order completely deletes allocation records.
+    """Test that canceling an order completely deletes allocation records.
 
     Regression test: deallocate_stock_for_orders() was setting quantity_allocated=0
     but not deleting the Allocation records, causing orphaned records in the database.
@@ -66,18 +63,16 @@ def test_cancel_order_allows_subsequent_po_confirmation(
     owned_warehouse,
     django_capture_on_commit_callbacks,
 ):
-    """
-    Test that after canceling an order, we can confirm a PO at the supplier warehouse
-    without hitting AllocationInvariantViolation.
+    """Test that after canceling an order, we can confirm a PO without AllocationInvariantViolation.
 
     This reproduces the bug: confirming a PO fails when there are orphaned allocations
     from canceled orders at the supplier warehouse.
     """
-    from ...inventory.stock_management import confirm_purchase_order_item
-    from ...inventory.models import PurchaseOrder, PurchaseOrderItem
     from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrder, PurchaseOrderItem
+    from ...inventory.stock_management import confirm_purchase_order_item
+    from ...shipping import IncoTerm, ShipmentType
     from ...shipping.models import Shipment
-    from ...shipping import ShipmentType, IncoTerm
 
     # Given: Order with allocations at supplier warehouse
     order = order_with_lines
@@ -90,7 +85,7 @@ def test_cancel_order_allows_subsequent_po_confirmation(
         quantity_allocated=0,
     )
 
-    allocation = Allocation.objects.create(
+    Allocation.objects.create(
         order_line=order.lines.first(),
         stock=supplier_stock,
         quantity_allocated=10,

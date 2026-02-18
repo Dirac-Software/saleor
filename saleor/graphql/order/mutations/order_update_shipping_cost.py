@@ -73,8 +73,13 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
 
     @classmethod
     def _get_or_create_manual_shipping_method(cls, channel):
-        from ....shipping.models import ShippingMethod, ShippingMethodChannelListing, ShippingZone
         from decimal import Decimal
+
+        from ....shipping.models import (
+            ShippingMethod,
+            ShippingMethodChannelListing,
+            ShippingZone,
+        )
 
         # Find or create a global "MANUAL" shipping zone
         manual_zone, _ = ShippingZone.objects.get_or_create(

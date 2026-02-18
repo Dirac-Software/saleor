@@ -2,11 +2,9 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import graphene
-import pytest
 
 from .....graphql.tests.utils import get_graphql_content
 from .....order.error_codes import OrderErrorCode
-
 
 AVAILABLE_XERO_PAYMENTS_QUERY = """
     query AvailableXeroPayments($orderId: ID!) {

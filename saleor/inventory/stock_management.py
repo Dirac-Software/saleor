@@ -1,7 +1,5 @@
 """Stock management utilities for purchase orders and inventory tracking."""
 
-from uuid import UUID
-
 from django.db import transaction
 from django.utils import timezone
 
@@ -14,10 +12,10 @@ from .events import (
     purchase_order_item_confirmed_event,
 )
 from .exceptions import (
-    AdjustmentRequiresManualResolution,
     AdjustmentAffectsFulfilledOrders,
     AdjustmentAffectsPaidOrders,
     AdjustmentAlreadyProcessed,
+    AdjustmentRequiresManualResolution,
     AllocationInvariantViolation,
     InvalidPurchaseOrderItemStatus,
     ReceiptLineNotInProgress,
@@ -663,9 +661,9 @@ def _create_fulfillments_for_shipment(shipment, user, manager):
     ).distinct()
 
     for order in orders_to_fulfill:
-        allocations = Allocation.objects.filter(
-            order_line__order=order
-        ).select_related("stock__warehouse", "order_line")
+        allocations = Allocation.objects.filter(order_line__order=order).select_related(
+            "stock__warehouse", "order_line"
+        )
 
         warehouse_groups: dict = defaultdict(list)
         for allocation in allocations:
