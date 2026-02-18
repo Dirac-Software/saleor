@@ -329,9 +329,9 @@ def parse_sizes_and_qty(
     if not sizes_str:
         return (), ()
 
-    # Find all patterns of: anything[digits]
-    # Matches "8[5]", "S[10]", "6.5[3]", etc.
-    pattern = r"([^\[\],\s]+)\[(\d+)\]"
+    # Find all patterns of: anything[digits], with optional space before bracket.
+    # Matches "8[5]", "S[10]", "6.5[3]", "XS [20]", "10 [3]", etc.
+    pattern = r"([^\[\],\s]+)\s*\[(\d+)\]"
     matches = re.findall(pattern, sizes_str)
 
     if not matches:
@@ -1661,7 +1661,7 @@ def create_product_channel_listing(
         channel=channel,
         currency=channel.currency_code,
         is_published=not not_for_web,  # Not published if not_for_web=True
-        visible_in_listings=not not_for_web,  # Not visible if not_for_web=True
+        visible_in_listings=False,  # Never shown in public listings (B2B/wholesale products)
         available_for_purchase_at=None if not_for_web else timezone.now(),
     )
 

@@ -7,6 +7,13 @@ from .collection import (
     CollectionReorderProducts,
     CollectionUpdate,
 )
+from .price_list import (
+    PriceListActivate,
+    PriceListCreate,
+    PriceListDeactivate,
+    PriceListDelete,
+    PriceListReplace,
+)
 from .product import (
     ProductCreate,
     ProductDelete,
@@ -30,6 +37,11 @@ from .product_variant import (
 )
 
 __all__ = [
+    "PriceListActivate",
+    "PriceListCreate",
+    "PriceListDeactivate",
+    "PriceListDelete",
+    "PriceListReplace",
     "ProductTypeCreate",
     "ProductTypeUpdate",
     "ProductTypeDelete",

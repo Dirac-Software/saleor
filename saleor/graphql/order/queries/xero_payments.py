@@ -2,16 +2,13 @@ import os
 
 import graphene
 import requests
-from django.core.exceptions import ValidationError
 
 from ....order.error_codes import OrderErrorCode
-from ....payment.exceptions import XeroValidationError
 from ....permission.enums import OrderPermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_ORDERS
 from ...core.scalars import Decimal
 from ...core.types import OrderError
-from ..types import Order
 
 
 class XeroPaymentSummary(graphene.ObjectType):
@@ -49,7 +46,9 @@ def resolve_available_xero_payments(
     from ...core.context import get_database_connection_name
 
     # Check permissions
-    if not info.context.user.has_perm(OrderPermissions.MANAGE_ORDERS):
+    if not info.context.user or not info.context.user.has_perm(
+        OrderPermissions.MANAGE_ORDERS
+    ):
         return AvailableXeroPayments(
             payments=[],
             errors=[
