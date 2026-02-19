@@ -34,3 +34,10 @@ Pipfile
 
 # Exported results file
 django-queries-results.html
+
+# Local runtime files
+celerybeat-schedule
+export_files/
+invoices/
+price_lists/
+products/
