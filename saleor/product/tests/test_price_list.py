@@ -574,7 +574,7 @@ def test_activate_raises_for_owned_warehouse(db):
         warehouse=owned_wh, config={}, processing_completed_at=timezone.now()
     )
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="is owned"):
         activate_price_list_task(pl.pk)
 
 

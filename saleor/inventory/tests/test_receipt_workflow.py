@@ -3,13 +3,18 @@
 import pytest
 from django.utils import timezone
 
+from ...order import FulfillmentStatus, OrderStatus
+from ...order.models import Fulfillment
+from ...warehouse.models import Allocation, Stock
 from .. import ReceiptStatus
 from ..exceptions import (
     ReceiptLineNotInProgress,
     ReceiptNotInProgress,
 )
+from ..models import PurchaseOrderItem, Receipt, ReceiptLine
 from ..stock_management import (
     complete_receipt,
+    confirm_purchase_order_item,
     delete_receipt,
     delete_receipt_line,
     receive_item,
@@ -245,12 +250,12 @@ def test_handles_adjustment_affecting_confirmed_orders(
         received_by=staff_user,
     )
 
-    # and: process_adjustment will raise AdjustmentAffectsConfirmedOrders
-    from ...inventory.exceptions import AdjustmentAffectsConfirmedOrders
+    # and: process_adjustment will raise AdjustmentRequiresManualResolution
+    from ...inventory.exceptions import AdjustmentRequiresManualResolution
 
     _mock_process = mocker.patch(
         "saleor.inventory.stock_management.process_adjustment",
-        side_effect=AdjustmentAffectsConfirmedOrders(
+        side_effect=AdjustmentRequiresManualResolution(
             adjustment=mocker.Mock(), order_numbers=[1234]
         ),
     )
@@ -282,11 +287,11 @@ def test_sends_notification_for_pending_adjustments(
         received_by=staff_user,
     )
 
-    from ...inventory.exceptions import AdjustmentAffectsConfirmedOrders
+    from ...inventory.exceptions import AdjustmentRequiresManualResolution
 
     mocker.patch(
         "saleor.inventory.stock_management.process_adjustment",
-        side_effect=AdjustmentAffectsConfirmedOrders(
+        side_effect=AdjustmentRequiresManualResolution(
             adjustment=mocker.Mock(), order_numbers=[1234]
         ),
     )
@@ -404,3 +409,143 @@ def test_error_when_receipt_line_completed(
     # when/then: deleting the line raises error
     with pytest.raises(ReceiptLineNotInProgress):
         delete_receipt_line(line)
+
+
+# Tests for fulfillment creation via complete_receipt
+
+
+@pytest.fixture
+def order_with_poi_and_receipt(
+    order,
+    nonowned_warehouse,
+    owned_warehouse,
+    purchase_order,
+    variant,
+    shipment,
+    staff_user,
+):
+    """Scenario: UNCONFIRMED order → POI confirmed → in-progress receipt.
+
+    Sets up an order with an allocation at nonowned_warehouse and a POI linked
+    to the shipment. POI is NOT yet confirmed - the test controls that step.
+    """
+    order.status = OrderStatus.UNCONFIRMED
+    order.save()
+
+    line = order.lines.create(
+        product_name=variant.product.name,
+        variant_name=variant.name,
+        product_sku=variant.sku,
+        is_shipping_required=True,
+        is_gift_card=False,
+        quantity=5,
+        variant=variant,
+        unit_price_net_amount=10,
+        unit_price_gross_amount=10,
+        total_price_net_amount=50,
+        total_price_gross_amount=50,
+        undiscounted_unit_price_net_amount=10,
+        undiscounted_unit_price_gross_amount=10,
+        undiscounted_total_price_net_amount=50,
+        undiscounted_total_price_gross_amount=50,
+        currency="USD",
+        tax_rate=0,
+    )
+
+    source_stock, _ = Stock.objects.get_or_create(
+        warehouse=nonowned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100, "quantity_allocated": 0},
+    )
+
+    Allocation.objects.create(
+        order_line=line,
+        stock=source_stock,
+        quantity_allocated=5,
+    )
+    source_stock.quantity_allocated = 5
+    source_stock.save()
+
+    poi = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=5,
+        total_price_amount=50.0,
+        currency="USD",
+        shipment=shipment,
+        country_of_origin="US",
+    )
+
+    receipt = Receipt.objects.create(
+        shipment=shipment,
+        status=ReceiptStatus.IN_PROGRESS,
+        created_by=staff_user,
+    )
+
+    return {"order": order, "line": line, "poi": poi, "receipt": receipt}
+
+
+def test_confirm_poi_does_not_create_fulfillments_for_order(
+    order_with_poi_and_receipt, staff_user
+):
+    # given
+    order = order_with_poi_and_receipt["order"]
+    poi = order_with_poi_and_receipt["poi"]
+
+    assert Fulfillment.objects.filter(order=order).count() == 0
+
+    # when
+    confirm_purchase_order_item(poi, user=staff_user)
+
+    # then
+    order.refresh_from_db()
+    assert order.status == OrderStatus.UNFULFILLED
+    assert Fulfillment.objects.filter(order=order).count() == 0
+
+
+def test_complete_receipt_creates_fulfillments(order_with_poi_and_receipt, staff_user):
+    # given
+    order = order_with_poi_and_receipt["order"]
+    poi = order_with_poi_and_receipt["poi"]
+    receipt = order_with_poi_and_receipt["receipt"]
+
+    confirm_purchase_order_item(poi, user=staff_user)
+
+    order.refresh_from_db()
+    assert order.status == OrderStatus.UNFULFILLED
+    assert Fulfillment.objects.filter(order=order).count() == 0
+
+    ReceiptLine.objects.create(
+        receipt=receipt,
+        purchase_order_item=poi,
+        quantity_received=5,
+    )
+
+    # when
+    complete_receipt(receipt, user=staff_user)
+
+    # then
+    fulfillments = Fulfillment.objects.filter(order=order)
+    assert fulfillments.count() == 1
+    assert fulfillments.first().status == FulfillmentStatus.WAITING_FOR_APPROVAL
+
+
+def test_complete_receipt_with_no_linked_orders_creates_no_fulfillments(
+    receipt, purchase_order_item, staff_user, receipt_line_factory
+):
+    # given: POI has no order allocations (standalone stock receipt)
+    purchase_order_item.quantity_ordered = 10
+    purchase_order_item.save()
+
+    receipt_line_factory(
+        receipt=receipt,
+        purchase_order_item=purchase_order_item,
+        quantity_received=10,
+        received_by=staff_user,
+    )
+
+    # when
+    complete_receipt(receipt, user=staff_user)
+
+    # then: no fulfillments since no orders are linked to this stock
+    assert Fulfillment.objects.count() == 0

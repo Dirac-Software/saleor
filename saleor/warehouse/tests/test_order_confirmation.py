@@ -1,5 +1,7 @@
 """Tests for order confirmation validation based on AllocationSources."""
 
+from unittest.mock import patch
+
 from ...order import OrderStatus
 from ...order.fetch import OrderLineInfo
 from ...plugins.manager import get_plugins_manager
@@ -391,3 +393,49 @@ def test_cannot_confirm_order_with_one_line_incomplete(
 
     # when/then - order cannot be confirmed because line 2 has no sources
     assert can_confirm_order(order) is False
+
+
+def test_allocate_stocks_auto_confirm_fires_xero_order_confirmed_for_deposit_required(
+    order_line,
+    owned_warehouse,
+    purchase_order_item,
+    channel_USD,
+    django_capture_on_commit_callbacks,
+):
+    # given
+    order = order_line.order
+    order.status = OrderStatus.UNCONFIRMED
+    order.deposit_required = True
+    order.save(update_fields=["status", "deposit_required"])
+
+    channel_USD.automatically_confirm_all_new_orders = True
+    channel_USD.save(update_fields=["automatically_confirm_all_new_orders"])
+
+    variant = order_line.variant
+    stock, _ = Stock.objects.get_or_create(
+        warehouse=owned_warehouse,
+        product_variant=variant,
+        defaults={"quantity": 100},
+    )
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 50
+    order_line.save(update_fields=["quantity"])
+
+    # when
+    with patch(
+        "saleor.plugins.manager.PluginsManager.xero_order_confirmed"
+    ) as mock_xero:
+        with django_capture_on_commit_callbacks(execute=True):
+            allocate_stocks(
+                [OrderLineInfo(line=order_line, variant=variant, quantity=50)],
+                COUNTRY_CODE,
+                channel_USD,
+                manager=get_plugins_manager(allow_replica=False),
+            )
+
+    # then
+    order.refresh_from_db()
+    assert order.status == OrderStatus.UNFULFILLED
+    mock_xero.assert_called_once_with(order)

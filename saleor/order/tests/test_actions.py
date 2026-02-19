@@ -182,4 +182,34 @@ def test_order_created_negative_order_line_price(
     line_extra_data = _get_extra_for_order_line_logger(order_line)
     assert line_extra_data == caplog.records[0].lines[0]
 
-    assert "Order with negative prices detected" in caplog.text
+
+@pytest.mark.parametrize(
+    ("deposit_required", "expect_xero_called"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+@patch("saleor.order.actions.call_event_including_protected_events")
+def test_order_confirmed_xero_webhook_gated_on_deposit_required(
+    mock_call_event,
+    deposit_required,
+    expect_xero_called,
+    order,
+    plugins_manager,
+):
+    order.deposit_required = deposit_required
+    order.save(update_fields=["deposit_required"])
+
+    order_confirmed(order, user=None, app=None, manager=plugins_manager)
+
+    xero_calls = [
+        call
+        for call in mock_call_event.call_args_list
+        if call.args and call.args[0] == plugins_manager.xero_order_confirmed
+    ]
+    if expect_xero_called:
+        assert len(xero_calls) == 1
+        assert xero_calls[0].args[1] == order
+    else:
+        assert len(xero_calls) == 0

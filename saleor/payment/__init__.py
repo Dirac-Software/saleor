@@ -21,8 +21,9 @@ class TransactionItemIdempotencyUniqueError(Exception):
 
 class CustomPaymentChoices:
     MANUAL = "manual"
+    XERO = "xero"
 
-    CHOICES = [(MANUAL, "Manual")]
+    CHOICES = [(MANUAL, "Manual"), (XERO, "Xero")]
 
 
 class OperationType(Enum):

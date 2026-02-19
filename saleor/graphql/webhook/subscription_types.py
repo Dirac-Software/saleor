@@ -66,7 +66,7 @@ from ..core.doc_category import (
 )
 from ..core.fields import BaseField
 from ..core.scalars import JSON, DateTime, PositiveDecimal
-from ..core.types import NonNullList, SubscriptionObjectType
+from ..core.types import Money, NonNullList, SubscriptionObjectType
 from ..core.types.order_or_checkout import OrderOrCheckout
 from ..order.dataloaders import OrderByIdLoader
 from ..order.types import Order, OrderGrantedRefund
@@ -1382,6 +1382,257 @@ class FulfillmentMetadataUpdated(SubscriptionObjectType, FulfillmentBase):
         enable_dry_run = True
         interfaces = (Event,)
         description = "Event sent when fulfillment metadata is updated."
+
+
+class ProformaCalculatedAmounts(graphene.ObjectType):
+    fulfillment_total = graphene.Field(
+        Money, required=True, description="Sum of line totals for this fulfillment."
+    )
+    deposit_credit = graphene.Field(
+        Money,
+        required=True,
+        description="Deposit already paid that applies to this fulfillment.",
+    )
+    proforma_amount = graphene.Field(
+        Money, required=True, description="fulfillmentTotal minus depositCredit."
+    )
+    shipping_cost = graphene.Field(
+        Money, required=True, description="Shipping cost for this fulfillment."
+    )
+    shipping_vat_rate = graphene.String(
+        required=True,
+        description='VAT rate as decimal string e.g. "0.20".',
+    )
+
+
+class FulfillmentProformaInvoiceGenerated(SubscriptionObjectType, FulfillmentBase):
+    invoice = graphene.Field(
+        "saleor.graphql.invoice.types.Invoice",
+        description="The proforma invoice that was generated.",
+    )
+    calculated_amounts = graphene.Field(
+        ProformaCalculatedAmounts,
+        required=True,
+        description="Calculated amounts for the proforma invoice.",
+    )
+
+    class Meta:
+        root_type = "Invoice"
+        enable_dry_run = True
+        interfaces = (Event,)
+        description = "Event sent when proforma invoice is generated for a fulfillment."
+
+    @staticmethod
+    def resolve_invoice(root, _info: ResolveInfo):
+        _, invoice = root
+        return invoice
+
+    @staticmethod
+    def resolve_fulfillment(root, _info: ResolveInfo):
+        _, invoice = root
+        return SyncWebhookControlContext(node=invoice.fulfillment)
+
+    @staticmethod
+    def resolve_order(root, _info: ResolveInfo):
+        _, invoice = root
+        return SyncWebhookControlContext(node=invoice.order)
+
+    @staticmethod
+    def resolve_calculated_amounts(root, _info: ResolveInfo):
+        from decimal import Decimal
+
+        _, invoice = root
+        fulfillment = invoice.fulfillment
+        order = invoice.order
+        currency = order.currency
+
+        fulfillment_total = Decimal(0)
+        for line in fulfillment.lines.all():
+            fulfillment_total += line.order_line.unit_price_gross_amount * line.quantity
+
+        deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
+        proforma_amount = fulfillment_total - deposit_credit
+
+        shipping_gross = order.shipping_price_gross_amount or Decimal(0)
+        shipping_net = order.shipping_price_net_amount or Decimal(0)
+        if shipping_net > 0:
+            vat_rate = (shipping_gross - shipping_net) / shipping_net
+            shipping_vat_rate = f"{vat_rate:.2f}"
+        else:
+            shipping_vat_rate = "0.00"
+
+        return ProformaCalculatedAmounts(
+            fulfillment_total=Money(amount=float(fulfillment_total), currency=currency),
+            deposit_credit=Money(amount=float(deposit_credit), currency=currency),
+            proforma_amount=Money(amount=float(proforma_amount), currency=currency),
+            shipping_cost=Money(amount=float(shipping_gross), currency=currency),
+            shipping_vat_rate=shipping_vat_rate,
+        )
+
+
+class FulfillmentFulfilled(SubscriptionObjectType, FulfillmentBase):
+    class Meta:
+        root_type = "Fulfillment"
+        enable_dry_run = True
+        interfaces = (Event,)
+        description = "Event sent when a fulfillment is marked as fulfilled."
+        doc_category = DOC_CATEGORY_ORDERS
+
+
+class XeroOrderConfirmedCalculatedAmounts(graphene.ObjectType):
+    deposit_amount = graphene.Field(
+        Money, required=True, description="Deposit amount due for this order."
+    )
+
+
+class XeroOrderConfirmed(SubscriptionObjectType, OrderBase):
+    calculated_amounts = graphene.Field(
+        XeroOrderConfirmedCalculatedAmounts,
+        required=True,
+        description="Calculated deposit amount for this order.",
+    )
+
+    class Meta:
+        root_type = "Order"
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = (
+            "Sync event sent when an order is confirmed. "
+            "Dirac should return the Xero deposit prepayment ID."
+        )
+        doc_category = DOC_CATEGORY_ORDERS
+
+    @staticmethod
+    def resolve_calculated_amounts(root, _info: ResolveInfo):
+        from decimal import Decimal
+
+        _, order = root
+        percentage = order.deposit_percentage or Decimal(0)
+        deposit_amount = order.total_gross_amount * (percentage / Decimal(100))
+        return XeroOrderConfirmedCalculatedAmounts(
+            deposit_amount=Money(amount=deposit_amount, currency=order.currency)
+        )
+
+
+class XeroFulfillmentLineAmounts(graphene.ObjectType):
+    order_line_id = graphene.String(required=True, description="ID of the order line.")
+    quantity = graphene.Int(required=True, description="Quantity fulfilled.")
+    product_name = graphene.String(required=True)
+    variant_name = graphene.String(required=True)
+    product_sku = graphene.String()
+    tax_rate = graphene.Float(required=True)
+    unit_price_gross = graphene.Field(Money, required=True)
+    unit_price_net = graphene.Field(Money, required=True)
+    total_price_gross = graphene.Field(Money, required=True)
+    total_price_net = graphene.Field(Money, required=True)
+
+
+class XeroFulfillmentCreatedCalculatedAmounts(graphene.ObjectType):
+    proforma_amount = graphene.Field(
+        Money, required=True, description="Fulfillment total minus deposit credit."
+    )
+    shipping_cost = graphene.Field(
+        Money, required=True, description="Shipping cost for this order."
+    )
+    shipping_vat_rate = graphene.String(
+        required=True,
+        description='VAT rate as decimal string e.g. "0.20".',
+    )
+    lines = graphene.List(
+        graphene.NonNull(XeroFulfillmentLineAmounts),
+        required=True,
+        description="Per-line stored amounts, safe to read in sync webhook context.",
+    )
+
+
+class XeroFulfillmentCreated(SubscriptionObjectType, FulfillmentBase):
+    calculated_amounts = graphene.Field(
+        XeroFulfillmentCreatedCalculatedAmounts,
+        required=True,
+        description="Calculated amounts for the proforma invoice.",
+    )
+
+    class Meta:
+        root_type = "Fulfillment"
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = (
+            "Sync event sent when a fulfillment is created. "
+            "Dirac should return the Xero quote and proforma prepayment IDs."
+        )
+        doc_category = DOC_CATEGORY_ORDERS
+
+    @staticmethod
+    def resolve_calculated_amounts(root, _info: ResolveInfo):
+        from decimal import Decimal
+
+        _, fulfillment = root
+        order = fulfillment.order
+
+        fulfillment_total = Decimal(0)
+        lines = []
+        for line in fulfillment.lines.all():
+            ol = line.order_line
+            gross = ol.unit_price_gross_amount
+            net = ol.unit_price_net_amount
+            fulfillment_total += gross * line.quantity
+            lines.append(
+                XeroFulfillmentLineAmounts(
+                    order_line_id=str(ol.pk),
+                    quantity=line.quantity,
+                    product_name=ol.product_name,
+                    variant_name=ol.variant_name,
+                    product_sku=ol.product_sku,
+                    tax_rate=float(ol.tax_rate),
+                    unit_price_gross=Money(
+                        amount=float(gross), currency=order.currency
+                    ),
+                    unit_price_net=Money(amount=float(net), currency=order.currency),
+                    total_price_gross=Money(
+                        amount=float(gross * line.quantity), currency=order.currency
+                    ),
+                    total_price_net=Money(
+                        amount=float(net * line.quantity), currency=order.currency
+                    ),
+                )
+            )
+
+        deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
+        proforma_amount = fulfillment_total - deposit_credit
+
+        shipping_gross = order.shipping_price_gross_amount or Decimal(0)
+        shipping_net = order.shipping_price_net_amount or Decimal(0)
+        if shipping_net > 0:
+            vat_rate = (shipping_gross - shipping_net) / shipping_net
+            shipping_vat_rate = f"{vat_rate:.2f}"
+        else:
+            shipping_vat_rate = "0.00"
+
+        return XeroFulfillmentCreatedCalculatedAmounts(
+            proforma_amount=Money(amount=proforma_amount, currency=order.currency),
+            shipping_cost=Money(amount=shipping_gross, currency=order.currency),
+            shipping_vat_rate=shipping_vat_rate,
+            lines=lines,
+        )
+
+
+class XeroCheckPrepaymentStatus(SubscriptionObjectType):
+    prepayment_id = graphene.String(
+        description="The Xero prepayment ID to check.",
+        required=True,
+    )
+
+    class Meta:
+        root_type = None
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = "Sync event to check whether a Xero prepayment has been paid."
+        doc_category = DOC_CATEGORY_ORDERS
+
+    @staticmethod
+    def resolve_prepayment_id(root, _info: ResolveInfo):
+        _, data = root
+        return data["prepayment_id"]
 
 
 class UserBase(AbstractType):
@@ -2885,6 +3136,30 @@ class ThumbnailCreated(SubscriptionObjectType):
         return image.url if image else None
 
 
+class XeroListPayments(SubscriptionObjectType):
+    contact_id = graphene.String()
+    email = graphene.String()
+    domain = graphene.String()
+
+    class Meta:
+        root_type = None
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = "List Xero payments for a customer."
+        doc_category = DOC_CATEGORY_ORDERS
+
+
+class XeroListBankAccounts(SubscriptionObjectType):
+    domain = graphene.String(required=True)
+
+    class Meta:
+        root_type = None
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = "List available Xero bank accounts for a domain."
+        doc_category = DOC_CATEGORY_ORDERS
+
+
 SYNC_WEBHOOK_TYPES_MAP = {
     WebhookEventSyncType.PAYMENT_AUTHORIZE: PaymentAuthorize,
     WebhookEventSyncType.PAYMENT_CAPTURE: PaymentCaptureEvent,
@@ -2925,6 +3200,8 @@ SYNC_WEBHOOK_TYPES_MAP = {
     WebhookEventSyncType.PAYMENT_METHOD_PROCESS_TOKENIZATION_SESSION: (
         PaymentMethodProcessTokenizationSession
     ),
+    WebhookEventSyncType.XERO_LIST_PAYMENTS: XeroListPayments,
+    WebhookEventSyncType.XERO_LIST_BANK_ACCOUNTS: XeroListBankAccounts,
 }
 
 
@@ -3021,7 +3298,12 @@ ASYNC_WEBHOOK_TYPES_MAP = {
     WebhookEventAsyncType.FULFILLMENT_TRACKING_NUMBER_UPDATED: FulfillmentTrackingNumberUpdated,  # noqa: E501
     WebhookEventAsyncType.FULFILLMENT_CANCELED: FulfillmentCanceled,
     WebhookEventAsyncType.FULFILLMENT_APPROVED: FulfillmentApproved,
+    WebhookEventAsyncType.FULFILLMENT_FULFILLED: FulfillmentFulfilled,
     WebhookEventAsyncType.FULFILLMENT_METADATA_UPDATED: FulfillmentMetadataUpdated,
+    WebhookEventAsyncType.FULFILLMENT_PROFORMA_INVOICE_GENERATED: FulfillmentProformaInvoiceGenerated,  # noqa: E501
+    WebhookEventSyncType.XERO_ORDER_CONFIRMED: XeroOrderConfirmed,
+    WebhookEventSyncType.XERO_FULFILLMENT_CREATED: XeroFulfillmentCreated,
+    WebhookEventSyncType.XERO_CHECK_PREPAYMENT_STATUS: XeroCheckPrepaymentStatus,
     WebhookEventAsyncType.CUSTOMER_CREATED: CustomerCreated,
     WebhookEventAsyncType.CUSTOMER_UPDATED: CustomerUpdated,
     WebhookEventAsyncType.CUSTOMER_METADATA_UPDATED: CustomerMetadataUpdated,

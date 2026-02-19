@@ -543,9 +543,11 @@ def test_parse_row_collects_all_errors_not_fail_fast():
 
 
 def test_parse_row_missing_optional_fields_valid():
+    # sell_price is required; rrp, buy_price, weight_kg, image_url, hs_code are optional
     raw = {
         "product_code": "HY4520",
         "brand": "Adidas",
+        "sell_price": 12.0,
         "sizes": "XS[16], S[26], M[92]",
     }
     row = parse_row(0, raw, "GBP")
@@ -672,7 +674,7 @@ def test_parse_sheet_all_rows_are_parsed_rows(hk_df):
 
 def test_parse_sheet_sequential_indices(hk_df):
     rows = parse_sheet(hk_df, HK_COLUMN_MAP, "GBP")
-    assert [r.row_index for r in rows] == list(range(len(HK_ROWS)))
+    assert [r.row_index for r in rows] == list(range(2, 2 + len(HK_ROWS)))
 
 
 def test_parse_sheet_maps_columns_correctly(hk_df):

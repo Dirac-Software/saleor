@@ -36,6 +36,13 @@ class Invoice(ModelWithMetadata, Job):
         blank=True,
         on_delete=models.SET_NULL,
     )
+    fulfillment = models.OneToOneField(
+        "order.Fulfillment",
+        related_name="proforma_invoice",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     xero_invoice_id = models.CharField(
         max_length=255, null=True, blank=True, unique=True
     )

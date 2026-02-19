@@ -903,6 +903,42 @@ class Fulfillment(
         ),
         required=True,
     )
+    proforma_invoice = graphene.Field(
+        Invoice,
+        description="Proforma invoice associated with this fulfillment.",
+        required=False,
+    )
+    deposit_allocated = graphene.Boolean(
+        description="Indicates if order deposits have been allocated to this fulfillment.",
+        required=True,
+    )
+    deposit_allocated_amount = graphene.Field(
+        Money,
+        description="Amount of deposit credit allocated to this fulfillment.",
+        required=False,
+    )
+    xero_quote_id = graphene.String(
+        description="Xero Quote UUID for the proforma quote linked to this fulfillment.",
+        required=False,
+    )
+    xero_quote_number = graphene.String(
+        description="Xero Quote number (e.g. Q-1234).",
+        required=False,
+    )
+    xero_proforma_prepayment_id = graphene.String(
+        description="Xero prepayment UUID for the proforma payment on this fulfillment.",
+        required=False,
+    )
+    quote_pdf_url = graphene.String(
+        description="URL to the quote PDF hosted by the Xero integration app.",
+        required=False,
+    )
+    can_transition_to_fulfilled = graphene.Boolean(
+        description=(
+            "Indicates if this fulfillment can automatically transition to FULFILLED status."
+        ),
+        required=True,
+    )
 
     class Meta:
         default_resolver = (
@@ -1042,6 +1078,38 @@ class Fulfillment(
     ):
         return root.node.has_inventory_received
 
+    @staticmethod
+    def resolve_proforma_invoice(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        try:
+            return root.node.proforma_invoice
+        except models.Fulfillment.proforma_invoice.RelatedObjectDoesNotExist:
+            return None
+
+    @staticmethod
+    def resolve_deposit_allocated(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        return root.node.deposit_allocated
+
+    @staticmethod
+    def resolve_deposit_allocated_amount(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        fulfillment = root.node
+        if fulfillment.deposit_allocated_amount is None:
+            return None
+        return prices.Money(
+            fulfillment.deposit_allocated_amount, fulfillment.order.currency
+        )
+
+    @staticmethod
+    def resolve_can_transition_to_fulfilled(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        return root.node.can_auto_transition_to_fulfilled()
+
 
 class OrderLine(
     SyncWebhookControlContextModelObjectType[ModelObjectType[models.OrderLine]]
@@ -1063,6 +1131,18 @@ class OrderLine(
     )
     quantity_fulfilled = graphene.Int(
         required=True, description="Number of variant items fulfilled."
+    )
+    warehouse_stock = graphene.Int(
+        required=True,
+        description="Quantity of received stock available for this order line.",
+    )
+    can_fulfill_quantity = graphene.Int(
+        required=True,
+        description="Maximum quantity that can be fulfilled now (min of ordered vs available minus already fulfilled).",
+    )
+    is_ready_to_fulfill = graphene.Boolean(
+        required=True,
+        description="Whether this line can be fulfilled now (has stock and deposit requirements met).",
     )
     tax_rate = graphene.Float(
         required=True, description="Rate of tax applied on product variant."
@@ -1271,6 +1351,49 @@ class OrderLine(
         variants_product = ProductByVariantIdLoader(info.context).load(variant_id)
         variant_medias = MediaByProductVariantIdLoader(info.context).load(variant_id)
         return Promise.all([variants_product, variant_medias]).then(_resolve_thumbnail)
+
+    @staticmethod
+    def resolve_warehouse_stock(
+        root: SyncWebhookControlContext[models.OrderLine], info
+    ):
+        from ...warehouse.stock_utils import get_received_quantity_for_order_line
+        from ..core.context import get_database_connection_name
+
+        database_connection_name = get_database_connection_name(info.context)
+        return get_received_quantity_for_order_line(
+            root.node, database_connection_name=database_connection_name
+        )
+
+    @staticmethod
+    def resolve_can_fulfill_quantity(
+        root: SyncWebhookControlContext[models.OrderLine], info
+    ):
+        from ...warehouse.stock_utils import get_fulfillable_quantity_for_order_line
+        from ..core.context import get_database_connection_name
+
+        database_connection_name = get_database_connection_name(info.context)
+        return get_fulfillable_quantity_for_order_line(
+            root.node, database_connection_name=database_connection_name
+        )
+
+    @staticmethod
+    def resolve_is_ready_to_fulfill(
+        root: SyncWebhookControlContext[models.OrderLine], info
+    ):
+        from ...warehouse.stock_utils import get_fulfillable_quantity_for_order_line
+        from ..core.context import get_database_connection_name
+
+        order_line = root.node
+        order = order_line.order
+
+        if order.deposit_required and not order.deposit_threshold_met:
+            return False
+
+        database_connection_name = get_database_connection_name(info.context)
+        can_fulfill = get_fulfillable_quantity_for_order_line(
+            order_line, database_connection_name=database_connection_name
+        )
+        return can_fulfill > 0
 
     @staticmethod
     @traced_resolver
@@ -1641,6 +1764,11 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     lines = NonNullList(
         lambda: OrderLine, required=True, description="List of order lines."
     )
+    fulfillable_lines = NonNullList(
+        lambda: OrderLine,
+        required=True,
+        description="Order lines that have stock available to fulfill.",
+    )
     actions = NonNullList(
         OrderAction,
         description=(
@@ -1696,6 +1824,43 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     charge_status = OrderChargeStatusEnum(
         description="The charge status of the order.",
         required=True,
+    )
+    deposit_required = graphene.Boolean(
+        description="Whether a deposit is required before fulfillment.",
+        required=True,
+    )
+    deposit_percentage = graphene.Field(
+        "saleor.graphql.core.scalars.Decimal",
+        description="Percentage of total required as deposit.",
+    )
+    deposit_payment_id = graphene.String(
+        description="Deprecated: Use payments with gateway='xero' instead.",
+        deprecation_reason="Use payments field filtered by gateway='xero'.",
+    )
+    deposit_amount = graphene.Field(
+        Money,
+        description="Deprecated: Use totalDepositPaid instead.",
+        deprecation_reason="Use totalDepositPaid field to get total from Xero deposit payments.",
+    )
+    total_deposit_paid = graphene.Field(
+        "saleor.graphql.core.scalars.Decimal",
+        required=True,
+        description="Total amount captured from all active Xero payments.",
+    )
+    deposit_threshold_met = graphene.Boolean(
+        required=True,
+        description="Whether the deposit threshold has been met (totalDepositPaid >= depositPercentage * total).",
+    )
+    deposit_paid_at = DateTime(
+        description="Date and time when deposit threshold was met."
+    )
+    xero_deposit_prepayment_id = graphene.String(
+        description="Xero prepayment UUID for the deposit on this order.",
+        required=False,
+    )
+    xero_bank_account_code = graphene.String(
+        description="Xero bank account code used for deposit prepayments on this order.",
+        required=False,
     )
     tax_exemption = graphene.Boolean(
         description="Returns True if order has to be exempt from taxes.",
@@ -2447,6 +2612,32 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         )
 
     @staticmethod
+    def resolve_fulfillable_lines(root: SyncWebhookControlContext[models.Order], info):
+        from ...warehouse.stock_utils import get_fulfillable_quantity_for_order_line
+        from ..core.context import get_database_connection_name
+
+        database_connection_name = get_database_connection_name(info.context)
+
+        def _filter_fulfillable(lines):
+            fulfillable = [
+                SyncWebhookControlContext(
+                    node=line, allow_sync_webhooks=root.allow_sync_webhooks
+                )
+                for line in lines
+                if get_fulfillable_quantity_for_order_line(
+                    line, database_connection_name=database_connection_name
+                )
+                > 0
+            ]
+            return fulfillable
+
+        return (
+            OrderLinesByOrderIdLoader(info.context)
+            .load(root.node.id)
+            .then(_filter_fulfillable)
+        )
+
+    @staticmethod
     def resolve_events(root: SyncWebhookControlContext[models.Order], _info):
         def _wrap_with_sync_webhook_control_context(events):
             return [
@@ -3187,6 +3378,18 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         if order.checkout_token:
             return graphene.Node.to_global_id("Checkout", order.checkout_token)
         return None
+
+    @staticmethod
+    def resolve_total_deposit_paid(
+        root: SyncWebhookControlContext[models.Order], _info
+    ):
+        return root.node.total_deposit_paid
+
+    @staticmethod
+    def resolve_deposit_threshold_met(
+        root: SyncWebhookControlContext[models.Order], _info
+    ):
+        return root.node.deposit_threshold_met
 
     @staticmethod
     def __resolve_references(roots: list["Order"], info):

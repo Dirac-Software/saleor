@@ -30,7 +30,7 @@ from .csv.schema import CsvMutations, CsvQueries
 from .discount.schema import DiscountMutations, DiscountQueries
 from .giftcard.schema import GiftCardMutations, GiftCardQueries
 from .inventory.schema import InventoryMutations, InventoryQueries
-from .invoice.schema import InvoiceMutations
+from .invoice.schema import InvoiceMutations, InvoiceQueries
 from .menu.schema import MenuMutations, MenuQueries
 from .meta.schema import MetaMutations
 from .order.schema import OrderMutations, OrderQueries
@@ -66,6 +66,7 @@ class Query(
     PluginsQueries,
     GiftCardQueries,
     InventoryQueries,
+    InvoiceQueries,
     MenuQueries,
     OrderQueries,
     PageQueries,

@@ -6,6 +6,7 @@ from ..core.scalars import DateTime
 from ..core.types import Job, ModelObjectType
 from ..meta.types import ObjectWithMetadata
 from ..order.dataloaders import OrderByIdLoader
+from .enums import InvoiceTypeEnum
 
 
 class Invoice(ModelObjectType[models.Invoice]):
@@ -27,6 +28,12 @@ class Invoice(ModelObjectType[models.Invoice]):
         "saleor.graphql.order.types.Order",
         description="Order related to the invoice.",
     )
+    xero_invoice_id = graphene.String(description="Xero invoice ID.")
+    type = graphene.Field(InvoiceTypeEnum, description="Invoice type.")
+    fulfillment = graphene.Field(
+        "saleor.graphql.order.types.Fulfillment",
+        description="Fulfillment related to the invoice.",
+    )
 
     class Meta:
         description = "Represents an Invoice."
@@ -43,3 +50,9 @@ class Invoice(ModelObjectType[models.Invoice]):
             .load(root.order_id)
             .then(_wrap_with_sync_webhook_control_context)
         )
+
+    @staticmethod
+    def resolve_fulfillment(root: models.Invoice, info):
+        if root.fulfillment:
+            return SyncWebhookControlContext(node=root.fulfillment)
+        return None

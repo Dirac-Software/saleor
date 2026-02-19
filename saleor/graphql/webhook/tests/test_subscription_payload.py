@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import graphene
 from django.test import override_settings
 from django.utils import timezone
@@ -435,3 +437,177 @@ def test_generate_payload_promise_from_subscription_unable_to_build_payload(
     # then
     payload = payload.get()
     assert payload is None
+
+
+XERO_ORDER_CONFIRMED_QUERY = """
+    subscription {
+      event {
+        ... on XeroOrderConfirmed {
+          order { id xeroBankAccountCode }
+          calculatedAmounts {
+            depositAmount {
+              amount
+              currency
+            }
+          }
+        }
+      }
+    }
+"""
+
+
+def test_xero_order_confirmed_calculated_amounts_serializes_as_decimal(
+    order, app, webhook_app
+):
+    # given - order with a known gross total and deposit percentage
+    order.total_gross_amount = Decimal("1000.00")
+    order.deposit_percentage = Decimal(30)
+    order.currency = "USD"
+    order.xero_bank_account_code = "XERO-001"
+    order.save(
+        update_fields=[
+            "total_gross_amount",
+            "deposit_percentage",
+            "currency",
+            "xero_bank_account_code",
+        ]
+    )
+
+    request = initialize_request(app=app)
+
+    # when
+    payload = generate_payload_from_subscription(
+        event_type=WebhookEventSyncType.XERO_ORDER_CONFIRMED,
+        subscribable_object=order,
+        subscription_query=XERO_ORDER_CONFIRMED_QUERY,
+        request=request,
+    )
+
+    # then - 30% of 1000 = 300, no errors, order field resolves
+    assert "errors" not in payload
+    assert payload["order"] is not None
+    assert payload["order"]["id"] is not None
+    assert payload["order"]["xeroBankAccountCode"] == "XERO-001"
+    assert payload["calculatedAmounts"]["depositAmount"]["amount"] == 300.0
+    assert payload["calculatedAmounts"]["depositAmount"]["currency"] == "USD"
+
+
+XERO_FULFILLMENT_CREATED_QUERY = """
+    subscription {
+      event {
+        ... on XeroFulfillmentCreated {
+          fulfillment { id }
+          calculatedAmounts {
+            proformaAmount { amount currency }
+            shippingCost { amount currency }
+            shippingVatRate
+          }
+        }
+      }
+    }
+"""
+
+
+def test_xero_fulfillment_created_calculated_amounts_serializes_as_decimal(
+    fulfillment, app
+):
+    # given
+    order = fulfillment.order
+    order.shipping_price_gross_amount = Decimal("120.00")
+    order.shipping_price_net_amount = Decimal("100.00")
+    order.currency = "USD"
+    order.save(
+        update_fields=[
+            "shipping_price_gross_amount",
+            "shipping_price_net_amount",
+            "currency",
+        ]
+    )
+    fulfillment.deposit_allocated_amount = Decimal("50.00")
+    fulfillment.save(update_fields=["deposit_allocated_amount"])
+
+    for line in fulfillment.lines.all():
+        line.order_line.unit_price_gross_amount = Decimal("100.00")
+        line.order_line.save(update_fields=["unit_price_gross_amount"])
+
+    request = initialize_request(app=app)
+
+    # when
+    payload = generate_payload_from_subscription(
+        event_type=WebhookEventSyncType.XERO_FULFILLMENT_CREATED,
+        subscribable_object=fulfillment,
+        subscription_query=XERO_FULFILLMENT_CREATED_QUERY,
+        request=request,
+    )
+
+    # then - no errors, amounts are numeric and correct
+    assert "errors" not in payload
+    amounts = payload["calculatedAmounts"]
+    assert amounts["shippingCost"]["amount"] == 120.0
+    assert amounts["shippingCost"]["currency"] == "USD"
+    assert amounts["shippingVatRate"] == "0.20"
+
+
+FULFILLMENT_APPROVED_XERO_FIELDS_QUERY = """
+    subscription {
+      event {
+        ... on FulfillmentApproved {
+          fulfillment {
+            privateMetadata { key value }
+            depositAllocatedAmount { amount currency }
+          }
+          order {
+            privateMetadata { key value }
+            shippingPrice { gross { amount currency } }
+            shippingTaxRate
+          }
+        }
+      }
+    }
+"""
+
+
+def test_fulfillment_approved_exposes_xero_fields(fulfillment, webhook_app):
+    # given
+    order = fulfillment.order
+    order.shipping_price_gross_amount = Decimal("60.00")
+    order.currency = "GBP"
+    order.store_value_in_private_metadata({"xeroDepositPrepaymentId": "prepay-123"})
+    order.save(
+        update_fields=[
+            "shipping_price_gross_amount",
+            "currency",
+            "private_metadata",
+        ]
+    )
+    fulfillment.deposit_allocated_amount = Decimal("25.00")
+    fulfillment.store_value_in_private_metadata(
+        {"xeroProformaPrepaymentId": "proforma-456"}
+    )
+    fulfillment.save(update_fields=["deposit_allocated_amount", "private_metadata"])
+
+    request = initialize_request(app=webhook_app)
+
+    # when
+    payload = generate_payload_promise_from_subscription(
+        event_type=WebhookEventAsyncType.FULFILLMENT_APPROVED,
+        subscribable_object={"fulfillment": fulfillment, "notify_customer": True},
+        subscription_query=FULFILLMENT_APPROVED_XERO_FIELDS_QUERY,
+        request=request,
+    ).get()
+
+    # then
+    assert "errors" not in payload
+    assert payload["fulfillment"] is not None
+    assert payload["order"] is not None
+
+    f = payload["fulfillment"]
+    assert f["depositAllocatedAmount"]["amount"] == 25.0
+    assert f["depositAllocatedAmount"]["currency"] == "GBP"
+    assert any(m["key"] == "xeroProformaPrepaymentId" for m in f["privateMetadata"])
+
+    o = payload["order"]
+    assert o["shippingPrice"]["gross"]["amount"] == 60.0
+    assert o["shippingPrice"]["gross"]["currency"] == "GBP"
+    assert o["shippingTaxRate"] is not None
+    assert any(m["key"] == "xeroDepositPrepaymentId" for m in o["privateMetadata"])

@@ -96,6 +96,13 @@ def parse_price(val, field_name: str) -> tuple[Decimal | None, list[str]]:
     return dec, errs
 
 
+def parse_required_price(val, field_name: str) -> tuple[Decimal | None, list[str]]:
+    dec, errs = parse_price(val, field_name)
+    if dec is None and not errs:
+        errs = [f"{field_name}: required"]
+    return dec, errs
+
+
 def parse_weight_kg(val) -> tuple[Decimal | None, list[str]]:
     dec, errs = parse_decimal(val, "weight_kg")
     if dec is not None:
@@ -187,7 +194,7 @@ def parse_row(
     category = collect(parse_category(raw.get("category"), valid_categories))
     sizes_and_qty = collect(parse_sizes(raw.get("sizes")))
     rrp = collect(parse_price(raw.get("rrp"), "rrp"))
-    sell_price = collect(parse_price(raw.get("sell_price"), "sell_price"))
+    sell_price = collect(parse_required_price(raw.get("sell_price"), "sell_price"))
     buy_price = collect(parse_price(raw.get("buy_price"), "buy_price"))
     weight_kg = collect(parse_weight_kg(raw.get("weight_kg")))
     image_url = collect(parse_image_url(raw.get("image_url")))
@@ -217,19 +224,26 @@ def parse_sheet(
     column_map: dict[int, str],
     default_currency: str,
     valid_categories: set[str] | None = None,
+    header_row: int = 0,
 ) -> list[ParsedRow]:
     """Parse a DataFrame into a list of ParsedRow.
 
     Uses to_dict('records') rather than iterrows() for performance.
     NaN values are normalised to None before parsing so individual parsers
     only need to handle None.
+
+    row_index is the 1-based Excel row number of the data row, so error
+    messages reference the row the user actually sees in their spreadsheet.
     """
     valid_cols = sorted(c for c in column_map if c < len(df.columns))
     sub = df.iloc[:, valid_cols].copy()
     sub.columns = pd.Index([column_map[c] for c in valid_cols])
     sub = sub.where(pd.notna(sub), other=None)
     rows = sub.to_dict("records")
+    # header_row is 0-based; data rows start one row below it.
+    # +2 converts to 1-based Excel row number (1 for header, +1 for data offset).
+    first_data_excel_row = header_row + 2
     return [
-        parse_row(idx, raw, default_currency, valid_categories)
+        parse_row(first_data_excel_row + idx, raw, default_currency, valid_categories)
         for idx, raw in enumerate(rows)
     ]

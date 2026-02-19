@@ -467,6 +467,8 @@ def order_confirmed(
     Trigger event, plugin hooks and optionally confirmation email.
     """
     events.order_confirmed_event(order=order, user=user, app=app)
+    if order.deposit_required:
+        call_event_including_protected_events(manager.xero_order_confirmed, order)
     call_order_event(
         manager,
         WebhookEventAsyncType.ORDER_CONFIRMED,
@@ -597,7 +599,7 @@ def order_refunded(
         webhook_events.append(WebhookEventAsyncType.ORDER_UPDATED)
 
     total_refunded = Decimal(0)
-    last_payment = payment if payment else order.get_last_payment()
+    last_payment = payment or order.get_last_payment()
     if last_payment and last_payment.charge_status in [
         ChargeStatus.PARTIALLY_REFUNDED,
         ChargeStatus.FULLY_REFUNDED,
@@ -1034,6 +1036,7 @@ def approve_fulfillment(
             notify_customer,
             manually_approved=True,
         )
+        call_event(manager.fulfillment_fulfilled, fulfillment)
 
     return fulfillment
 
@@ -1486,6 +1489,7 @@ def create_fulfillments(
         if unsaved_fulfillment_lines:
             FulfillmentLine.objects.bulk_create(unsaved_fulfillment_lines)
         order.refresh_from_db()
+
         if auto_approved:
             order_fulfilled(
                 fulfillments,
@@ -1499,7 +1503,17 @@ def create_fulfillments(
                 auto,
             )
         else:
+            from .proforma import (
+                calculate_deposit_allocation,
+                calculate_fulfillment_total,
+            )
+
             for fulfillment in fulfillments:
+                fulfillment_total = calculate_fulfillment_total(fulfillment)
+                deposit_credit = calculate_deposit_allocation(order, fulfillment_total)
+                fulfillment.deposit_allocated_amount = deposit_credit
+                fulfillment.save(update_fields=["deposit_allocated_amount"])
+                call_event(manager.xero_fulfillment_created, fulfillment)
                 auto_create_pick_for_fulfillment(fulfillment, user)
             order_awaits_fulfillment_approval(
                 fulfillments,
@@ -2345,7 +2359,12 @@ def assign_shipment_to_fulfillment(fulfillment, shipment, user=None, auto_approv
 
 
 def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
-    """Automatically approve fulfillment if pick is completed and shipment exists.
+    """Automatically approve fulfillment if all conditions are met.
+
+    Checks 3 conditions before auto-approval:
+    1. Pick is completed (implies inventory is received)
+    2. Shipment exists
+    3. Cumulative payments cover all fulfillment totals up to and including this one
 
     Args:
         fulfillment: Fulfillment to check
@@ -2372,6 +2391,18 @@ def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
         return False
 
     if not fulfillment.shipment:
+        return False
+
+    from .proforma import calculate_fulfillment_total
+
+    order = fulfillment.order
+    prior_total = sum(
+        calculate_fulfillment_total(f)
+        for f in order.fulfillments.exclude(pk=fulfillment.pk)
+        if f.status != FulfillmentStatus.CANCELED
+    )
+    current_total = calculate_fulfillment_total(fulfillment)
+    if order.total_deposit_paid < prior_total + current_total:
         return False
 
     from ..plugins.manager import get_plugins_manager

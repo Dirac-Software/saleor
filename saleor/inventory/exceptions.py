@@ -59,22 +59,23 @@ class AdjustmentAlreadyProcessed(Exception):
         )
 
 
-class AdjustmentAffectsConfirmedOrders(Exception):
-    """Raised when a negative adjustment in stock would affect confirmed orders.
+class AdjustmentRequiresManualResolution(Exception):
+    """Base class for adjustments that cannot be auto-processed.
 
-    These require complex resolution (refund/substitution workflow).
+    Subclasses indicate the specific reason. Catch this base class when you
+    want to handle all "needs manual resolution" cases uniformly.
     """
 
     def __init__(self, adjustment: "PurchaseOrderItemAdjustment", order_numbers: list):
         self.adjustment = adjustment
         self.order_numbers = order_numbers
         super().__init__(
-            f"Cannot process adjustment {adjustment.id}: affects orders with state > UNCONFIRMED"
-            f"{order_numbers}. Resolution required."
+            f"Cannot process adjustment {adjustment.id}: manual resolution required "
+            f"for orders {order_numbers}."
         )
 
 
-class AdjustmentAffectsFulfilledOrders(Exception):
+class AdjustmentAffectsFulfilledOrders(AdjustmentRequiresManualResolution):
     """Raised when a negative adjustment would affect UNFULFILLED orders.
 
     UNFULFILLED orders are locked and cannot be edited via standard mutations.
@@ -84,14 +85,15 @@ class AdjustmentAffectsFulfilledOrders(Exception):
     def __init__(self, adjustment: "PurchaseOrderItemAdjustment", order_numbers: list):
         self.adjustment = adjustment
         self.order_numbers = order_numbers
-        super().__init__(
+        Exception.__init__(
+            self,
             f"Cannot process adjustment {adjustment.id}: affects UNFULFILLED orders "
             f"{order_numbers}. UNFULFILLED orders cannot be automatically modified. "
-            f"Manual resolution required."
+            f"Manual resolution required.",
         )
 
 
-class AdjustmentAffectsPaidOrders(Exception):
+class AdjustmentAffectsPaidOrders(AdjustmentRequiresManualResolution):
     """Raised when a negative adjustment would affect fully paid orders.
 
     Paid orders require refund workflow before stock can be reduced.
@@ -100,9 +102,10 @@ class AdjustmentAffectsPaidOrders(Exception):
     def __init__(self, adjustment: "PurchaseOrderItemAdjustment", order_numbers: list):
         self.adjustment = adjustment
         self.order_numbers = order_numbers
-        super().__init__(
+        Exception.__init__(
+            self,
             f"Cannot process adjustment {adjustment.id}: affects fully paid orders "
-            f"{order_numbers}. Refund workflow required."
+            f"{order_numbers}. Refund workflow required.",
         )
 
 

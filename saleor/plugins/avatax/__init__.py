@@ -431,7 +431,7 @@ def get_order_lines_data(
 
         append_shipping_to_data(
             data=data,
-            shipping_price_amount=shipping_price if shipping_price else None,
+            shipping_price_amount=shipping_price or None,
             shipping_tax_code=config.shipping_tax_code,
             prices_entered_with_tax=prices_entered_with_tax,
             discounted=shipping_discounted,

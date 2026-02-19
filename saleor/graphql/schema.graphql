@@ -1063,6 +1063,26 @@ type Query {
     last: Int
   ): FulfillmentCountableConnection @doc(category: "Orders")
 
+  """
+  List available Xero bank accounts for creating deposit prepayments.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  availableXeroBankAccounts(
+    """ID of the order (used to resolve the Xero tenant via its channel)."""
+    orderId: ID!
+  ): AvailableXeroBankAccounts @doc(category: "Orders")
+
+  """
+  List available Xero payments for an order's customer (last 5).
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  availableXeroPayments(
+    """ID of the order to fetch payments for."""
+    orderId: ID!
+  ): AvailableXeroPayments @doc(category: "Orders")
+
   """Look up a navigation menu by ID or name."""
   menu(
     """Slug of a channel for which the data should be returned."""
@@ -1146,6 +1166,12 @@ type Query {
     """
     last: Int
   ): MenuItemCountableConnection @doc(category: "Menu")
+
+  """Look up an Invoice by Xero invoice ID."""
+  invoiceByXeroId(
+    """Xero invoice ID to look up."""
+    xeroInvoiceId: String!
+  ): Invoice @doc(category: "Orders")
 
   """
   Look up a purchase order by ID.
@@ -2181,10 +2207,12 @@ enum WebhookEventTypeEnum @doc(category: "Webhooks") {
 
   """A fulfillment is approved."""
   FULFILLMENT_APPROVED
+  FULFILLMENT_FULFILLED
 
   """A fulfillment metadata is updated."""
   FULFILLMENT_METADATA_UPDATED
   FULFILLMENT_TRACKING_NUMBER_UPDATED
+  FULFILLMENT_PROFORMA_INVOICE_GENERATED
 
   """A draft order is created."""
   DRAFT_ORDER_CREATED
@@ -2504,6 +2532,11 @@ enum WebhookEventTypeEnum @doc(category: "Webhooks") {
   PAYMENT_GATEWAY_INITIALIZE_TOKENIZATION_SESSION
   PAYMENT_METHOD_INITIALIZE_TOKENIZATION_SESSION
   PAYMENT_METHOD_PROCESS_TOKENIZATION_SESSION
+  XERO_LIST_PAYMENTS
+  XERO_LIST_BANK_ACCOUNTS
+  XERO_ORDER_CONFIRMED
+  XERO_FULFILLMENT_CREATED
+  XERO_CHECK_PREPAYMENT_STATUS
 }
 
 """Synchronous webhook event."""
@@ -2569,6 +2602,11 @@ enum WebhookEventTypeSyncEnum @doc(category: "Webhooks") {
   PAYMENT_GATEWAY_INITIALIZE_TOKENIZATION_SESSION
   PAYMENT_METHOD_INITIALIZE_TOKENIZATION_SESSION
   PAYMENT_METHOD_PROCESS_TOKENIZATION_SESSION
+  XERO_LIST_PAYMENTS
+  XERO_LIST_BANK_ACCOUNTS
+  XERO_ORDER_CONFIRMED
+  XERO_FULFILLMENT_CREATED
+  XERO_CHECK_PREPAYMENT_STATUS
 }
 
 """Asynchronous webhook event."""
@@ -2758,10 +2796,12 @@ enum WebhookEventTypeAsyncEnum @doc(category: "Webhooks") {
 
   """A fulfillment is approved."""
   FULFILLMENT_APPROVED
+  FULFILLMENT_FULFILLED
 
   """A fulfillment metadata is updated."""
   FULFILLMENT_METADATA_UPDATED
   FULFILLMENT_TRACKING_NUMBER_UPDATED
+  FULFILLMENT_PROFORMA_INVOICE_GENERATED
 
   """A draft order is created."""
   DRAFT_ORDER_CREATED
@@ -3591,8 +3631,10 @@ enum WebhookSampleEventTypeEnum @doc(category: "Webhooks") {
   FULFILLMENT_CREATED
   FULFILLMENT_CANCELED
   FULFILLMENT_APPROVED
+  FULFILLMENT_FULFILLED
   FULFILLMENT_METADATA_UPDATED
   FULFILLMENT_TRACKING_NUMBER_UPDATED
+  FULFILLMENT_PROFORMA_INVOICE_GENERATED
   DRAFT_ORDER_CREATED
   DRAFT_ORDER_UPDATED
   DRAFT_ORDER_DELETED
@@ -4128,6 +4170,7 @@ type ShippingMethodType implements Node & ObjectWithMetadata @doc(category: "Shi
 enum ShippingMethodTypeEnum @doc(category: "Shipping") {
   PRICE
   WEIGHT
+  MANUAL
 }
 
 """Represents shipping method translations."""
@@ -10220,6 +10263,11 @@ type Shop implements ObjectWithMetadata {
   fulfillmentAllowUnpaid: Boolean!
 
   """
+  Product attribute slug used as the product code in invoice webhooks. Defaults to 'product-code'.
+  """
+  invoiceProductCodeAttribute: String!
+
+  """
   This field is used as a default value for `ProductVariant.trackInventory`.
   """
   trackInventoryByDefault: Boolean
@@ -10631,6 +10679,9 @@ type User implements Node & ObjectWithMetadata @doc(category: "Users") {
 
   """External ID of this user."""
   externalReference: String
+
+  """Xero contact ID for this user."""
+  xeroContactId: String
 
   """The date when the user last time log in to the system."""
   lastLogin: DateTime
@@ -11454,6 +11505,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """List of order lines."""
   lines: [OrderLine!]!
 
+  """Order lines that have stock available to fulfill."""
+  fulfillableLines: [OrderLine!]!
+
   """
   List of actions that can be performed in the current state of an order.
   """
@@ -11496,6 +11550,35 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """The charge status of the order."""
   chargeStatus: OrderChargeStatusEnum!
+
+  """Whether a deposit is required before fulfillment."""
+  depositRequired: Boolean!
+
+  """Percentage of total required as deposit."""
+  depositPercentage: Decimal
+
+  """Deprecated: Use payments with gateway='xero' instead."""
+  depositPaymentId: String @deprecated(reason: "Use payments field filtered by gateway='xero'.")
+
+  """Deprecated: Use totalDepositPaid instead."""
+  depositAmount: Money @deprecated(reason: "Use totalDepositPaid field to get total from Xero deposit payments.")
+
+  """Total amount captured from all active Xero payments."""
+  totalDepositPaid: Decimal!
+
+  """
+  Whether the deposit threshold has been met (totalDepositPaid >= depositPercentage * total).
+  """
+  depositThresholdMet: Boolean!
+
+  """Date and time when deposit threshold was met."""
+  depositPaidAt: DateTime
+
+  """Xero prepayment UUID for the deposit on this order."""
+  xeroDepositPrepaymentId: String
+
+  """Xero bank account code used for deposit prepayments on this order."""
+  xeroBankAccountCode: String
 
   """Returns True if order has to be exempt from taxes."""
   taxExemption: Boolean!
@@ -11792,6 +11875,32 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
   Indicates if all required inventory from purchase orders has been received in the warehouse. True when all allocations have matching allocation sources, meaning the purchased goods have physically arrived.
   """
   hasInventoryReceived: Boolean!
+
+  """Proforma invoice associated with this fulfillment."""
+  proformaInvoice: Invoice
+
+  """Indicates if order deposits have been allocated to this fulfillment."""
+  depositAllocated: Boolean!
+
+  """Amount of deposit credit allocated to this fulfillment."""
+  depositAllocatedAmount: Money
+
+  """Xero Quote UUID for the proforma quote linked to this fulfillment."""
+  xeroQuoteId: String
+
+  """Xero Quote number (e.g. Q-1234)."""
+  xeroQuoteNumber: String
+
+  """Xero prepayment UUID for the proforma payment on this fulfillment."""
+  xeroProformaPrepaymentId: String
+
+  """URL to the quote PDF hosted by the Xero integration app."""
+  quotePdfUrl: String
+
+  """
+  Indicates if this fulfillment can automatically transition to FULFILLED status.
+  """
+  canTransitionToFulfilled: Boolean!
 }
 
 enum FulfillmentStatus @doc(category: "Orders") {
@@ -11871,6 +11980,19 @@ type OrderLine implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """Number of variant items fulfilled."""
   quantityFulfilled: Int!
+
+  """Quantity of received stock available for this order line."""
+  warehouseStock: Int!
+
+  """
+  Maximum quantity that can be fulfilled now (min of ordered vs available minus already fulfilled).
+  """
+  canFulfillQuantity: Int!
+
+  """
+  Whether this line can be fulfilled now (has stock and deposit requirements met).
+  """
+  isReadyToFulfill: Boolean!
 
   """Rate of tax applied on product variant."""
   taxRate: Float!
@@ -12235,6 +12357,15 @@ type Invoice implements ObjectWithMetadata & Job & Node @doc(category: "Orders")
 
   """Order related to the invoice."""
   order: Order
+
+  """Xero invoice ID."""
+  xeroInvoiceId: String
+
+  """Invoice type."""
+  type: InvoiceType
+
+  """Fulfillment related to the invoice."""
+  fulfillment: Fulfillment
 }
 
 interface Job {
@@ -12256,6 +12387,11 @@ enum JobStatusEnum {
   SUCCESS
   FAILED
   DELETED
+}
+
+enum InvoiceType @doc(category: "Orders") {
+  FINAL
+  PROFORMA
 }
 
 enum IncoTermEnum @doc(category: "Shipping") {
@@ -13533,6 +13669,9 @@ type PriceList implements Node {
   """When processing last failed."""
   processingFailedAt: DateTime
 
+  """Whether an async task is currently running for this price list."""
+  isProcessing: Boolean!
+
   """The warehouse this price list belongs to."""
   warehouse: Warehouse!
 
@@ -14050,6 +14189,7 @@ input OrderFilterInput @doc(category: "Orders") {
   customer: String
   created: DateRangeInput
   search: String
+  depositRequired: Boolean
   metadata: [MetadataFilter!]
   channels: [ID!]
   authorizeStatus: [OrderAuthorizeStatusEnum!]
@@ -14257,6 +14397,9 @@ input FulfillmentFilterInput @doc(category: "Orders") {
 
   """Filter by fulfillment warehouse."""
   warehouse: FulfillmentWarehouseFilterInput
+
+  """Filter by whether deposit has been allocated."""
+  depositAllocated: Boolean
 }
 
 """Filter by fulfillment status."""
@@ -14496,6 +14639,51 @@ input FulfillmentQueryFilterInput @doc(category: "Orders") {
   status: [FulfillmentStatus!]
   warehouse: [ID!]
   metadata: [MetadataFilter!]
+  depositAllocated: Boolean
+}
+
+"""Available Xero bank accounts for creating prepayments."""
+type AvailableXeroBankAccounts {
+  """List of available Xero bank accounts."""
+  bankAccounts: [XeroBankAccountSummary!]
+
+  """Errors encountered while fetching bank accounts."""
+  errors: [OrderError!]
+}
+
+"""A Xero bank account."""
+type XeroBankAccountSummary {
+  """Xero bank account code."""
+  code: String!
+
+  """Xero bank account name."""
+  name: String!
+}
+
+"""Available Xero payments for an order's customer."""
+type AvailableXeroPayments {
+  """List of available Xero payments for this order's customer."""
+  payments: [XeroPaymentSummary!]
+
+  """Errors encountered while fetching payments."""
+  errors: [OrderError!]
+}
+
+type XeroPaymentSummary {
+  """Xero payment ID (PaymentID)."""
+  paymentId: String!
+
+  """Payment amount."""
+  amount: Decimal!
+
+  """Payment date from Xero."""
+  date: String!
+
+  """Associated invoice number."""
+  invoiceNumber: String
+
+  """Payment status in Xero."""
+  status: String!
 }
 
 type MenuCountableConnection @doc(category: "Menu") {
@@ -18302,6 +18490,25 @@ type Mutation {
   ): OrderRefund @doc(category: "Orders")
 
   """
+  Set whether an order requires a deposit before fulfillment. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderSetDepositRequired(
+    """ID of the order."""
+    id: ID!
+
+    """Percentage of total required as deposit (0-100)."""
+    percentage: Decimal
+
+    """Whether deposit is required."""
+    required: Boolean!
+
+    """Xero bank account code to use for deposit prepayments."""
+    xeroBankAccountCode: String
+  ): OrderSetDepositRequired @doc(category: "Orders")
+
+  """
   Updates an order. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -18702,6 +18909,22 @@ type Mutation {
     """ID of an invoice to be sent."""
     id: ID!
   ): InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [INVOICE_SENT, NOTIFY_USER], syncEvents: [])
+
+  """
+  Create an Invoice record linking a Xero final invoice to a fulfillment. Called by external integration after creating invoice in Xero. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  invoiceCreateFinal(
+    """ID of the fulfillment."""
+    fulfillmentId: ID!
+
+    """Invoice number from Xero."""
+    invoiceNumber: String
+
+    """Xero invoice ID to link."""
+    xeroInvoiceId: String!
+  ): InvoiceCreateFinal @doc(category: "Orders")
 
   """
   Creates a new purchase order from a supplier. 
@@ -21898,6 +22121,11 @@ input ShopSettingsInput {
 
   """Enable ability to approve fulfillments which are unpaid."""
   fulfillmentAllowUnpaid: Boolean
+
+  """
+  Product attribute slug used as the product code in invoice webhooks. Defaults to 'product-code'.
+  """
+  invoiceProductCodeAttribute: String
 
   """Default number of max downloads per digital content URL."""
   defaultDigitalMaxDownloads: Int
@@ -27119,6 +27347,18 @@ type OrderRefund @doc(category: "Orders") {
 }
 
 """
+Set whether an order requires a deposit before fulfillment. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderSetDepositRequired @doc(category: "Orders") {
+  """Order with updated deposit settings."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
 Updates an order. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
@@ -28137,6 +28377,18 @@ type InvoiceSendNotification @doc(category: "Orders") @webhookEventsInfo(asyncEv
   invoiceErrors: [InvoiceError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [InvoiceError!]!
   invoice: Invoice
+}
+
+"""
+Create an Invoice record linking a Xero final invoice to a fulfillment. Called by external integration after creating invoice in Xero. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type InvoiceCreateFinal @doc(category: "Orders") {
+  """Created invoice record."""
+  invoice: Invoice
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
 }
 
 """
@@ -32560,6 +32812,9 @@ input UserCreateInput @doc(category: "Users") {
   """User account is confirmed."""
   isConfirmed: Boolean @deprecated(reason: "The user will be always set as unconfirmed. The confirmation will take place when the user sets the password.")
 
+  """Xero contact ID for this customer."""
+  xeroContactId: String
+
   """
   URL of a view where users should be redirected to set the password. URL in RFC 1808 format.
   """
@@ -32630,6 +32885,9 @@ input CustomerInput @doc(category: "Users") {
 
   """User account is confirmed."""
   isConfirmed: Boolean
+
+  """Xero contact ID for this customer."""
+  xeroContactId: String
 }
 
 """
@@ -35325,6 +35583,27 @@ type FulfillmentApproved implements Event @doc(category: "Orders") {
   notifyCustomer: Boolean!
 }
 
+"""Event sent when a fulfillment is marked as fulfilled."""
+type FulfillmentFulfilled implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+
+  """The fulfillment the event relates to."""
+  fulfillment: Fulfillment
+
+  """The order the fulfillment belongs to."""
+  order: Order
+}
+
 """Event sent when fulfillment metadata is updated."""
 type FulfillmentMetadataUpdated implements Event @doc(category: "Orders") {
   """Time of the event."""
@@ -35344,6 +35623,152 @@ type FulfillmentMetadataUpdated implements Event @doc(category: "Orders") {
 
   """The order the fulfillment belongs to."""
   order: Order
+}
+
+"""Event sent when proforma invoice is generated for a fulfillment."""
+type FulfillmentProformaInvoiceGenerated implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+
+  """The fulfillment the event relates to."""
+  fulfillment: Fulfillment
+
+  """The order the fulfillment belongs to."""
+  order: Order
+
+  """The proforma invoice that was generated."""
+  invoice: Invoice
+
+  """Calculated amounts for the proforma invoice."""
+  calculatedAmounts: ProformaCalculatedAmounts!
+}
+
+type ProformaCalculatedAmounts {
+  """Sum of line totals for this fulfillment."""
+  fulfillmentTotal: Money!
+
+  """Deposit already paid that applies to this fulfillment."""
+  depositCredit: Money!
+
+  """fulfillmentTotal minus depositCredit."""
+  proformaAmount: Money!
+
+  """Shipping cost for this fulfillment."""
+  shippingCost: Money!
+
+  """VAT rate as decimal string e.g. "0.20"."""
+  shippingVatRate: String!
+}
+
+"""
+Sync event sent when an order is confirmed. Dirac should return the Xero deposit prepayment ID.
+"""
+type XeroOrderConfirmed implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+
+  """The order the event relates to."""
+  order: Order
+
+  """Calculated deposit amount for this order."""
+  calculatedAmounts: XeroOrderConfirmedCalculatedAmounts!
+}
+
+type XeroOrderConfirmedCalculatedAmounts {
+  """Deposit amount due for this order."""
+  depositAmount: Money!
+}
+
+"""
+Sync event sent when a fulfillment is created. Dirac should return the Xero quote and proforma prepayment IDs.
+"""
+type XeroFulfillmentCreated implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+
+  """The fulfillment the event relates to."""
+  fulfillment: Fulfillment
+
+  """The order the fulfillment belongs to."""
+  order: Order
+
+  """Calculated amounts for the proforma invoice."""
+  calculatedAmounts: XeroFulfillmentCreatedCalculatedAmounts!
+}
+
+type XeroFulfillmentCreatedCalculatedAmounts {
+  """Fulfillment total minus deposit credit."""
+  proformaAmount: Money!
+
+  """Shipping cost for this order."""
+  shippingCost: Money!
+
+  """VAT rate as decimal string e.g. "0.20"."""
+  shippingVatRate: String!
+
+  """Per-line stored amounts, safe to read in sync webhook context."""
+  lines: [XeroFulfillmentLineAmounts!]!
+}
+
+type XeroFulfillmentLineAmounts {
+  """ID of the order line."""
+  orderLineId: String!
+
+  """Quantity fulfilled."""
+  quantity: Int!
+  productName: String!
+  variantName: String!
+  productSku: String
+  taxRate: Float!
+  unitPriceGross: Money!
+  unitPriceNet: Money!
+  totalPriceGross: Money!
+  totalPriceNet: Money!
+}
+
+"""Sync event to check whether a Xero prepayment has been paid."""
+type XeroCheckPrepaymentStatus implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+
+  """The Xero prepayment ID to check."""
+  prepaymentId: String!
 }
 
 """Event sent when new customer user is created."""
@@ -36828,6 +37253,40 @@ type PaymentMethodProcessTokenizationSession implements Event @doc(category: "Pa
   The ID returned by app from `PAYMENT_METHOD_INITIALIZE_TOKENIZATION_SESSION` webhook.
   """
   id: String!
+}
+
+"""List Xero payments for a customer."""
+type XeroListPayments implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+  contactId: String
+  email: String
+  domain: String
+}
+
+"""List available Xero bank accounts for a domain."""
+type XeroListBankAccounts implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+  domain: String!
 }
 
 """

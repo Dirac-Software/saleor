@@ -102,8 +102,13 @@ def validate_shipping_method(
         )
         return
 
+    from ...shipping import ShippingMethodType
+
+    is_manual_type = order.shipping_method.type == ShippingMethodType.MANUAL
+
     if (
-        order.shipping_address
+        not is_manual_type
+        and order.shipping_address
         and order.shipping_address.country.code
         not in order.shipping_method.shipping_zone.countries
     ):
@@ -111,7 +116,9 @@ def validate_shipping_method(
             "Shipping method is not valid for chosen shipping address",
             code=OrderErrorCode.SHIPPING_METHOD_NOT_APPLICABLE.value,
         )
-    elif not order.shipping_method.shipping_zone.channels.filter(id=order.channel_id):
+    elif not is_manual_type and not order.shipping_method.shipping_zone.channels.filter(
+        id=order.channel_id
+    ):
         error = ValidationError(
             "Shipping method not available in given channel.",
             code=OrderErrorCode.SHIPPING_METHOD_NOT_APPLICABLE.value,
@@ -125,7 +132,7 @@ def validate_shipping_method(
                 "Shipping method not available in given channel.",
                 code=OrderErrorCode.SHIPPING_METHOD_NOT_APPLICABLE.value,
             )
-        else:
+        elif not is_manual_type:
             error = get_shipping_method_availability_error(
                 order,
                 convert_to_shipping_method_data(order.shipping_method, listing),
@@ -133,6 +140,8 @@ def validate_shipping_method(
                 database_connection_name=database_connection_name,
                 allow_sync_webhooks=allow_sync_webhooks,
             )
+        else:
+            error = None
 
     if error:
         errors["shipping"].append(error)

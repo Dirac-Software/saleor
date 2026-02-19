@@ -6,6 +6,7 @@ CUSTOMER_UPDATE_FIELDS = {
     "note",
     "external_reference",
     "is_confirmed",
+    "xero_contact_id",
     "metadata",
     "private_metadata",
 }

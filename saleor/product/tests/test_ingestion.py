@@ -1,5 +1,7 @@
 """Tests for product ingestion utilities."""
 
+from unittest.mock import Mock
+
 import pytest
 
 from saleor.attribute import AttributeInputType, AttributeType
@@ -9,19 +11,18 @@ from saleor.attribute.models.product_variant import (
     AssignedVariantAttributeValue,
     AttributeVariant,
 )
+from saleor.core.http_client import HTTPClient
 from saleor.product.ingestion import (
     IngestConfig,
     MissingDatabaseSetup,
-    OwnedWarehouseIngestionError,
     SizeQtyUnparseable,
     SpreadsheetColumnMapping,
+    create_product_media,
     get_products_by_code_and_brand,
     get_size_to_variant_map,
     parse_sizes_and_qty,
-    validate_warehouse_for_ingestion,
 )
-from saleor.product.models import Product, ProductType, ProductVariant
-from saleor.warehouse.models import Warehouse
+from saleor.product.models import Product, ProductMedia, ProductType, ProductVariant
 
 
 def test_parse_sizes_and_qty_with_bracket_notation():
@@ -344,325 +345,153 @@ def product_with_variants(simple_product):
     return product
 
 
-@pytest.fixture
-def non_owned_warehouse(db):
-    """Create a non-owned warehouse for testing."""
-    from saleor.account.models import Address
+def test_create_product_media_success(simple_product, mocker):
+    """Test successful product media creation from URL."""
+    image_url = "https://example.com/image.jpg"
+    fake_image_data = b"fake-image-data"
 
-    address = Address.objects.create(
-        street_address_1="123 Test St",
-        city="Test City",
-        country="AE",
-    )
-    warehouse = Warehouse.objects.create(
-        name="Non-Owned Warehouse",
-        slug="non-owned-warehouse",
-        address=address,
-        is_owned=False,
-    )
-    return warehouse
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
 
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
 
-@pytest.fixture
-def owned_warehouse(db):
-    """Create an owned warehouse for testing."""
-    from saleor.account.models import Address
+    media = create_product_media(simple_product, image_url)
 
-    address = Address.objects.create(
-        street_address_1="456 Test St",
-        city="Test City",
-        country="AE",
-    )
-    warehouse = Warehouse.objects.create(
-        name="Owned Warehouse",
-        slug="owned-warehouse",
-        address=address,
-        is_owned=True,
-    )
-    return warehouse
+    assert media is not None
+    assert media.product == simple_product
+    assert media.alt == simple_product.name
+    assert media.image.name.endswith(".jpg")
 
 
-def test_validate_warehouse_for_ingestion_non_owned(non_owned_warehouse):
-    """Test that validation passes for non-owned warehouses."""
-    validate_warehouse_for_ingestion(non_owned_warehouse)
+def test_create_product_media_with_query_params(simple_product, mocker):
+    """Test media creation with URL containing query parameters."""
+    image_url = "https://example.com/image.jpg?w=800&h=600&fit=crop"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.image.name.endswith(".jpg")
+    assert "?" not in media.image.name
+    assert "w=" not in media.image.name
 
 
-def test_validate_warehouse_for_ingestion_owned(owned_warehouse):
-    """Test that validation fails for owned warehouses."""
-    with pytest.raises(
-        OwnedWarehouseIngestionError,
-        match="Cannot ingest products to owned warehouse",
-    ):
-        validate_warehouse_for_ingestion(owned_warehouse)
+def test_create_product_media_very_long_url(simple_product, mocker):
+    """Test media creation with extremely long URL does not create long filename."""
+    base_url = "https://example.com/very/long/path"
+    long_path = "/".join(["segment"] * 50)
+    image_url = f"{base_url}/{long_path}/image.jpg?param1=value1&param2=value2"
+    fake_image_data = b"fake-image-data"
+
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    filename = media.image.name.split("/")[-1]
+    assert len(filename) < 100
+    assert filename.endswith(".jpg")
 
 
-def test_ingest_products_with_image_creates_product_media(
-    db, non_owned_warehouse, channel_USD
-):
-    """E2E test: ingesting products with image URLs creates ProductMedia.
+def test_create_product_media_http_error(simple_product, mocker):
+    """Test media creation handles HTTP errors gracefully."""
+    image_url = "https://example.com/nonexistent.jpg"
 
-    This test catches the bug where ContentFile was created without a name,
-    causing 'File for image must have the name attribute' error and poisoning
-    the transaction.
-    """
-    import tempfile
-    from unittest.mock import Mock, patch
+    mock_response = Mock()
+    mock_response.raise_for_status.side_effect = Exception("404 Not Found")
 
-    import pandas as pd
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
 
-    from saleor.attribute import AttributeInputType, AttributeType
-    from saleor.product.ingestion import (
-        IngestConfig,
-        SpreadsheetColumnMapping,
-        ingest_products_from_excel,
-    )
-    from saleor.product.models import Category, Product, ProductMedia, ProductType
+    media = create_product_media(simple_product, image_url)
 
-    # Set up required database objects
-    product_type = ProductType.objects.create(
-        name="Shoes",
-        slug="shoes",
-        has_variants=True,
-    )
+    assert media is None
+    assert ProductMedia.objects.filter(product=simple_product).count() == 0
 
-    Category.objects.create(
-        name="Shoes",
-        slug="shoes",
+
+def test_create_product_media_network_error(simple_product, mocker):
+    """Test media creation handles network errors gracefully."""
+    image_url = "https://example.com/image.jpg"
+
+    mocker.patch.object(
+        type(HTTPClient), "send_request", side_effect=Exception("Network timeout")
     )
 
-    # Create required attributes
-    product_code_attr = Attribute.objects.create(
-        slug="product-code",
-        name="Product Code",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    brand_attr = Attribute.objects.create(
-        slug="brand",
-        name="Brand",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    rrp_attr = Attribute.objects.create(
-        slug="rrp",
-        name="RRP",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    moq_attr = Attribute.objects.create(
-        slug="minimum-order-quantity",
-        name="Minimum Order Quantity",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    size_attr = Attribute.objects.create(
-        slug="size",
-        name="Size",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.DROPDOWN,
-    )
+    media = create_product_media(simple_product, image_url)
 
-    # Assign attributes to product type
-    product_type.product_attributes.add(
-        product_code_attr, brand_attr, rrp_attr, moq_attr
-    )
-    product_type.variant_attributes.add(size_attr)
+    assert media is None
+    assert ProductMedia.objects.filter(product=simple_product).count() == 0
 
-    # Create Excel with product that has image URL
-    excel_data = {
-        "Code": ["TEST-001"],
-        "Brand": ["Nike"],
-        "Description": ["Test Running Shoe"],
-        "Category": ["Shoes"],
-        "Sizes": ["8[5], 9[3]"],
-        "RRP": ["£100.00"],
-        "Price": ["£75.00"],
-        "Weight": ["0.5"],
-        "Image": ["https://example.com/shoe.jpg"],
-    }
-    df = pd.DataFrame(excel_data)
 
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False, mode="wb") as f:
-        df.to_excel(f.name, index=False)
-        excel_path = f.name
+def test_create_product_media_no_extension(simple_product, mocker):
+    """Test media creation falls back to jpg when URL has no extension."""
+    image_url = "https://example.com/image"
+    fake_image_data = b"fake-image-data"
 
-    # Mock HTTP requests for both image download and exchange rates
-    def mock_http_request(method, url, **kwargs):
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
+
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.image.name.endswith(".jpg")
+
+
+def test_create_product_media_different_extensions(simple_product, mocker):
+    """Test media creation preserves different image extensions."""
+    extensions = ["jpg", "jpeg", "png", "gif", "webp"]
+
+    for ext in extensions:
+        image_url = f"https://example.com/image.{ext}"
+        fake_image_data = b"fake-image-data"
+
         mock_response = Mock()
+        mock_response.content = fake_image_data
         mock_response.raise_for_status = Mock()
 
-        if "frankfurter" in url:
-            # Mock exchange rate API response
-            mock_response.json.return_value = {
-                "base": "EUR",
-                "rates": {"GBP": 0.86, "USD": 1.0},
-            }
-        else:
-            # Mock image download response
-            mock_response.content = b"fake_image_data_pretending_to_be_jpeg"
-
-        return mock_response
-
-    try:
-        with patch("saleor.core.http_client.HTTPClient") as mock_http_client:
-            mock_http_client.send_request.side_effect = mock_http_request
-
-            config = IngestConfig(
-                warehouse_name=non_owned_warehouse.name,
-                warehouse_address=non_owned_warehouse.address.street_address_1,
-                warehouse_country=str(non_owned_warehouse.address.country),
-                column_mapping=SpreadsheetColumnMapping(),
-                minimum_order_quantity=1,
-                confirm_price_interpretation=True,
-            )
-
-            result = ingest_products_from_excel(config, excel_path)
-
-        # Verify product was created
-        assert result.total_products_processed == 1
-        assert result.total_variants_created == 2
-        assert len(result.created_products) == 1
-
-        # Verify product exists
-        product = Product.objects.get(name="Test Running Shoe")
-        assert product is not None
-
-        # Verify ProductMedia was created (this would have failed with the bug)
-        assert ProductMedia.objects.filter(product=product).exists()
-        media = ProductMedia.objects.get(product=product)
-        assert media.alt == "Test Running Shoe"
-
-        # Verify the transaction completed successfully (not poisoned)
-        assert product.variants.count() == 2
-
-    finally:
-        # Cleanup temp file
-        import os
-
-        if os.path.exists(excel_path):
-            os.unlink(excel_path)
-
-
-def test_ingest_products_without_image_creates_product(
-    db, non_owned_warehouse, channel_USD
-):
-    """E2E test: ingesting products without image URLs works fine.
-
-    This test verifies that products without images are created successfully.
-    """
-    import tempfile
-
-    import pandas as pd
-
-    from saleor.attribute import AttributeInputType, AttributeType
-    from saleor.product.ingestion import (
-        IngestConfig,
-        SpreadsheetColumnMapping,
-        ingest_products_from_excel,
-    )
-    from saleor.product.models import Category, Product, ProductMedia, ProductType
-
-    # Set up required database objects
-    product_type = ProductType.objects.create(
-        name="Clothing",
-        slug="clothing",
-        has_variants=True,
-    )
-
-    Category.objects.create(
-        name="Clothing",
-        slug="clothing",
-    )
-
-    # Create required attributes
-    product_code_attr = Attribute.objects.create(
-        slug="product-code",
-        name="Product Code",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    brand_attr = Attribute.objects.create(
-        slug="brand",
-        name="Brand",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    rrp_attr = Attribute.objects.create(
-        slug="rrp",
-        name="RRP",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    moq_attr = Attribute.objects.create(
-        slug="minimum-order-quantity",
-        name="Minimum Order Quantity",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.PLAIN_TEXT,
-    )
-    size_attr = Attribute.objects.create(
-        slug="size",
-        name="Size",
-        type=AttributeType.PRODUCT_TYPE,
-        input_type=AttributeInputType.DROPDOWN,
-    )
-
-    # Assign attributes to product type
-    product_type.product_attributes.add(
-        product_code_attr, brand_attr, rrp_attr, moq_attr
-    )
-    product_type.variant_attributes.add(size_attr)
-
-    # Create Excel with product WITHOUT image URL
-    excel_data = {
-        "Code": ["TEST-002"],
-        "Brand": ["Adidas"],
-        "Description": ["Test T-Shirt"],
-        "Category": ["Clothing"],
-        "Sizes": ["S[10], M[15], L[8]"],
-        "RRP": ["£30.00"],
-        "Price": ["£25.00"],
-        "Weight": ["0.2"],
-        "Image": [""],
-    }
-    df = pd.DataFrame(excel_data)
-
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False, mode="wb") as f:
-        df.to_excel(f.name, index=False)
-        excel_path = f.name
-
-    try:
-        config = IngestConfig(
-            warehouse_name=non_owned_warehouse.name,
-            warehouse_address=non_owned_warehouse.address.street_address_1,
-            warehouse_country=str(non_owned_warehouse.address.country),
-            column_mapping=SpreadsheetColumnMapping(),
-            minimum_order_quantity=1,
-            confirm_price_interpretation=True,
+        mocker.patch.object(
+            type(HTTPClient), "send_request", return_value=mock_response
         )
 
-        result = ingest_products_from_excel(config, excel_path)
+        media = create_product_media(simple_product, image_url)
 
-        # Verify product was created
-        assert result.total_products_processed == 1
-        assert result.total_variants_created == 3
-        assert len(result.created_products) == 1
+        assert media is not None
+        assert media.image.name.endswith(f".{ext}")
 
-        # Verify product exists
-        product = Product.objects.get(name="Test T-Shirt")
-        assert product is not None
+        ProductMedia.objects.filter(product=simple_product).delete()
 
-        # Verify NO ProductMedia was created (no image URL provided)
-        assert not ProductMedia.objects.filter(product=product).exists()
 
-        # Verify the transaction completed successfully
-        assert product.variants.count() == 3
+def test_create_product_media_storage_error(simple_product, mocker):
+    """Test media creation handles storage errors gracefully."""
+    image_url = "https://example.com/image.jpg"
+    fake_image_data = b"fake-image-data"
 
-    finally:
-        # Cleanup temp file
-        import os
+    mock_response = Mock()
+    mock_response.content = fake_image_data
+    mock_response.raise_for_status = Mock()
 
-        if os.path.exists(excel_path):
-            os.unlink(excel_path)
+    mocker.patch.object(type(HTTPClient), "send_request", return_value=mock_response)
+    mocker.patch(
+        "saleor.product.models.ProductMedia.objects.create",
+        side_effect=Exception("Storage backend error"),
+    )
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is None
 
 
 def test_parse_sizes_and_qty_hk_apparel_with_spaces():

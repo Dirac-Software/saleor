@@ -15,7 +15,6 @@ from .order_discount_add import order_discount_add
 from .order_fulfill import order_fulfill
 from .order_fulfill_add_tracking import order_add_tracking
 from .order_fulfillment_cancel import order_fulfillment_cancel
-from .order_invoice_create import order_invoice_create
 from .order_line_delete import order_line_delete
 from .order_line_discount_update import order_line_discount_update
 from .order_line_update import order_line_update
@@ -47,7 +46,6 @@ __all__ = [
     "order_fulfill",
     "order_add_tracking",
     "order_fulfillment_cancel",
-    "order_invoice_create",
     "order_update_shipping",
     "order_update_shipping_cost",
     "draft_order_bulk_delete",

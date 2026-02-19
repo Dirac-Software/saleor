@@ -76,7 +76,7 @@ class PageTranslation(SeoModelTranslationWithSlug):
         return f"{class_.__name__}(pk={self.pk!r}, title={self.title!r}, page_pk={self.page_id!r})"
 
     def __str__(self):
-        return self.title if self.title else str(self.pk)
+        return self.title or str(self.pk)
 
     def get_translated_object_id(self):
         return "Page", self.page_id

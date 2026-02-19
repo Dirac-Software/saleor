@@ -80,14 +80,22 @@ class FulfillmentApprove(BaseMutation):
 
         OrderFulfill.check_lines_for_preorder([line.order_line for line in fulfillment])
         site = get_site_promise(info.context).get()
-        if (
-            not site.settings.fulfillment_allow_unpaid
-            and not fulfillment.order.is_fully_paid()
-        ):
-            raise ValidationError(
-                "Cannot fulfill unpaid order.",
-                code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
+
+        if not site.settings.fulfillment_allow_unpaid:
+            from ....order.proforma import calculate_fulfillment_total
+
+            order = fulfillment.order
+            prior_total = sum(
+                calculate_fulfillment_total(f)
+                for f in order.fulfillments.exclude(pk=fulfillment.pk)
+                if f.status != FulfillmentStatus.CANCELED
             )
+            current_total = calculate_fulfillment_total(fulfillment)
+            if order.total_deposit_paid < prior_total + current_total:
+                raise ValidationError(
+                    "Cannot fulfill: cumulative payments do not cover fulfillment totals.",
+                    code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
+                )
 
     @classmethod
     def perform_mutation(  # type: ignore[override]

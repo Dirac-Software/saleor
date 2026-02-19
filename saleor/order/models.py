@@ -417,6 +417,33 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
         max_length=TAX_ERROR_FIELD_LENGTH, null=True, blank=True
     )
 
+    deposit_required = models.BooleanField(default=False)
+    deposit_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    deposit_paid_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Timestamp when the deposit threshold was met by cumulative Xero payments."
+        ),
+    )
+    xero_deposit_prepayment_id = models.CharField(
+        max_length=36,
+        null=True,
+        blank=True,
+        help_text="Xero prepayment UUID for the deposit on this order.",
+    )
+    xero_bank_account_code = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Xero bank account code used for deposit prepayments on this order.",
+    )
+
     objects = OrderManager()
 
     class Meta:
@@ -467,6 +494,38 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
 
     def is_partly_paid(self):
         return self.total_charged_amount > 0
+
+    @property
+    def total_deposit_paid(self):
+        from django.db.models import Sum
+
+        from ..payment import CustomPaymentChoices
+
+        result = self.payments.filter(
+            gateway=CustomPaymentChoices.XERO,
+            is_active=True,
+        ).aggregate(total=Sum("captured_amount"))
+        return result["total"] or Decimal(0)
+
+    @property
+    def deposit_threshold_met(self):
+        if not self.deposit_required:
+            return True
+        if not self.deposit_percentage:
+            return False
+        required = self.total_gross_amount * (self.deposit_percentage / Decimal(100))
+        return self.total_deposit_paid >= required
+
+    def get_remaining_deposit(self):
+        from decimal import Decimal
+
+        total_paid = self.total_deposit_paid
+        if not total_paid:
+            return Decimal(0)
+        total_allocated = sum(
+            f.deposit_allocated_amount or Decimal(0) for f in self.fulfillments.all()
+        )
+        return total_paid - total_allocated
 
     def get_customer_email(self):
         if self.user_email:
@@ -875,6 +934,35 @@ class Fulfillment(ModelWithMetadata):
         blank=True,
     )
 
+    deposit_allocated_amount = models.DecimalField(
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        default=Decimal(0),
+    )
+    xero_quote_id = models.CharField(
+        max_length=36,
+        null=True,
+        blank=True,
+        help_text="Xero Quote UUID for the proforma quote linked to this fulfillment.",
+    )
+    xero_quote_number = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Xero Quote number (e.g. Q-1234).",
+    )
+    xero_proforma_prepayment_id = models.CharField(
+        max_length=36,
+        null=True,
+        blank=True,
+        help_text="Xero prepayment UUID for the proforma payment on this fulfillment.",
+    )
+    quote_pdf_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="URL to the quote PDF hosted by the Xero integration app.",
+    )
+
     class Meta(ModelWithMetadata.Meta):
         ordering = ("pk",)
         indexes = [
@@ -974,6 +1062,59 @@ class Fulfillment(ModelWithMetadata):
                         return False
 
         return has_owned_allocations
+
+    def has_po_sourced_allocations(self):
+        """Check if this fulfillment has any allocations sourced from purchase orders.
+
+        Returns True if any allocation for this fulfillment's order lines
+        has AllocationSources linked to purchase orders.
+        """
+        for line in self.lines.all():
+            order_line = line.order_line
+            allocations = order_line.allocations.filter(stock__warehouse__is_owned=True)
+
+            for allocation in allocations:
+                if allocation.allocation_sources.exists():
+                    return True
+
+        return False
+
+    @property
+    def deposit_allocated(self):
+        from ..core.prices import Money
+
+        return Money(self.deposit_allocated_amount, self.order.currency)
+
+    def can_auto_transition_to_fulfilled(self):
+        from . import PickStatus
+
+        if self.status != FulfillmentStatus.WAITING_FOR_APPROVAL:
+            return False
+
+        try:
+            pick_complete = self.pick.status == PickStatus.COMPLETED
+        except Pick.DoesNotExist:
+            return False
+
+        if not pick_complete:
+            return False
+
+        if not self.shipment_id:
+            return False
+
+        from .proforma import calculate_fulfillment_total
+
+        order = self.order
+        prior_total = sum(
+            calculate_fulfillment_total(f)
+            for f in order.fulfillments.exclude(pk=self.pk)
+            if f.status != FulfillmentStatus.CANCELED
+        )
+        current_total = calculate_fulfillment_total(self)
+        if order.total_deposit_paid < prior_total + current_total:
+            return False
+
+        return True
 
 
 class FulfillmentLine(models.Model):

@@ -8,8 +8,8 @@ from .invoice_update import InvoiceUpdate
 __all__ = [
     "InvoiceCreate",
     "InvoiceDelete",
-    "InvoiceRequestDelete",
     "InvoiceRequest",
+    "InvoiceRequestDelete",
     "InvoiceSendNotification",
     "InvoiceUpdate",
 ]

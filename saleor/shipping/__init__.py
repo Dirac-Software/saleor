@@ -1,10 +1,12 @@
 class ShippingMethodType:
     PRICE_BASED = "price"
     WEIGHT_BASED = "weight"
+    MANUAL = "manual"
 
     CHOICES = [
         (PRICE_BASED, "Price based shipping"),
         (WEIGHT_BASED, "Weight based shipping"),
+        (MANUAL, "Manual shipping"),
     ]
 
 

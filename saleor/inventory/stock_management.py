@@ -1,7 +1,5 @@
 """Stock management utilities for purchase orders and inventory tracking."""
 
-from uuid import UUID
-
 from django.db import transaction
 from django.utils import timezone
 
@@ -14,10 +12,10 @@ from .events import (
     purchase_order_item_confirmed_event,
 )
 from .exceptions import (
-    AdjustmentAffectsConfirmedOrders,
     AdjustmentAffectsFulfilledOrders,
     AdjustmentAffectsPaidOrders,
     AdjustmentAlreadyProcessed,
+    AdjustmentRequiresManualResolution,
     AllocationInvariantViolation,
     InvalidPurchaseOrderItemStatus,
     ReceiptLineNotInProgress,
@@ -88,9 +86,11 @@ def confirm_purchase_order_item(
         )
 
     # Get allocations to potentially move (FIFO by order line creation time)
+    # Only consider allocations with quantity > 0 (ignore orphaned empty records)
     allocations = (
         source.allocations.select_for_update()
         .select_related("order_line")
+        .filter(quantity_allocated__gt=0)
         .order_by("order_line__created_at")
     )
 
@@ -191,66 +191,17 @@ def confirm_purchase_order_item(
             order.status = OrderStatus.UNFULFILLED
             order.save(update_fields=["status", "updated_at"])
 
-            # Create fulfillments per warehouse with WAITING_FOR_APPROVAL status
-            from collections import defaultdict
-
-            from django.contrib.sites.models import Site
-
-            from ..order.actions import (
-                OrderFulfillmentLineInfo,
-                create_fulfillments,
-                order_confirmed,
-            )
+            from ..order.actions import order_confirmed
             from ..plugins.manager import get_plugins_manager
 
-            manager = get_plugins_manager(allow_replica=False)
+            confirm_manager = get_plugins_manager(allow_replica=False)
 
             # Send order confirmed email
             # Use lambda with default args to capture loop variables by value
             transaction.on_commit(
-                lambda o=order, u=user, a=app, m=manager: order_confirmed(  # type: ignore[misc]
+                lambda o=order, u=user, a=app, m=confirm_manager: order_confirmed(  # type: ignore[misc]
                     o, u, a, m, send_confirmation_email=True
                 )
-            )
-
-            # Get allocations and group by warehouse
-            allocations = Allocation.objects.filter(
-                order_line__order=order
-            ).select_related("stock__warehouse", "order_line")
-
-            warehouse_groups = defaultdict(list)
-            for allocation in allocations:
-                warehouse_pk = allocation.stock.warehouse_id
-                warehouse_groups[warehouse_pk].append(allocation)
-
-            # Build fulfillment_lines_for_warehouses dict
-            fulfillment_lines_for_warehouses: dict[
-                UUID, list[OrderFulfillmentLineInfo]
-            ] = {}
-            for warehouse_pk, allocations_list in warehouse_groups.items():
-                lines: list[OrderFulfillmentLineInfo] = []
-                for allocation in allocations_list:
-                    lines.append(
-                        OrderFulfillmentLineInfo(
-                            order_line=allocation.order_line,
-                            quantity=allocation.quantity_allocated,
-                        )
-                    )
-                fulfillment_lines_for_warehouses[warehouse_pk] = lines
-
-            # Create fulfillments
-            site_settings = Site.objects.get_current().settings
-
-            create_fulfillments(
-                user=user,
-                app=app,
-                order=order,
-                fulfillment_lines_for_warehouses=fulfillment_lines_for_warehouses,
-                manager=manager,
-                site_settings=site_settings,
-                notify_customer=False,
-                auto_approved=False,
-                tracking_url="",
             )
 
     # Log event for audit trail
@@ -629,8 +580,8 @@ def complete_receipt(receipt, user=None, manager=None):
             try:
                 process_adjustment(adjustment, user=user)
                 adjustments_created.append(adjustment)
-            except AdjustmentAffectsConfirmedOrders:
-                # Can't auto-process - affects confirmed orders
+            except AdjustmentRequiresManualResolution:
+                # Can't auto-process - requires manual resolution
                 # Leave unprocessed and notify staff
                 adjustments_pending.append(adjustment)
 
@@ -648,6 +599,12 @@ def complete_receipt(receipt, user=None, manager=None):
     receipt.completed_at = timezone.now()
     receipt.completed_by = user
     receipt.save(update_fields=["status", "completed_at", "completed_by"])
+
+    # Create fulfillments for UNFULFILLED orders whose stock has now physically arrived.
+    # Skip if there are pending adjustments: unresolved shortages mean the order state
+    # is still uncertain and fulfillments must wait for manual resolution first.
+    if not adjustments_pending:
+        _create_fulfillments_for_shipment(shipment=shipment, user=user, manager=manager)
 
     # If there are pending adjustments, notify staff
     if adjustments_pending and manager:
@@ -682,6 +639,58 @@ def complete_receipt(receipt, user=None, manager=None):
         "items_received": len(pois),
         "discrepancies": discrepancies,
     }
+
+
+def _create_fulfillments_for_shipment(shipment, user, manager):
+    from collections import defaultdict
+
+    from django.contrib.sites.models import Site
+
+    from ..order import OrderStatus
+    from ..order.actions import OrderFulfillmentLineInfo, create_fulfillments
+    from ..order.models import Order
+    from ..plugins.manager import get_plugins_manager
+    from ..warehouse.models import Allocation
+
+    fulfill_manager = manager or get_plugins_manager(allow_replica=False)
+    site_settings = Site.objects.get_current().settings
+
+    orders_to_fulfill = Order.objects.filter(
+        lines__allocations__allocation_sources__purchase_order_item__shipment=shipment,
+        status=OrderStatus.UNFULFILLED,
+    ).distinct()
+
+    for order in orders_to_fulfill:
+        allocations = Allocation.objects.filter(order_line__order=order).select_related(
+            "stock__warehouse", "order_line"
+        )
+
+        warehouse_groups: dict = defaultdict(list)
+        for allocation in allocations:
+            warehouse_groups[allocation.stock.warehouse_id].append(allocation)
+
+        fulfillment_lines_for_warehouses = {
+            warehouse_pk: [
+                OrderFulfillmentLineInfo(
+                    order_line=alloc.order_line,
+                    quantity=alloc.quantity_allocated,
+                )
+                for alloc in alloc_list
+            ]
+            for warehouse_pk, alloc_list in warehouse_groups.items()
+        }
+
+        create_fulfillments(
+            user=user,
+            app=None,
+            order=order,
+            fulfillment_lines_for_warehouses=fulfillment_lines_for_warehouses,
+            manager=fulfill_manager,
+            site_settings=site_settings,
+            notify_customer=False,
+            auto_approved=False,
+            tracking_url="",
+        )
 
 
 @transaction.atomic

@@ -263,6 +263,13 @@ class Shop(graphene.ObjectType):
         description="Allow to approve fulfillments which are unpaid.",
         required=True,
     )
+    invoice_product_code_attribute = graphene.String(
+        description=(
+            "Product attribute slug used as the product code in invoice webhooks. "
+            "Defaults to 'product-code'."
+        ),
+        required=True,
+    )
     track_inventory_by_default = graphene.Boolean(
         description=(
             "This field is used as a default value for `ProductVariant.trackInventory`."
@@ -513,6 +520,11 @@ class Shop(graphene.ObjectType):
     @load_site_callback
     def resolve_fulfillment_allow_unpaid(_, info, site):
         return site.settings.fulfillment_allow_unpaid
+
+    @staticmethod
+    @load_site_callback
+    def resolve_invoice_product_code_attribute(_, info, site):
+        return site.settings.invoice_product_code_attribute
 
     @staticmethod
     @load_site_callback
