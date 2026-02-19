@@ -286,6 +286,11 @@ def test_clean_image_file_in_avif_format():
         ("http://example.com/invalid_image.docx", False),
         ("http://example.com/invalid_image.exe", False),
         ("http://example.com/invalid_image.txt", False),
+        ("data:image/jpeg;base64,/9j/4AAQSkZJRg==", True),
+        ("data:image/png;base64,iVBORw0KGgo=", True),
+        ("data:image/webp;base64,UklGRg==", True),
+        ("data:application/pdf;base64,JVBER", False),
+        ("data:text/plain;base64,aGVsbG8=", False),
     ],
 )
 def test_is_image_url(url, is_valid):
