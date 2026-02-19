@@ -1813,7 +1813,10 @@ def assign_product_attributes(
         rrp_value, _ = AttributeValue.objects.get_or_create(
             attribute=rrp_attr,
             slug=rrp_slug,
-            defaults={"name": str(product_data.rrp)},
+            defaults={
+                "name": str(product_data.rrp),
+                "plain_text": str(product_data.rrp),
+            },
         )
         AssignedProductAttributeValue.objects.create(product=product, value=rrp_value)
 
@@ -1823,7 +1826,7 @@ def assign_product_attributes(
     moq_attr_value, _ = AttributeValue.objects.get_or_create(
         attribute=moq_attr,
         slug=moq_slug,
-        defaults={"name": str(moq_value)},
+        defaults={"name": str(moq_value), "plain_text": str(moq_value)},
     )
     AssignedProductAttributeValue.objects.create(product=product, value=moq_attr_value)
 
@@ -1833,7 +1836,7 @@ def assign_product_attributes(
     brand_value, _ = AttributeValue.objects.get_or_create(
         attribute=brand_attr,
         slug=brand_slug,
-        defaults={"name": product_data.brand},
+        defaults={"name": product_data.brand, "plain_text": product_data.brand},
     )
     AssignedProductAttributeValue.objects.create(product=product, value=brand_value)
 
@@ -2496,17 +2499,17 @@ def ingest_products_from_excel(
         products_queryset = Product.objects.filter(id__in=product_ids)
         update_discounted_prices_for_promotion(products_queryset)
 
-        # Step 7: Update search vectors for all affected products
-        if product_ids:
-            logger.info("Updating search vector for %d product(s)", len(product_ids))
-            from saleor.product.search import update_products_search_vector
-
-            update_products_search_vector(product_ids)
-
         # Rollback transaction if dry-run
         if config.dry_run:
             logger.info("DRY-RUN MODE: Rolling back all changes")
             transaction.set_rollback(True)
+
+    # Step 7: Update search vectors for all affected products (after transaction commits)
+    if product_ids and not config.dry_run:
+        logger.info("Updating search vector for %d product(s)", len(product_ids))
+        from saleor.product.search import update_products_search_vector
+
+        update_products_search_vector(product_ids)
 
     # Step 8: Calculate statistics
     total_variants_created = sum(p.variants.count() for p in created_products)
