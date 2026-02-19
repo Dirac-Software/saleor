@@ -19,6 +19,18 @@ VALID_IMAGE_EXTENSIONS = frozenset(
     {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".avif"}
 )
 
+VALID_IMAGE_MIME_TYPES = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+        "image/avif",
+    }
+)
+
 # UK HS / commodity codes: 6 digits (HS), 8 digits (CN8 import), 10 digits (export CPC)
 VALID_HS_CODE_LENGTHS = frozenset({6, 8, 10})
 
@@ -118,6 +130,18 @@ def parse_weight_kg(val) -> tuple[Decimal | None, list[str]]:
 def parse_image_url(val) -> tuple[str, list[str]]:
     url = parse_optional_str(val)
     if not url:
+        return url, []
+    if url.startswith("data:"):
+        try:
+            header = url.split(",", 1)[0]
+            mime_type = header[5:].split(";")[0]
+        except (IndexError, ValueError):
+            return url, ["image_url: invalid data URI"]
+        if mime_type not in VALID_IMAGE_MIME_TYPES:
+            return url, [
+                f"image_url: unsupported data URI type '{mime_type}' — "
+                f"expected one of {', '.join(sorted(VALID_IMAGE_MIME_TYPES))}"
+            ]
         return url, []
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):

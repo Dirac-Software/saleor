@@ -339,6 +339,43 @@ def test_parse_image_url_none_is_ok():
     assert errs == []
 
 
+def test_parse_image_url_data_uri_jpeg():
+    _, errs = parse_image_url("data:image/jpeg;base64,/9j/4AAQSkZJRg==")
+    assert errs == []
+
+
+def test_parse_image_url_data_uri_png():
+    _, errs = parse_image_url("data:image/png;base64,iVBORw0KGgo=")
+    assert errs == []
+
+
+@pytest.mark.parametrize(
+    "mime_type",
+    [
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+        "image/avif",
+    ],
+)
+def test_parse_image_url_data_uri_all_valid_mime_types(mime_type):
+    _, errs = parse_image_url(f"data:{mime_type};base64,abc123")
+    assert errs == []
+
+
+def test_parse_image_url_data_uri_invalid_mime_type():
+    _, errs = parse_image_url("data:application/pdf;base64,JVBER")
+    assert any("application/pdf" in e for e in errs)
+
+
+def test_parse_image_url_data_uri_non_image_type():
+    _, errs = parse_image_url("data:text/plain;base64,aGVsbG8=")
+    assert errs != []
+
+
 # ---------------------------------------------------------------------------
 # parse_hs_code
 # ---------------------------------------------------------------------------

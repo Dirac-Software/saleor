@@ -25,6 +25,24 @@ from saleor.product.ingestion import (
 from saleor.product.models import Product, ProductMedia, ProductType, ProductVariant
 
 
+@pytest.fixture
+def non_owned_warehouse(db):
+    from saleor.account.models import Address
+    from saleor.warehouse.models import Warehouse
+
+    address = Address.objects.create(
+        street_address_1="1 Test St",
+        city="London",
+        country="GB",
+    )
+    return Warehouse.objects.create(
+        name="External Warehouse",
+        slug="external-warehouse",
+        address=address,
+        is_owned=False,
+    )
+
+
 def test_parse_sizes_and_qty_with_bracket_notation():
     """Test parsing sizes with quantity in brackets."""
     sizes_str = "6.5[1], 7[2], 7.5[9], 8[13]"
@@ -494,6 +512,36 @@ def test_create_product_media_storage_error(simple_product, mocker):
     assert media is None
 
 
+def test_create_product_media_data_url(simple_product):
+    """Test media creation from a data: URI without making any HTTP request."""
+    import base64
+
+    raw = b"fake-image-bytes"
+    encoded = base64.b64encode(raw).decode()
+    image_url = f"data:image/jpeg;base64,{encoded}"
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.product == simple_product
+    assert media.alt == simple_product.name
+    assert media.image.name.endswith(".jpg")
+
+
+def test_create_product_media_data_url_png(simple_product):
+    """Test data: URI with PNG MIME type produces a .png file."""
+    import base64
+
+    raw = b"fake-png-bytes"
+    encoded = base64.b64encode(raw).decode()
+    image_url = f"data:image/png;base64,{encoded}"
+
+    media = create_product_media(simple_product, image_url)
+
+    assert media is not None
+    assert media.image.name.endswith(".png")
+
+
 def test_parse_sizes_and_qty_hk_apparel_with_spaces():
     """Test parsing HK sheet apparel sizes in 'XS [20], M [50]' format (space before bracket)."""
     sizes_str = "XS [20], M [50], L [50], XL [50], 3XL [20]"
@@ -534,8 +582,8 @@ def test_parse_sizes_and_qty_hk_multi_char_sizes_with_spaces():
     assert quantities == (1, 2, 1, 2, 5, 10, 34, 27, 18, 3)
 
 
-def test_ingest_products_sets_search_index_dirty(db, non_owned_warehouse, channel_USD):
-    """Test that ingesting products sets search_index_dirty=True on created products."""
+def test_ingest_products_updates_search_vector(db, non_owned_warehouse, channel_USD):
+    """Test that ingesting products updates the search vector for all created products."""
     import tempfile
 
     import pandas as pd
@@ -611,8 +659,9 @@ def test_ingest_products_sets_search_index_dirty(db, non_owned_warehouse, channe
 
         assert len(result.created_products) == 1
         product = Product.objects.get(name="Tiro Tracksuit")
-        product.refresh_from_db(fields=["search_index_dirty"])
-        assert product.search_index_dirty is True
+        product.refresh_from_db(fields=["search_vector", "search_index_dirty"])
+        assert product.search_vector is not None
+        assert product.search_index_dirty is False
 
     finally:
         import os

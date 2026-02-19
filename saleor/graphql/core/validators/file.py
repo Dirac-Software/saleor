@@ -27,6 +27,13 @@ def is_supported_image_mimetype(mimetype: str) -> bool:
 
 def is_image_url(url: str) -> bool:
     """Check if file URL seems to be an image."""
+    if url.startswith("data:"):
+        try:
+            header = url.split(",", 1)[0]
+            mimetype = header[5:].split(";")[0]
+            return is_image_mimetype(mimetype)
+        except (IndexError, ValueError):
+            return False
     filetype = mimetypes.guess_type(url)[0]
     return filetype is not None and is_image_mimetype(filetype)
 
