@@ -5,6 +5,7 @@ rather than failing fast. parse_sheet converts the DataFrame into a list
 of ParsedRow objects ready for bulk insertion.
 """
 
+import math
 import os
 import re
 from decimal import Decimal, InvalidOperation
@@ -93,12 +94,15 @@ def parse_category(val, valid_categories: set[str] | None) -> tuple[str, list[st
 
 
 def parse_decimal(val, field_name: str) -> tuple[Decimal | None, list[str]]:
-    if val is None:
+    if val is None or (isinstance(val, float) and math.isnan(val)):
         return None, []
     try:
-        return Decimal(str(val)), []
+        dec = Decimal(str(val))
     except InvalidOperation:
         return None, [f"{field_name}: cannot parse '{val}' as a number"]
+    if not dec.is_finite():
+        return None, [f"{field_name}: cannot parse '{val}' as a number"]
+    return dec, []
 
 
 def parse_price(val, field_name: str) -> tuple[Decimal | None, list[str]]:
@@ -262,7 +266,7 @@ def parse_sheet(
     valid_cols = sorted(c for c in column_map if c < len(df.columns))
     sub = df.iloc[:, valid_cols].copy()
     sub.columns = pd.Index([column_map[c] for c in valid_cols])
-    sub = sub.where(pd.notna(sub), other=None)
+    sub = sub.astype(object).where(pd.notna(sub), other=None)
     rows = sub.to_dict("records")
     # header_row is 0-based; data rows start one row below it.
     # +2 converts to 1-based Excel row number (1 for header, +1 for data offset).
