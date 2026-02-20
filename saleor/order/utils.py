@@ -294,7 +294,9 @@ def create_order_line(
     total_price = unit_price * quantity
     undiscounted_total_price = undiscounted_unit_price * quantity
 
-    if product.tax_class_id:
+    if line_data.tax_class is not None:
+        tax_class = line_data.tax_class
+    elif product.tax_class_id:
         tax_class = product.tax_class
     else:
         tax_class = product.product_type.tax_class
@@ -405,6 +407,10 @@ def add_variant_to_order(
             update_line_base_unit_prices_with_custom_price(
                 order, line_data, line, update_fields
             )
+
+        if line_data.tax_class is not None:
+            line.tax_class = line_data.tax_class
+            update_fields.append("tax_class_id")
 
         change_order_line_quantity(
             user,

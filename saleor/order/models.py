@@ -400,6 +400,11 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
         max_length=255, null=True, blank=True, db_index=False
     )
     gift_cards = models.ManyToManyField(GiftCard, blank=True, related_name="orders")
+    allowed_warehouses = models.ManyToManyField(
+        "warehouse.Warehouse",
+        blank=True,
+        related_name="orders_with_restricted_warehouses",
+    )
     display_gross_prices = models.BooleanField(default=True)
     customer_note = models.TextField(blank=True, default="")
     weight = MeasurementField(

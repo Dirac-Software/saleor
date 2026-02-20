@@ -75,3 +75,32 @@ def test_create_as_staff(staff_api_client, permission_manage_taxes):
 
 def test_create_as_app(app_api_client, permission_manage_taxes):
     _test_tax_class_create(app_api_client, permission_manage_taxes)
+
+
+def test_tax_class_create_with_xero_tax_code(staff_api_client, permission_manage_taxes):
+    # given
+    variables = {
+        "input": {
+            "name": "Tax Class",
+            "createCountryRates": [
+                {"countryCode": "PL", "rate": 23, "xeroTaxCode": "TAX001"},
+            ],
+        },
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        MUTATION, variables, permissions=[permission_manage_taxes]
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["taxClassCreate"]
+    assert not data["errors"]
+    assert data["taxClass"]["countries"][0]["xeroTaxCode"] == "TAX001"
+
+    from .....tax.models import TaxClass, TaxClassCountryRate
+
+    tax_class = TaxClass.objects.get(name="Tax Class")
+    rate = TaxClassCountryRate.objects.get(tax_class=tax_class, country="PL")
+    assert rate.xero_tax_code == "TAX001"

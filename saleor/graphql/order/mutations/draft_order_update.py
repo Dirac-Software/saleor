@@ -37,7 +37,7 @@ from ...shipping.utils import get_shipping_model_by_object_id
 from ...site.dataloaders import get_site_promise
 from ..types import Order
 from . import draft_order_cleaner
-from .draft_order_create import DraftOrderInput
+from .draft_order_create import DraftOrderCreate, DraftOrderInput
 from .utils import (
     DRAFT_ORDER_UPDATE_FIELDS,
     SHIPPING_METHOD_UPDATE_FIELDS,
@@ -134,6 +134,8 @@ class DraftOrderUpdate(
         )
 
         draft_order_cleaner.clean_redirect_url(redirect_url, cleaned_input)
+
+        DraftOrderCreate.clean_allowed_warehouses(cleaned_input, channel)
 
         return cleaned_input
 
@@ -430,6 +432,10 @@ class DraftOrderUpdate(
         order_modified, metadata_modified = cls._save(
             instance_tracker, metadata_collection, private_metadata_collection
         )
+
+        if (warehouses := cleaned_input.get("allowed_warehouses")) is not None:
+            instance.allowed_warehouses.set(warehouses)
+            order_modified = True
 
         if order_modified or metadata_modified:
             site = get_site_promise(info.context).get()

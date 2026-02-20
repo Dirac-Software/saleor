@@ -1946,6 +1946,14 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     gift_cards = NonNullList(
         GiftCard, description="List of user gift cards.", required=True
     )
+    allowed_warehouses = NonNullList(
+        Warehouse,
+        required=True,
+        description=(
+            "Warehouses from which stock may be allocated for this order. "
+            "Empty means no restriction."
+        ),
+    )
     customer_note = graphene.String(
         required=True,
         description="Additional information provided by the customer about the order.",
@@ -3019,6 +3027,12 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     @staticmethod
     def resolve_gift_cards(root: SyncWebhookControlContext[models.Order], info):
         return GiftCardsByOrderIdLoader(info.context).load(root.node.id)
+
+    @staticmethod
+    def resolve_allowed_warehouses(
+        root: SyncWebhookControlContext[models.Order], _info
+    ):
+        return root.node.allowed_warehouses.all()
 
     @staticmethod
     def resolve_voucher(root: SyncWebhookControlContext[models.Order], info):

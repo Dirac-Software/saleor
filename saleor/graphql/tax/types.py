@@ -192,6 +192,7 @@ class TaxClassCountryRate(ModelObjectType[models.TaxClassCountryRate]):
     tax_class = graphene.Field(
         TaxClass, description="Related tax class.", required=False
     )
+    xero_tax_code = graphene.String(description="Xero tax code for this country rate.")
 
     class Meta:
         description = (

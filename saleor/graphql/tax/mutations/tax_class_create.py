@@ -39,6 +39,10 @@ class CountryRateInput(BaseInputObjectType):
         ),
         required=True,
     )
+    xero_tax_code = graphene.String(
+        description="Xero tax code to assign for this country rate.",
+        required=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_TAXES
@@ -72,7 +76,10 @@ class TaxClassCreate(DeprecatedModelMutation):
     def create_country_rates(cls, instance, country_rates):
         to_create = [
             models.TaxClassCountryRate(
-                tax_class=instance, country=item["country_code"], rate=item["rate"]
+                tax_class=instance,
+                country=item["country_code"],
+                rate=item["rate"],
+                xero_tax_code=item.get("xero_tax_code"),
             )
             for item in country_rates
         ]

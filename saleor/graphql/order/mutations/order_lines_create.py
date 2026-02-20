@@ -20,6 +20,7 @@ from ....order.utils import (
 from ....permission.enums import OrderPermissions
 from ....plugins.manager import PluginsManager
 from ....product import models as product_models
+from ....tax.models import TaxClass
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.context import SyncWebhookControlContext
@@ -28,6 +29,7 @@ from ...core.mutations import BaseMutation
 from ...core.types import NonNullList, OrderError
 from ...plugins.dataloaders import get_plugin_manager_promise
 from ...product.types import ProductVariant
+from ...tax.types import TaxClass as TaxClassType
 from ..types import Order, OrderLine
 from ..utils import (
     OrderLineData,
@@ -89,6 +91,13 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
             quantity = input_line["quantity"]
 
             custom_price = input_line.get("price")
+            tax_class_id = input_line.get("tax_class")
+            tax_class: TaxClass | None = None
+            if tax_class_id:
+                tax_class = cls.get_node_or_error(
+                    info, tax_class_id, only_type=TaxClassType, field="tax_class"
+                )
+
             if quantity > 0:
                 if force_new_line or variants_from_existing_lines.count(variant.pk) > 1:
                     grouped_lines_data.append(
@@ -98,6 +107,7 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
                             quantity=quantity,
                             price_override=custom_price,
                             rules_info=variant_rule_data.rules_info,
+                            tax_class=tax_class,
                         )
                     )
                 else:
@@ -116,6 +126,7 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
                     line_data.quantity += quantity
                     line_data.price_override = custom_price
                     line_data.rules_info = variant_rule_data.rules_info
+                    line_data.tax_class = tax_class
             else:
                 invalid_ids.append(variant_id)
         if invalid_ids:

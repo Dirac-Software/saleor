@@ -23,7 +23,7 @@ from ..management import (
     increase_allocations,
     increase_stock,
 )
-from ..models import Allocation, ChannelWarehouse, PreorderAllocation
+from ..models import Allocation, ChannelWarehouse, PreorderAllocation, Warehouse
 
 COUNTRY_CODE = "US"
 
@@ -1737,3 +1737,88 @@ def test_allocate_sorting_order_prioritizes_owned_first(
 
     nonowned_stock.refresh_from_db()
     assert nonowned_stock.quantity_allocated == 0
+
+
+@pytest.mark.django_db
+def test_allocate_stocks_with_allowed_warehouse_filter(
+    order_line, stock, warehouse, address, shipping_zone, channel_USD
+):
+    # given
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
+
+    second_warehouse = Warehouse.objects.create(
+        address=address,
+        name="Second Warehouse",
+        slug="second-warehouse",
+        email="second@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+    second_stock = Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+
+    order_line.quantity = 10
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=10)
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+        additional_filter_lookup={"warehouse_id__in": [warehouse.id]},
+    )
+
+    # then
+    assert Allocation.objects.filter(order_line=order_line, stock=stock).exists()
+    assert not Allocation.objects.filter(
+        order_line=order_line, stock=second_stock
+    ).exists()
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 10
+    second_stock.refresh_from_db()
+    assert second_stock.quantity_allocated == 0
+
+
+@pytest.mark.django_db
+def test_allocate_stocks_raises_insufficient_stock_when_restricted_warehouse_has_no_stock(
+    order_line, stock, warehouse, address, shipping_zone, channel_USD
+):
+    # given - allowed warehouse has no stock, but another warehouse does
+    stock.quantity = 0
+    stock.save(update_fields=["quantity"])
+
+    second_warehouse = Warehouse.objects.create(
+        address=address,
+        name="Second Warehouse Fallback",
+        slug="second-warehouse-fallback",
+        email="second-fallback@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+    Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+
+    order_line.quantity = 10
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=10)
+
+    # when / then
+    with pytest.raises(InsufficientStock):
+        allocate_stocks(
+            [line_data],
+            COUNTRY_CODE,
+            channel_USD,
+            manager=get_plugins_manager(allow_replica=False),
+            additional_filter_lookup={"warehouse_id__in": [warehouse.id]},
+        )
