@@ -186,6 +186,22 @@ def test_parse_decimal_invalid_string():
     assert "rrp" in errs[0]
 
 
+def test_parse_decimal_pandas_nan_treated_as_none():
+    val, errs = parse_decimal(float("nan"), "sell_price")
+    assert val is None
+    assert errs == []
+
+
+@pytest.mark.parametrize(
+    "bad_val", ["inf", "infinity", "-inf", float("inf"), float("-inf")]
+)
+def test_parse_decimal_non_finite_is_invalid(bad_val):
+    val, errs = parse_decimal(bad_val, "sell_price")
+    assert val is None
+    assert len(errs) == 1
+    assert "sell_price" in errs[0]
+
+
 def test_parse_decimal_zero():
     val, errs = parse_decimal(0, "buy_price")
     assert val == Decimal(0)
@@ -744,6 +760,36 @@ def test_parse_sheet_nan_cells_become_none(hk_df):
     rows = parse_sheet(hk_df, HK_COLUMN_MAP, "GBP")
     assert all(r.buy_price is None for r in rows)
     assert all(r.image_url == "" for r in rows)
+
+
+def test_parse_sheet_float_column_nan_treated_as_missing():
+    df = pd.DataFrame(
+        [["Adidas", "ABC123", "desc", float("nan"), 9.99, "Apparel", 0.2, "M[10]"]],
+        columns=[
+            "Brand",
+            "Article",
+            "Description",
+            "RRP (GBP)",
+            "Sale Price (GBP)",
+            "Category",
+            "unit_weight_kg",
+            "updated_sizing",
+        ],
+    )
+    column_map = {
+        0: "brand",
+        1: "product_code",
+        2: "description",
+        3: "rrp",
+        4: "sell_price",
+        5: "category",
+        6: "weight_kg",
+        7: "sizes",
+    }
+    rows = parse_sheet(df, column_map, "GBP")
+    assert len(rows) == 1
+    assert rows[0].rrp is None
+    assert rows[0].sell_price == Decimal("9.99")
 
 
 def test_parse_sheet_category_validated(hk_df):
