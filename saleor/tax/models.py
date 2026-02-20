@@ -26,6 +26,7 @@ class TaxClassCountryRate(models.Model):
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
     )
+    xero_tax_code = models.CharField(max_length=50, blank=True, null=True)
 
     class Meta:
         ordering = ("country", models.F("tax_class_id").asc(nulls_first=True), "pk")

@@ -2217,3 +2217,95 @@ def test_order_lines_create_sets_product_type_id_for_order_line(
     order.refresh_from_db()
     assert len(order.lines.all()) == 1
     assert order.lines.first().product_type_id == expected_product_type_id
+
+
+ORDER_LINES_CREATE_WITH_TAX_CLASS_MUTATION = """
+    mutation OrderLinesCreate($orderId: ID!, $variantId: ID!, $quantity: Int!, $taxClassId: ID!) {
+        orderLinesCreate(id: $orderId, input: [{
+            variantId: $variantId,
+            quantity: $quantity,
+            taxClass: $taxClassId
+        }]) {
+            errors { field code message }
+            orderLines { id }
+        }
+    }
+"""
+
+
+def test_order_lines_create_with_tax_class_on_line(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+    tax_classes,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.save(update_fields=["status"])
+
+    override_tax_class = tax_classes[0]
+    variant = order.lines.first().variant
+    variant.product.tax_class = tax_classes[1]
+    variant.product.save(update_fields=["tax_class"])
+
+    order_id = graphene.Node.to_global_id("Order", order.id)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+    tax_class_id = graphene.Node.to_global_id("TaxClass", override_tax_class.id)
+
+    variables = {
+        "orderId": order_id,
+        "variantId": variant_id,
+        "quantity": 1,
+        "taxClassId": tax_class_id,
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_LINES_CREATE_WITH_TAX_CLASS_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    assert not content["data"]["orderLinesCreate"]["errors"]
+
+    new_line = order.lines.filter(variant=variant).last()
+    assert new_line.tax_class_id == override_tax_class.id
+    assert new_line.tax_class_id != variant.product.tax_class_id
+
+
+def test_order_lines_create_with_invalid_tax_class_on_line(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.save(update_fields=["status"])
+
+    variant = order.lines.first().variant
+    order_id = graphene.Node.to_global_id("Order", order.id)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+    invalid_tax_class_id = graphene.Node.to_global_id("TaxClass", 0)
+
+    variables = {
+        "orderId": order_id,
+        "variantId": variant_id,
+        "quantity": 1,
+        "taxClassId": invalid_tax_class_id,
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_LINES_CREATE_WITH_TAX_CLASS_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    errors = content["data"]["orderLinesCreate"]["errors"]
+    assert len(errors) == 1
+    assert errors[0]["field"] == "taxClass"
+    assert errors[0]["code"] == OrderErrorCode.NOT_FOUND.name

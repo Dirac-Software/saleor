@@ -23,6 +23,7 @@ from ....order.utils import (
     update_order_display_gross_prices,
 )
 from ....permission.enums import OrderPermissions
+from ....tax.models import TaxClass
 from ....webhook.event_types import WebhookEventAsyncType
 from ...account.i18n import I18nMixin
 from ...account.mixins import AddressMetadataMixin
@@ -41,6 +42,7 @@ from ...meta.inputs import MetadataInput, MetadataInputDescription
 from ...plugins.dataloaders import get_plugin_manager_promise
 from ...product.types import ProductVariant
 from ...shipping.utils import get_shipping_model_by_object_id
+from ...tax.types import TaxClass as TaxClassType
 from ..types import Order
 from ..utils import (
     OrderLineData,
@@ -66,6 +68,10 @@ class OrderLineInput(BaseInputObjectType):
     price_gross = PositiveDecimal(
         required=False,
         description="Custom gross price of the item. Only works for draft orders.",
+    )
+    tax_class = graphene.ID(
+        required=False,
+        description="ID of a tax class to use for this order line.",
     )
 
     class Meta:
@@ -261,7 +267,7 @@ class DraftOrderCreate(
             cleaned_input["currency"] = channel.currency_code
 
         lines = data.pop("lines", None)
-        cls.clean_lines(cleaned_input, lines, channel)
+        cls.clean_lines(cleaned_input, lines, channel, info)
         cleaned_input["status"] = OrderStatus.DRAFT
         cleaned_input["origin"] = OrderOrigin.DRAFT
         cleaned_input["lines_count"] = len(cleaned_input.get("lines_data", []))
@@ -328,7 +334,7 @@ class DraftOrderCreate(
             )
 
     @classmethod
-    def clean_lines(cls, cleaned_input, lines, channel):
+    def clean_lines(cls, cleaned_input, lines, channel, info):
         if not lines:
             return
         grouped_lines_data: list[OrderLineData] = []
@@ -358,12 +364,20 @@ class DraftOrderCreate(
             variant = variant_data.variant
             custom_price = line.get("price", None)
 
+            tax_class_id = line.get("tax_class", None)
+            tax_class: TaxClass | None = None
+            if tax_class_id:
+                tax_class = cls.get_node_or_error(
+                    info, tax_class_id, only_type=TaxClassType, field="tax_class"
+                )
+
             if line.get("force_new_line"):
                 line_data = OrderLineData(
                     variant_id=variant.id,
                     variant=variant,
                     price_override=custom_price,
                     rules_info=variant_data.rules_info,
+                    tax_class=tax_class,
                 )
                 grouped_lines_data.append(line_data)
             else:
@@ -372,6 +386,7 @@ class DraftOrderCreate(
                 line_data.variant = variant
                 line_data.price_override = custom_price
                 line_data.rules_info = variant_data.rules_info
+                line_data.tax_class = tax_class
 
             if (quantity := line.get("quantity")) is not None:
                 line_data.quantity += quantity

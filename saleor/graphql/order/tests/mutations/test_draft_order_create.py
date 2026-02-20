@@ -4070,3 +4070,87 @@ def test_draft_order_create_sets_product_type_id_for_order_line(
 
     order_line = OrderLine.objects.first()
     assert order_line.product_type_id == expected_product_type_id
+
+
+def test_draft_order_create_with_tax_class_on_line(
+    staff_api_client,
+    permission_group_manage_orders,
+    customer_user,
+    variant,
+    channel_USD,
+    graphql_address_data,
+    tax_classes,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    query = DRAFT_ORDER_CREATE_MUTATION
+
+    override_tax_class = tax_classes[0]
+    product = variant.product
+    product.tax_class = tax_classes[1]
+    product.save(update_fields=["tax_class"])
+
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+    tax_class_id = graphene.Node.to_global_id("TaxClass", override_tax_class.id)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+
+    variables = {
+        "input": {
+            "lines": [
+                {"variantId": variant_id, "quantity": 1, "taxClass": tax_class_id}
+            ],
+            "billingAddress": graphql_address_data,
+            "channelId": channel_id,
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(query, variables)
+
+    # then
+    content = get_graphql_content(response)
+    assert not content["data"]["draftOrderCreate"]["errors"]
+
+    order_line = OrderLine.objects.first()
+    assert order_line.tax_class_id == override_tax_class.id
+    assert order_line.tax_class_id != product.tax_class_id
+
+
+def test_draft_order_create_with_invalid_tax_class_on_line(
+    staff_api_client,
+    permission_group_manage_orders,
+    variant,
+    channel_USD,
+    graphql_address_data,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    query = DRAFT_ORDER_CREATE_MUTATION
+
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+    invalid_tax_class_id = graphene.Node.to_global_id("TaxClass", 0)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+
+    variables = {
+        "input": {
+            "lines": [
+                {
+                    "variantId": variant_id,
+                    "quantity": 1,
+                    "taxClass": invalid_tax_class_id,
+                }
+            ],
+            "billingAddress": graphql_address_data,
+            "channelId": channel_id,
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(query, variables)
+
+    # then
+    content = get_graphql_content(response)
+    errors = content["data"]["draftOrderCreate"]["errors"]
+    assert len(errors) == 1
+    assert errors[0]["field"] == "taxClass"
+    assert errors[0]["code"] == OrderErrorCode.NOT_FOUND.name

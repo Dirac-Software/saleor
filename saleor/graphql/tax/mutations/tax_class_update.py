@@ -30,6 +30,10 @@ class CountryRateUpdateInput(BaseInputObjectType):
         ),
         required=False,
     )
+    xero_tax_code = graphene.String(
+        description="Xero tax code to assign for this country rate.",
+        required=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_TAXES
@@ -114,13 +118,19 @@ class TaxClassUpdate(DeprecatedModelMutation):
             rate = data.get("rate")
             if rate is not None:
                 obj.rate = rate
+                obj.xero_tax_code = data.get("xero_tax_code")
                 updated_countries.append(obj.country.code)
-        models.TaxClassCountryRate.objects.bulk_update(to_update, fields=("rate",))
+        models.TaxClassCountryRate.objects.bulk_update(
+            to_update, fields=("rate", "xero_tax_code")
+        )
 
         # Create new instances.
         to_create = [
             models.TaxClassCountryRate(
-                tax_class=instance, country=item["country_code"], rate=item["rate"]
+                tax_class=instance,
+                country=item["country_code"],
+                rate=item["rate"],
+                xero_tax_code=item.get("xero_tax_code"),
             )
             for item in country_rates
             if item["country_code"] not in updated_countries

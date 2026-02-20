@@ -12,12 +12,14 @@ from ....order.utils import (
     recalculate_order_weight,
 )
 from ....permission.enums import OrderPermissions
+from ....tax.models import TaxClass
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.context import SyncWebhookControlContext
 from ...core.mutations import ModelWithRestrictedChannelAccessMutation
 from ...core.types import OrderError
 from ...plugins.dataloaders import get_plugin_manager_promise
+from ...tax.types import TaxClass as TaxClassType
 from ..types import Order, OrderLine
 from .draft_order_create import OrderLineInput
 from .utils import EditableOrderValidationMixin, call_event_by_order_status
@@ -45,7 +47,12 @@ class OrderLineUpdate(
     @classmethod
     def clean_input(cls, info: ResolveInfo, instance, data, **kwargs):
         instance.old_quantity = instance.quantity
+        tax_class_id = data.pop("tax_class", None)
         cleaned_input = super().clean_input(info, instance, data, **kwargs)
+        if tax_class_id:
+            cleaned_input["tax_class"] = cls.get_node_or_error(
+                info, tax_class_id, only_type=TaxClassType, field="tax_class"
+            )
 
         # Check price validation before general order validation to give more specific error
         if "price" in data and not instance.order.is_draft():
@@ -121,11 +128,17 @@ class OrderLineUpdate(
                     code=OrderErrorCode.INSUFFICIENT_STOCK.value,
                 ) from e
 
+            # Handle tax class override
+            tax_class: TaxClass | None = cleaned_input.get("tax_class")
+            if tax_class is not None:
+                instance.tax_class = tax_class
+                instance.save(update_fields=["tax_class_id"])
+
             # Handle custom price updates
             price_net = cleaned_input.get("price_net")
             price_gross = cleaned_input.get("price_gross")
             legacy_price = cleaned_input.get("price")
-            should_invalidate_prices = False
+            should_invalidate_prices = tax_class is not None
 
             # Check if any price field was explicitly provided (even if None)
             has_price_input = (
