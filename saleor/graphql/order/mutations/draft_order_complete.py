@@ -190,6 +190,14 @@ class DraftOrderComplete(BaseMutation):
                     site = get_site_promise(info.context).get()
                     try:
                         with traced_atomic_transaction():
+                            allowed_warehouse_ids = list(
+                                order.allowed_warehouses.values_list("id", flat=True)
+                            )
+                            additional_filter_lookup = (
+                                {"warehouse_id__in": allowed_warehouse_ids}
+                                if allowed_warehouse_ids
+                                else None
+                            )
                             allocate_stocks(
                                 [line_data],
                                 country,
@@ -198,6 +206,7 @@ class DraftOrderComplete(BaseMutation):
                                 check_reservations=is_reservation_enabled(
                                     site.settings
                                 ),
+                                additional_filter_lookup=additional_filter_lookup,
                             )
                             allocate_preorders(
                                 [line_data],

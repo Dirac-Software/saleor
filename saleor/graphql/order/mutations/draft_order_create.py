@@ -61,14 +61,6 @@ class OrderLineInput(BaseInputObjectType):
         required=False,
         description="Custom price of the item. Only works for draft orders.",
     )
-    price_net = PositiveDecimal(
-        required=False,
-        description="Custom net price of the item. Only works for draft orders.",
-    )
-    price_gross = PositiveDecimal(
-        required=False,
-        description="Custom gross price of the item. Only works for draft orders.",
-    )
     tax_class = graphene.ID(
         required=False,
         description="ID of a tax class to use for this order line.",
@@ -179,6 +171,14 @@ class DraftOrderInput(BaseInputObjectType):
         required=False,
         description=(f"Order language code.{ADDED_IN_321}"),
     )
+    allowed_warehouses = NonNullList(
+        graphene.ID,
+        required=False,
+        description=(
+            "IDs of warehouses to restrict stock allocation to. "
+            "If empty, all eligible warehouses are used."
+        ),
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
@@ -278,7 +278,31 @@ class DraftOrderCreate(
 
         draft_order_cleaner.clean_redirect_url(redirect_url, cleaned_input)
 
+        cls.clean_allowed_warehouses(cleaned_input, channel)
+
         return cleaned_input
+
+    @classmethod
+    def clean_allowed_warehouses(cls, cleaned_input, channel):
+        from ....warehouse.models import Warehouse
+
+        warehouses = cleaned_input.pop("allowed_warehouses", None)
+        if warehouses is None:
+            return
+        if warehouses:
+            valid_count = Warehouse.objects.filter(
+                pk__in=[w.pk for w in warehouses], channels=channel
+            ).count()
+            if valid_count != len(warehouses):
+                raise ValidationError(
+                    {
+                        "allowed_warehouses": ValidationError(
+                            "Some warehouses are not available in the selected channel.",
+                            code=OrderErrorCode.INVALID.value,
+                        )
+                    }
+                )
+        cleaned_input["allowed_warehouses"] = warehouses
 
     @classmethod
     def clean_addresses(
@@ -460,6 +484,9 @@ class DraftOrderCreate(
             update_order_search_vector(instance, save=False)
 
             instance.save()
+
+            if (warehouses := cleaned_input.get("allowed_warehouses")) is not None:
+                instance.allowed_warehouses.set(warehouses)
 
             events.draft_order_created_event(
                 order=instance, user=info.context.user, app=app

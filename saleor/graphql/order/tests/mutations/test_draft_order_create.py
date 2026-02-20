@@ -4154,3 +4154,152 @@ def test_draft_order_create_with_invalid_tax_class_on_line(
     assert len(errors) == 1
     assert errors[0]["field"] == "taxClass"
     assert errors[0]["code"] == OrderErrorCode.NOT_FOUND.name
+
+
+DRAFT_ORDER_CREATE_WITH_WAREHOUSES_MUTATION = """
+    mutation draftCreate($input: DraftOrderCreateInput!) {
+        draftOrderCreate(input: $input) {
+            errors {
+                field
+                code
+                message
+            }
+            order {
+                id
+                allowedWarehouses {
+                    id
+                }
+            }
+        }
+    }
+"""
+
+
+@pytest.mark.django_db
+def test_draft_order_create_with_allowed_warehouses(
+    staff_api_client,
+    permission_group_manage_orders,
+    channel_USD,
+    warehouse,
+    variant,
+    shipping_method,
+    graphql_address_data,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    warehouse_global_id = graphene.Node.to_global_id("Warehouse", warehouse.id)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+
+    variables = {
+        "input": {
+            "channelId": channel_id,
+            "lines": [{"variantId": variant_id, "quantity": 1}],
+            "allowedWarehouses": [warehouse_global_id],
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_CREATE_WITH_WAREHOUSES_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderCreate"]
+    assert not data["errors"]
+    assert len(data["order"]["allowedWarehouses"]) == 1
+    assert data["order"]["allowedWarehouses"][0]["id"] == warehouse_global_id
+
+    order_id = data["order"]["id"]
+    _, pk = graphene.Node.from_global_id(order_id)
+    from .....order.models import Order
+
+    order = Order.objects.get(pk=pk)
+    assert list(order.allowed_warehouses.values_list("id", flat=True)) == [warehouse.id]
+
+
+@pytest.mark.django_db
+def test_draft_order_create_with_no_allowed_warehouses(
+    staff_api_client,
+    permission_group_manage_orders,
+    channel_USD,
+    variant,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+
+    variables = {
+        "input": {
+            "channelId": channel_id,
+            "lines": [{"variantId": variant_id, "quantity": 1}],
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_CREATE_WITH_WAREHOUSES_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderCreate"]
+    assert not data["errors"]
+    assert data["order"]["allowedWarehouses"] == []
+
+    order_id = data["order"]["id"]
+    _, pk = graphene.Node.from_global_id(order_id)
+    from .....order.models import Order
+
+    order = Order.objects.get(pk=pk)
+    assert order.allowed_warehouses.count() == 0
+
+
+@pytest.mark.django_db
+def test_draft_order_create_with_warehouse_not_in_channel_raises_error(
+    staff_api_client,
+    permission_group_manage_orders,
+    channel_USD,
+    variant,
+    address,
+    shipping_zone,
+):
+    # given - create a warehouse not added to channel_USD
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    from .....warehouse.models import Warehouse
+
+    other_warehouse = Warehouse.objects.create(
+        address=address,
+        name="Other Channel Warehouse",
+        slug="other-channel-warehouse",
+        email="other-ch@example.com",
+    )
+    other_warehouse.shipping_zones.add(shipping_zone)
+    # intentionally NOT added to channel_USD
+
+    channel_id = graphene.Node.to_global_id("Channel", channel_USD.id)
+    variant_id = graphene.Node.to_global_id("ProductVariant", variant.id)
+    warehouse_global_id = graphene.Node.to_global_id("Warehouse", other_warehouse.id)
+
+    variables = {
+        "input": {
+            "channelId": channel_id,
+            "lines": [{"variantId": variant_id, "quantity": 1}],
+            "allowedWarehouses": [warehouse_global_id],
+        }
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_CREATE_WITH_WAREHOUSES_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderCreate"]
+    assert data["errors"]
+    assert data["errors"][0]["field"] == "allowedWarehouses"
+    assert data["errors"][0]["code"] == "INVALID"

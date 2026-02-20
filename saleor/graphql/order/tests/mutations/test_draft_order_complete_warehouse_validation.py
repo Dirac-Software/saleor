@@ -375,3 +375,163 @@ def test_draft_order_complete_mixed_owned_nonowned_blocked(
     order.refresh_from_db()
     assert order.status == OrderStatus.UNCONFIRMED
     assert data["order"]["status"] == OrderStatus.UNCONFIRMED.upper()
+
+
+@pytest.mark.django_db
+def test_draft_order_complete_allocates_only_from_allowed_warehouses(
+    staff_api_client,
+    draft_order,
+    permission_group_manage_orders,
+    warehouse,
+    address,
+    shipping_zone,
+    channel_USD,
+):
+    # given - draft order restricted to `warehouse`, second_warehouse also has stock
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    second_warehouse = type(warehouse).objects.create(
+        address=address,
+        name="Second Warehouse Allowed",
+        slug="second-warehouse-allowed",
+        email="second-allowed@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+
+    order_line = draft_order.lines.first()
+    Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+    stock = Stock.objects.get(product_variant=order_line.variant, warehouse=warehouse)
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
+
+    draft_order.allowed_warehouses.set([warehouse])
+
+    order_id = graphene.Node.to_global_id("Order", draft_order.id)
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_COMPLETE_MUTATION,
+        {"id": order_id},
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderComplete"]
+    assert not data["errors"]
+
+    assert Allocation.objects.filter(
+        order_line=order_line, stock__warehouse=warehouse
+    ).exists()
+    assert not Allocation.objects.filter(
+        order_line=order_line, stock__warehouse=second_warehouse
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_draft_order_complete_all_warehouses_when_allowed_warehouses_empty(
+    staff_api_client,
+    draft_order,
+    permission_group_manage_orders,
+    warehouse,
+    address,
+    shipping_zone,
+    channel_USD,
+):
+    # given - draft order has no warehouse restriction
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    second_warehouse = type(warehouse).objects.create(
+        address=address,
+        name="Second Warehouse Unrestricted",
+        slug="second-warehouse-unrestricted",
+        email="second-unres@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+
+    order_line = draft_order.lines.first()
+    stock = Stock.objects.get(product_variant=order_line.variant, warehouse=warehouse)
+    stock.quantity = 0
+    stock.save(update_fields=["quantity"])
+
+    Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+
+    # allowed_warehouses is empty → no restriction
+    assert draft_order.allowed_warehouses.count() == 0
+
+    order_id = graphene.Node.to_global_id("Order", draft_order.id)
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_COMPLETE_MUTATION,
+        {"id": order_id},
+    )
+
+    # then - allocates from second_warehouse since warehouse has no stock
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderComplete"]
+    assert not data["errors"]
+
+    assert Allocation.objects.filter(
+        order_line=order_line, stock__warehouse=second_warehouse
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_draft_order_complete_insufficient_stock_from_restricted_warehouse(
+    staff_api_client,
+    draft_order,
+    permission_group_manage_orders,
+    warehouse,
+    address,
+    shipping_zone,
+    channel_USD,
+):
+    # given - allowed warehouse has zero stock, another warehouse has enough
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+
+    second_warehouse = type(warehouse).objects.create(
+        address=address,
+        name="Second Warehouse Restricted",
+        slug="second-warehouse-restricted",
+        email="second-res@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+
+    order_line = draft_order.lines.first()
+    stock = Stock.objects.get(product_variant=order_line.variant, warehouse=warehouse)
+    stock.quantity = 0
+    stock.save(update_fields=["quantity"])
+
+    Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+
+    # restrict to warehouse only (which has no stock)
+    draft_order.allowed_warehouses.set([warehouse])
+
+    order_id = graphene.Node.to_global_id("Order", draft_order.id)
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_COMPLETE_MUTATION,
+        {"id": order_id},
+    )
+
+    # then - should fail with insufficient stock error
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderComplete"]
+    assert data["errors"]
+    assert data["errors"][0]["field"] == "lines"
