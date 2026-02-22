@@ -30,6 +30,8 @@ if TYPE_CHECKING:
 
 from dataclasses import dataclass
 
+from ...tax.models import TaxClass
+
 T_ERRORS = dict[str, list[ValidationError]]
 
 
@@ -41,6 +43,7 @@ class OrderLineData:
     price_override: Decimal | None = None
     quantity: int = 0
     rules_info: Iterable[VariantPromotionRuleInfo] | None = None
+    tax_class: TaxClass | None = None
 
 
 def validate_total_quantity(lines: Iterable["OrderLine"], errors: T_ERRORS):

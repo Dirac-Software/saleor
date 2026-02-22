@@ -30,6 +30,10 @@ class CountryRateUpdateInput(BaseInputObjectType):
         ),
         required=False,
     )
+    xero_tax_code = graphene.String(
+        description="Xero tax code to assign for this country rate.",
+        required=False,
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_TAXES
@@ -114,13 +118,19 @@ class TaxClassUpdate(DeprecatedModelMutation):
             rate = data.get("rate")
             if rate is not None:
                 obj.rate = rate
+                obj.xero_tax_code = data.get("xero_tax_code")
                 updated_countries.append(obj.country.code)
-        models.TaxClassCountryRate.objects.bulk_update(to_update, fields=("rate",))
+        models.TaxClassCountryRate.objects.bulk_update(
+            to_update, fields=("rate", "xero_tax_code")
+        )
 
         # Create new instances.
         to_create = [
             models.TaxClassCountryRate(
-                tax_class=instance, country=item["country_code"], rate=item["rate"]
+                tax_class=instance,
+                country=item["country_code"],
+                rate=item["rate"],
+                xero_tax_code=item.get("xero_tax_code"),
             )
             for item in country_rates
             if item["country_code"] not in updated_countries
@@ -138,8 +148,10 @@ class TaxClassUpdate(DeprecatedModelMutation):
         ).delete()
 
     @classmethod
-    def remove_country_rates(cls, country_codes):
-        models.TaxClassCountryRate.objects.filter(country__in=country_codes).delete()
+    def remove_country_rates(cls, instance, country_codes):
+        models.TaxClassCountryRate.objects.filter(
+            tax_class=instance, country__in=country_codes
+        ).delete()
 
     @classmethod
     def save(cls, _info, instance, cleaned_input, instance_tracker=None):
@@ -147,4 +159,4 @@ class TaxClassUpdate(DeprecatedModelMutation):
         update_country_rates = cleaned_input.get("update_country_rates", [])
         remove_country_rates = cleaned_input.get("remove_country_rates", [])
         cls.update_country_rates(instance, update_country_rates)
-        cls.remove_country_rates(remove_country_rates)
+        cls.remove_country_rates(instance, remove_country_rates)

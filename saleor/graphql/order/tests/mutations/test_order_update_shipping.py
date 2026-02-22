@@ -40,8 +40,8 @@ ORDER_UPDATE_SHIPPING_QUERY = """
 """
 
 ORDER_UPDATE_SHIPPING_COST_MUTATION = """
-    mutation orderUpdateShippingCost($id: ID!, $shippingCostNet: PositiveDecimal!, $vatPercentage: PositiveDecimal) {
-        orderUpdateShippingCost(id: $id, input: {shippingCostNet: $shippingCostNet, vatPercentage: $vatPercentage}) {
+    mutation orderUpdateShippingCost($id: ID!, $shippingCostNet: PositiveDecimal!) {
+        orderUpdateShippingCost(id: $id, input: {shippingCostNet: $shippingCostNet}) {
             errors {
                 field
                 code
@@ -94,11 +94,13 @@ def test_order_update_shipping(
     shipping_total = shipping_method.channel_listings.get(
         channel_id=order.channel_id
     ).get_total()
+    # Clear country rates so the mutation computes 0% VAT (this test is about
+    # shipping method assignment, not VAT computation).
+    shipping_method.tax_class.country_rates.all().delete()
     cost_query = ORDER_UPDATE_SHIPPING_COST_MUTATION
     cost_variables = {
         "id": order_id,
         "shippingCostNet": str(shipping_total.amount),
-        "vatPercentage": "0",  # No VAT for this test
     }
     response = staff_api_client.post_graphql(cost_query, cost_variables)
     content = get_graphql_content(response)
@@ -185,11 +187,13 @@ def test_order_update_shipping_by_app(
     shipping_total = shipping_method.channel_listings.get(
         channel_id=order.channel_id
     ).get_total()
+    # Clear country rates so the mutation computes 0% VAT (this test is about
+    # shipping method assignment, not VAT computation).
+    shipping_method.tax_class.country_rates.all().delete()
     cost_query = ORDER_UPDATE_SHIPPING_COST_MUTATION
     cost_variables = {
         "id": order_id,
         "shippingCostNet": str(shipping_total.amount),
-        "vatPercentage": "0",
     }
     # App already has permissions from first call, so don't pass permissions param
     response = app_api_client.post_graphql(cost_query, cost_variables)
@@ -664,7 +668,6 @@ def test_order_update_shipping_with_voucher_discount(
     cost_variables = {
         "id": order_id,
         "shippingCostNet": str(new_undiscounted_shipping_price.amount),
-        "vatPercentage": "0",
     }
     response = staff_api_client.post_graphql(cost_query, cost_variables)
     content = get_graphql_content(response)

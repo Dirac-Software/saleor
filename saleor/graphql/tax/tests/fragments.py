@@ -40,6 +40,7 @@ TAX_CLASS_FRAGMENT = """
         country
       }
       rate
+      xeroTaxCode
     }
     metadata {
       key

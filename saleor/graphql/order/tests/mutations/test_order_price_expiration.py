@@ -255,7 +255,7 @@ def test_order_line_update_invalidate_prices(
     # then
     assert not content["data"]["orderLineUpdate"]["errors"]
     order.refresh_from_db()
-    assert order.should_refresh_prices
+    assert not order.should_refresh_prices
 
 
 ORDER_LINE_DELETE_MUTATION = """

@@ -309,7 +309,7 @@ def allocate_stocks(
             "warehouse__is_owned",
         )
     )
-    stocks_id = (stock.pop("id") for stock in stocks)
+    stocks_id = [stock.pop("id") for stock in stocks]
 
     quantity_reservation_for_stocks: dict = _prepare_stock_to_reserved_quantity_map(
         checkout_lines, check_reservations, stocks_id
@@ -911,11 +911,16 @@ def increase_allocations(
     country_code = get_active_country(
         channel, order.shipping_address, order.billing_address
     )
+    allowed_warehouse_ids = list(order.allowed_warehouses.values_list("id", flat=True))
+    additional_filter_lookup = (
+        {"warehouse_id__in": allowed_warehouse_ids} if allowed_warehouse_ids else None
+    )
     allocate_stocks(
         lines_info,
         country_code,
         channel,
         manager,
+        additional_filter_lookup=additional_filter_lookup,
     )
 
 

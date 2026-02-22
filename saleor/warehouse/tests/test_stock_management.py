@@ -23,7 +23,7 @@ from ..management import (
     increase_allocations,
     increase_stock,
 )
-from ..models import Allocation, ChannelWarehouse, PreorderAllocation
+from ..models import Allocation, ChannelWarehouse, PreorderAllocation, Warehouse
 
 COUNTRY_CODE = "US"
 
@@ -1737,3 +1737,139 @@ def test_allocate_sorting_order_prioritizes_owned_first(
 
     nonowned_stock.refresh_from_db()
     assert nonowned_stock.quantity_allocated == 0
+
+
+@pytest.mark.django_db
+def test_allocate_stocks_with_allowed_warehouse_filter(
+    order_line, stock, warehouse, address, shipping_zone, channel_USD
+):
+    # given
+    stock.quantity = 100
+    stock.save(update_fields=["quantity"])
+
+    second_warehouse = Warehouse.objects.create(
+        address=address,
+        name="Second Warehouse",
+        slug="second-warehouse",
+        email="second@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+    second_stock = Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+
+    order_line.quantity = 10
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=10)
+
+    # when
+    allocate_stocks(
+        [line_data],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+        additional_filter_lookup={"warehouse_id__in": [warehouse.id]},
+    )
+
+    # then
+    assert Allocation.objects.filter(order_line=order_line, stock=stock).exists()
+    assert not Allocation.objects.filter(
+        order_line=order_line, stock=second_stock
+    ).exists()
+    stock.refresh_from_db()
+    assert stock.quantity_allocated == 10
+    second_stock.refresh_from_db()
+    assert second_stock.quantity_allocated == 0
+
+
+@pytest.mark.django_db
+def test_allocate_stocks_raises_insufficient_stock_when_restricted_warehouse_has_no_stock(
+    order_line, stock, warehouse, address, shipping_zone, channel_USD
+):
+    # given - allowed warehouse has no stock, but another warehouse does
+    stock.quantity = 0
+    stock.save(update_fields=["quantity"])
+
+    second_warehouse = Warehouse.objects.create(
+        address=address,
+        name="Second Warehouse Fallback",
+        slug="second-warehouse-fallback",
+        email="second-fallback@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+    Stock.objects.create(
+        product_variant=order_line.variant,
+        warehouse=second_warehouse,
+        quantity=100,
+    )
+
+    order_line.quantity = 10
+    order_line.save(update_fields=["quantity"])
+
+    line_data = OrderLineInfo(line=order_line, variant=order_line.variant, quantity=10)
+
+    # when / then
+    with pytest.raises(InsufficientStock):
+        allocate_stocks(
+            [line_data],
+            COUNTRY_CODE,
+            channel_USD,
+            manager=get_plugins_manager(allow_replica=False),
+            additional_filter_lookup={"warehouse_id__in": [warehouse.id]},
+        )
+
+
+@pytest.mark.django_db
+def test_allocate_stocks_respects_existing_allocations_when_check_reservations_enabled(
+    order_line, stock, channel_USD
+):
+    # given - stock has 10 items, 8 are already allocated to an existing order
+    stock.quantity = 10
+    stock.save(update_fields=["quantity"])
+
+    order_line.quantity = 8
+    order_line.save(update_fields=["quantity"])
+
+    Allocation.objects.create(order_line=order_line, stock=stock, quantity_allocated=8)
+
+    # Create a second order line for the same variant trying to claim 5 units.
+    # Only 2 are truly available (10 - 8 = 2), so InsufficientStock must be raised.
+    new_order_line = order_line.order.lines.create(
+        product_name=order_line.product_name,
+        variant_name=order_line.variant_name,
+        product_sku=order_line.product_sku,
+        product_variant_id=order_line.product_variant_id,
+        is_shipping_required=order_line.is_shipping_required,
+        is_gift_card=order_line.is_gift_card,
+        quantity=5,
+        variant=order_line.variant,
+        unit_price=order_line.unit_price,
+        total_price=order_line.total_price,
+        undiscounted_unit_price=order_line.undiscounted_unit_price,
+        undiscounted_total_price=order_line.undiscounted_total_price,
+        base_unit_price=order_line.base_unit_price,
+        undiscounted_base_unit_price=order_line.undiscounted_base_unit_price,
+        tax_rate=order_line.tax_rate,
+    )
+    line_data = OrderLineInfo(
+        line=new_order_line, variant=new_order_line.variant, quantity=5
+    )
+
+    # when / then
+    # With check_reservations=True the generator stocks_id is consumed by the
+    # reservation query, leaving the allocation query with an empty iterable.
+    # The bug causes existing allocations to be ignored, so no InsufficientStock
+    # is raised and the stock is over-allocated.
+    with pytest.raises(InsufficientStock):
+        allocate_stocks(
+            [line_data],
+            COUNTRY_CODE,
+            channel_USD,
+            manager=get_plugins_manager(allow_replica=False),
+            check_reservations=True,
+        )

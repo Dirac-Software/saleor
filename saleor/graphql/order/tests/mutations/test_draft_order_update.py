@@ -1742,8 +1742,8 @@ DRAFT_ORDER_UPDATE_SHIPPING_METHOD_MUTATION = """
 """
 
 ORDER_UPDATE_SHIPPING_COST_MUTATION = """
-    mutation orderUpdateShippingCost($id: ID!, $shippingCostNet: PositiveDecimal!, $vatPercentage: PositiveDecimal) {
-        orderUpdateShippingCost(id: $id, input: {shippingCostNet: $shippingCostNet, vatPercentage: $vatPercentage}) {
+    mutation orderUpdateShippingCost($id: ID!, $shippingCostNet: PositiveDecimal!) {
+        orderUpdateShippingCost(id: $id, input: {shippingCostNet: $shippingCostNet}) {
             errors {
                 field
                 code
@@ -1843,7 +1843,6 @@ def test_draft_order_update_shipping_method_prices_updates(
     cost_variables = {
         "id": order_id,
         "shippingCostNet": str(shipping_price),
-        "vatPercentage": "0",
     }
     response = staff_api_client.post_graphql(cost_query, cost_variables)
     content = get_graphql_content(response)
@@ -1940,30 +1939,24 @@ def test_draft_order_update_shipping_method(
     cost_variables = {
         "id": order_id,
         "shippingCostNet": str(shipping_total.amount),
-        "vatPercentage": "0",
     }
     response = staff_api_client.post_graphql(cost_query, cost_variables)
     content = get_graphql_content(response)
     assert not content["data"]["orderUpdateShippingCost"]["errors"]
 
     order.refresh_from_db()
-    shipping_price = TaxedMoney(shipping_total, shipping_total)
 
     assert data["order"]["shippingMethodName"] == shipping_method.name
     # Note: These assertions check the GraphQL response from orderUpdateShippingCost
     cost_data = content["data"]["orderUpdateShippingCost"]["order"]
     assert Decimal(cost_data["shippingPrice"]["net"]["amount"]) == quantize_price(
-        shipping_price.net.amount, shipping_price.currency
-    )
-    assert Decimal(cost_data["shippingPrice"]["gross"]["amount"]) == quantize_price(
-        shipping_price.gross.amount, shipping_price.currency
+        shipping_total.amount, shipping_total.currency
     )
 
     assert order.base_shipping_price == shipping_total
     assert order.shipping_method == shipping_method
     assert order.undiscounted_base_shipping_price == shipping_total
-    assert order.shipping_price_net == shipping_price.net
-    assert order.shipping_price_gross == shipping_price.gross
+    assert order.shipping_price_net == shipping_total
 
     assert order.shipping_tax_class == shipping_tax_class
     assert order.shipping_tax_class_name == shipping_tax_class.name
@@ -3467,6 +3460,8 @@ def test_draft_order_update_no_changes(
     input_fields.remove("voucher")
     # `channel` can't be updated when is not None
     input_fields.remove("channelId")
+    # `allowedWarehouses` is tested separately
+    input_fields.remove("allowedWarehouses")
 
     input = {
         "billingAddress": address_input,
@@ -3569,6 +3564,8 @@ def test_draft_order_update_emit_events(
     input_fields.remove("saveBillingAddress")
     # `saveShippingAddress` can't be provided without shippingAddress
     input_fields.remove("saveShippingAddress")
+    # `allowedWarehouses` is tested separately
+    input_fields.remove("allowedWarehouses")
 
     assert graphql_address_data["lastName"] != order.shipping_address.last_name
     assert graphql_address_data["lastName"] != order.billing_address.last_name
@@ -3885,3 +3882,91 @@ def test_draft_order_update_metadata_key_deleted_in_meantime(
     draft_order.refresh_from_db()
     assert draft_order.metadata == {key_1: new_value}
     assert draft_order.private_metadata == {key_2: new_value}
+
+
+DRAFT_ORDER_UPDATE_WITH_WAREHOUSES_MUTATION = """
+    mutation draftUpdate($id: ID!, $input: DraftOrderInput!) {
+        draftOrderUpdate(id: $id, input: $input) {
+            errors {
+                field
+                code
+                message
+            }
+            order {
+                id
+                allowedWarehouses {
+                    id
+                }
+            }
+        }
+    }
+"""
+
+
+@pytest.mark.django_db
+def test_draft_order_update_sets_allowed_warehouses(
+    staff_api_client,
+    permission_group_manage_orders,
+    draft_order,
+    warehouse,
+):
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order_id = graphene.Node.to_global_id("Order", draft_order.id)
+    warehouse_global_id = graphene.Node.to_global_id("Warehouse", warehouse.id)
+
+    variables = {
+        "id": order_id,
+        "input": {"allowedWarehouses": [warehouse_global_id]},
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_UPDATE_WITH_WAREHOUSES_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderUpdate"]
+    assert not data["errors"]
+    assert len(data["order"]["allowedWarehouses"]) == 1
+    assert data["order"]["allowedWarehouses"][0]["id"] == warehouse_global_id
+
+    draft_order.refresh_from_db()
+    assert list(draft_order.allowed_warehouses.values_list("id", flat=True)) == [
+        warehouse.id
+    ]
+
+
+@pytest.mark.django_db
+def test_draft_order_update_clears_allowed_warehouses(
+    staff_api_client,
+    permission_group_manage_orders,
+    draft_order,
+    warehouse,
+):
+    # given - order already has warehouse restrictions
+    draft_order.allowed_warehouses.set([warehouse])
+    assert draft_order.allowed_warehouses.count() == 1
+
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order_id = graphene.Node.to_global_id("Order", draft_order.id)
+
+    variables = {
+        "id": order_id,
+        "input": {"allowedWarehouses": []},
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        DRAFT_ORDER_UPDATE_WITH_WAREHOUSES_MUTATION, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["draftOrderUpdate"]
+    assert not data["errors"]
+    assert data["order"]["allowedWarehouses"] == []
+
+    draft_order.refresh_from_db()
+    assert draft_order.allowed_warehouses.count() == 0

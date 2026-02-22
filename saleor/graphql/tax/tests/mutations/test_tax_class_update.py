@@ -83,8 +83,8 @@ def _test_tax_class_update(api_client, permission_manage_taxes):
         new_item.pop("country")
         response_data.append(new_item)
 
-    assert update_PL_rate in response_data
-    assert create_DE_rate in response_data
+    assert {**update_PL_rate, "xeroTaxCode": None} in response_data
+    assert {**create_DE_rate, "xeroTaxCode": None} in response_data
 
 
 def test_create_as_staff(staff_api_client, permission_manage_taxes):
@@ -215,6 +215,43 @@ def test_remove_individual_country_rates_non_existing_rate(
 
     default_rate_de.refresh_from_db()
     assert default_rate_de.pk is not None
+
+
+def test_tax_class_update_with_xero_tax_code(staff_api_client, permission_manage_taxes):
+    # given
+    tax_class = TaxClass.objects.create(name="Tax Class")
+    tax_class.country_rates.create(country="PL", rate=21)
+
+    id = graphene.Node.to_global_id("TaxClass", tax_class.pk)
+
+    variables = {
+        "id": id,
+        "input": {
+            "updateCountryRates": [
+                {"countryCode": "PL", "rate": 23, "xeroTaxCode": "TAX001"},
+                {"countryCode": "DE", "rate": 19, "xeroTaxCode": "TAX002"},
+            ],
+        },
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        MUTATION, variables, permissions=[permission_manage_taxes]
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["taxClassUpdate"]
+    assert not data["errors"]
+
+    countries_by_code = {c["country"]["code"]: c for c in data["taxClass"]["countries"]}
+    assert countries_by_code["PL"]["xeroTaxCode"] == "TAX001"
+    assert countries_by_code["DE"]["xeroTaxCode"] == "TAX002"
+
+    pl_rate = tax_class.country_rates.get(country="PL")
+    de_rate = tax_class.country_rates.get(country="DE")
+    assert pl_rate.xero_tax_code == "TAX001"
+    assert de_rate.xero_tax_code == "TAX002"
 
 
 def test_tax_class_update_zero_rate(staff_api_client, permission_manage_taxes):

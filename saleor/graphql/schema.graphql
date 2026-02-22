@@ -6590,6 +6590,9 @@ type TaxClassCountryRate @doc(category: "Taxes") {
 
   """Related tax class."""
   taxClass: TaxClass
+
+  """Xero tax code for this country rate."""
+  xeroTaxCode: String
 }
 
 enum VariantAttributeScope @doc(category: "Products") {
@@ -11647,6 +11650,11 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
 
   """List of user gift cards."""
   giftCards: [GiftCard!]!
+
+  """
+  Warehouses from which stock may be allocated for this order. Empty means no restriction.
+  """
+  allowedWarehouses: [Warehouse!]!
 
   """Additional information provided by the customer about the order."""
   customerNote: String!
@@ -18538,7 +18546,7 @@ type Mutation {
   ): OrderUpdateShipping @doc(category: "Orders")
 
   """
-  Manually updates the shipping cost of an order. Provide net cost and VAT percentage (defaults to 20% UK standard rate). Gross cost is auto-calculated. Only works for draft and unconfirmed orders. 
+  Manually sets the shipping cost of a draft or unconfirmed order. Provide the net amount and optionally a tax class; the gross is derived from the tax class's rate for the order's shipping country. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
   """
@@ -21585,6 +21593,9 @@ input CountryRateInput @doc(category: "Taxes") {
   Tax rate value provided as percentage. Example: provide `23` to represent `23%` tax rate.
   """
   rate: Float!
+
+  """Xero tax code to assign for this country rate."""
+  xeroTaxCode: String
 }
 
 """
@@ -21672,6 +21683,9 @@ input CountryRateUpdateInput @doc(category: "Taxes") {
   Tax rate value provided as percentage. Example: provide `23` to represent `23%` tax rate. Provide `null` to remove the particular rate.
   """
   rate: Float
+
+  """Xero tax code to assign for this country rate."""
+  xeroTaxCode: String
 }
 
 """
@@ -26465,6 +26479,11 @@ input DraftOrderCreateInput @doc(category: "Orders") {
   """
   languageCode: LanguageCodeEnum
 
+  """
+  IDs of warehouses to restrict stock allocation to. If empty, all eligible warehouses are used.
+  """
+  allowedWarehouses: [ID!]
+
   """Variant line input consisting of variant ID and quantity of products."""
   lines: [OrderLineCreateInput!]
 }
@@ -26478,11 +26497,8 @@ input OrderLineCreateInput @doc(category: "Orders") {
   """
   price: PositiveDecimal
 
-  """Custom net price of the item. Only works for draft orders."""
-  priceNet: PositiveDecimal
-
-  """Custom gross price of the item. Only works for draft orders."""
-  priceGross: PositiveDecimal
+  """ID of a tax class to use for this order line."""
+  taxClass: ID
 
   """Product variant ID."""
   variantId: ID!
@@ -26620,6 +26636,11 @@ input DraftOrderInput @doc(category: "Orders") {
   Added in Saleor 3.21.
   """
   languageCode: LanguageCodeEnum
+
+  """
+  IDs of warehouses to restrict stock allocation to. If empty, all eligible warehouses are used.
+  """
+  allowedWarehouses: [ID!]
 }
 
 """
@@ -27168,11 +27189,8 @@ input OrderLineInput @doc(category: "Orders") {
   """Custom price of the item. Only works for draft orders."""
   price: PositiveDecimal
 
-  """Custom net price of the item. Only works for draft orders."""
-  priceNet: PositiveDecimal
-
-  """Custom gross price of the item. Only works for draft orders."""
-  priceGross: PositiveDecimal
+  """ID of a tax class to use for this order line."""
+  taxClass: ID
 }
 
 """
@@ -27428,7 +27446,7 @@ input OrderUpdateShippingInput @doc(category: "Orders") {
 }
 
 """
-Manually updates the shipping cost of an order. Provide net cost and VAT percentage (defaults to 20% UK standard rate). Gross cost is auto-calculated. Only works for draft and unconfirmed orders. 
+Manually sets the shipping cost of a draft or unconfirmed order. Provide the net amount and optionally a tax class; the gross is derived from the tax class's rate for the order's shipping country. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
 """
@@ -27444,12 +27462,12 @@ input OrderUpdateShippingCostInput @doc(category: "Orders") {
   shippingCostNet: PositiveDecimal!
 
   """
-  VAT percentage to apply to shipping cost. Defaults to 20% (UK standard rate). Common UK rates: 20% (standard), 5% (reduced), 0% (zero-rated).
+  Tax class used to determine the VAT rate for shipping. The rate is looked up from the tax class's country rate for the order's shipping address country. If omitted, the order's existing shipping tax class is reused; if none is set, the country default rate applies.
   """
-  vatPercentage: PositiveDecimal
+  taxClass: ID
 
   """
-  Incoterm (International Commercial Terms) defining shipping responsibility. Default is 'DDP' (Delivered Duty Paid) - seller pays all shipping costs. Use 'EXW' (Ex Works) to allow $0 shipping cost when buyer pays shipping. Other options: FOB, DAP, CIF, etc.
+  Incoterm (International Commercial Terms) defining shipping responsibility. Options: EXW, FCA, CPT, CIP, DAP, DPU, DDP, FAS, FOB, CFR, CIF.
   """
   incoTerm: String
 }

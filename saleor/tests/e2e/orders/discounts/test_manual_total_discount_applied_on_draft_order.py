@@ -144,7 +144,7 @@ def test_manual_total_discount_fixed_should_be_applied_to_draft_order_CORE_0223(
 
     # Step 3.5 - Set shipping cost
     shipping_net = round(shipping_price / (1 + country_tax_rate / 100), 2)
-    input = {"shippingCostNet": shipping_net, "vatPercentage": country_tax_rate}
+    input = {"shippingCostNet": shipping_net}
     order = order_update_shipping_cost(e2e_staff_api_client, order_id, input)
     order = order["order"]
 
@@ -341,7 +341,7 @@ def test_manual_total_discount_percentage_should_be_applied_to_draft_order_CORE_
 
     # Step 3.5 - Set shipping cost
     shipping_net = round(shipping_price / (1 + country_tax_rate / 100), 2)
-    input = {"shippingCostNet": shipping_net, "vatPercentage": country_tax_rate}
+    input = {"shippingCostNet": shipping_net}
     order = order_update_shipping_cost(e2e_staff_api_client, order_id, input)
     order = order["order"]
 
