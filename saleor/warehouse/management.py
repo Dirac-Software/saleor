@@ -309,7 +309,7 @@ def allocate_stocks(
             "warehouse__is_owned",
         )
     )
-    stocks_id = (stock.pop("id") for stock in stocks)
+    stocks_id = [stock.pop("id") for stock in stocks]
 
     quantity_reservation_for_stocks: dict = _prepare_stock_to_reserved_quantity_map(
         checkout_lines, check_reservations, stocks_id

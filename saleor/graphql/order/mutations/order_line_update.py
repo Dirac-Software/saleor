@@ -48,7 +48,9 @@ class OrderLineUpdate(
     def clean_input(cls, info: ResolveInfo, instance, data, **kwargs):
         instance.old_quantity = instance.quantity
         tax_class_id = data.pop("tax_class", None)
+        price_in_input = "price" in data
         cleaned_input = super().clean_input(info, instance, data, **kwargs)
+        cleaned_input["_price_in_input"] = price_in_input
         if tax_class_id:
             cleaned_input["tax_class"] = cls.get_node_or_error(
                 info, tax_class_id, only_type=TaxClassType, field="tax_class"
@@ -167,15 +169,27 @@ class OrderLineUpdate(
                 cleaned_input.get("price") is not None
                 or cleaned_input.get("tax_class") is not None
             )
+            price_explicitly_null = (
+                cleaned_input.get("_price_in_input")
+                and cleaned_input.get("price") is None
+            )
             quantity_changed = instance.quantity != instance.old_quantity
-            should_invalidate = price_or_tax_changed or quantity_changed
-            if should_invalidate:
-                invalidate_order_prices(order, save=False)
+
             recalculate_order_weight(order)
             order_save_fields = ["weight", "updated_at"]
-            if should_invalidate:
+            if price_or_tax_changed:
+                invalidate_order_prices(order, save=False)
                 order_save_fields.append("should_refresh_prices")
             order.save(update_fields=order_save_fields)
+
+            if (
+                quantity_changed
+                and not price_or_tax_changed
+                and not price_explicitly_null
+            ):
+                from ....order.calculations import fetch_order_prices_if_expired
+
+                fetch_order_prices_if_expired(order, manager, force_update=True)
 
             call_event_by_order_status(order, manager)
 

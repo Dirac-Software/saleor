@@ -148,8 +148,10 @@ class TaxClassUpdate(DeprecatedModelMutation):
         ).delete()
 
     @classmethod
-    def remove_country_rates(cls, country_codes):
-        models.TaxClassCountryRate.objects.filter(country__in=country_codes).delete()
+    def remove_country_rates(cls, instance, country_codes):
+        models.TaxClassCountryRate.objects.filter(
+            tax_class=instance, country__in=country_codes
+        ).delete()
 
     @classmethod
     def save(cls, _info, instance, cleaned_input, instance_tracker=None):
@@ -157,4 +159,4 @@ class TaxClassUpdate(DeprecatedModelMutation):
         update_country_rates = cleaned_input.get("update_country_rates", [])
         remove_country_rates = cleaned_input.get("remove_country_rates", [])
         cls.update_country_rates(instance, update_country_rates)
-        cls.remove_country_rates(remove_country_rates)
+        cls.remove_country_rates(instance, remove_country_rates)

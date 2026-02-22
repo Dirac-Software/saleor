@@ -177,6 +177,7 @@ class DraftOrderComplete(BaseMutation):
 
             cls.setup_voucher_customer(order, channel)
             order_lines_info = []
+            lines_to_clear = []
             lines = order.lines.all()
             for line in lines:
                 if not line.variant:
@@ -219,9 +220,13 @@ class DraftOrderComplete(BaseMutation):
                         errors = prepare_insufficient_stock_order_validation_errors(e)
                         raise ValidationError({"lines": errors}) from e
 
-                # clear draft base price expiration time
                 line.draft_base_price_expire_at = None
-                OrderLine.objects.bulk_update(lines, ["draft_base_price_expire_at"])
+                lines_to_clear.append(line)
+
+            if lines_to_clear:
+                OrderLine.objects.bulk_update(
+                    lines_to_clear, ["draft_base_price_expire_at"]
+                )
 
             # Refresh order status - allocate_stocks may have auto-confirmed it
             order.refresh_from_db()
