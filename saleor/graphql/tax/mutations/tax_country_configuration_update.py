@@ -41,6 +41,9 @@ class TaxClassRateInput(BaseInputObjectType):
         description="ID of a tax class for which to update the tax rate", required=False
     )
     rate = graphene.Float(description="Tax rate value.", required=False)
+    xero_tax_code = graphene.String(
+        description="Xero tax code to assign for this country rate.", required=False
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_TAXES
@@ -172,10 +175,13 @@ class TaxCountryConfigurationUpdate(BaseMutation):
         if default_rate:
             rate = default_rate.get("rate")
             if rate is not None:
+                defaults = {"rate": default_rate["rate"]}
+                if "xero_tax_code" in default_rate:
+                    defaults["xero_tax_code"] = default_rate["xero_tax_code"]
                 models.TaxClassCountryRate.objects.update_or_create(
                     country=country_code,
                     tax_class=None,
-                    defaults={"rate": default_rate["rate"]},
+                    defaults=defaults,
                 )
             else:
                 default_rate_obj = models.TaxClassCountryRate.objects.filter(
@@ -198,12 +204,17 @@ class TaxCountryConfigurationUpdate(BaseMutation):
 
         # Update existing instances.
         for obj in update_qs:
-            rate = cleaned_data[obj.tax_class_id].get("rate")
+            input_item = cleaned_data[obj.tax_class_id]
+            rate = input_item.get("rate")
             if rate is None:
                 delete_ids.append(obj.tax_class_id)
             else:
                 obj.rate = rate
-        models.TaxClassCountryRate.objects.bulk_update(update_qs, fields=("rate",))
+                if "xero_tax_code" in input_item:
+                    obj.xero_tax_code = input_item["xero_tax_code"]
+        models.TaxClassCountryRate.objects.bulk_update(
+            update_qs, fields=("rate", "xero_tax_code")
+        )
 
         # Create new instances.
         to_create = []
@@ -212,7 +223,10 @@ class TaxCountryConfigurationUpdate(BaseMutation):
             rate = input_item.get("rate")
             if rate is not None:
                 obj = models.TaxClassCountryRate(
-                    country=country_code, tax_class_id=tax_class_id, rate=rate
+                    country=country_code,
+                    tax_class_id=tax_class_id,
+                    rate=rate,
+                    xero_tax_code=input_item.get("xero_tax_code"),
                 )
                 to_create.append(obj)
         models.TaxClassCountryRate.objects.bulk_create(to_create)
