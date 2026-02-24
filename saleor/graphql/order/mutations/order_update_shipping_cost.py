@@ -8,10 +8,12 @@ from ....core.prices import quantize_price
 from ....order import models
 from ....order.actions import call_order_event
 from ....order.error_codes import OrderErrorCode
-from ....order.utils import get_order_country
 from ....permission.enums import OrderPermissions
-from ....tax.models import TaxClassCountryRate
-from ....tax.utils import get_tax_rate_for_country, normalize_tax_rate_for_db
+from ....tax.utils import (
+    get_tax_country_for_order,
+    normalize_tax_rate_for_db,
+    resolve_tax_class_country_rate,
+)
 from ....webhook.event_types import WebhookEventAsyncType
 from ...core import ResolveInfo
 from ...core.context import SyncWebhookControlContext
@@ -119,27 +121,7 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         return manual_method
 
     @classmethod
-    def _resolve_shipping_tax_rate(cls, order, tax_class, country_code):
-        """Return the tax rate (as a percentage, e.g. 20 for 20%) for shipping.
-
-        Looks up TaxClassCountryRate for the given tax class and country,
-        falling back to the country default rate if no specific row exists.
-        """
-        default_rate_obj = TaxClassCountryRate.objects.filter(
-            country=country_code, tax_class=None
-        ).first()
-        default_tax_rate = default_rate_obj.rate if default_rate_obj else Decimal(0)
-
-        if tax_class is None:
-            return default_tax_rate
-
-        rates = list(TaxClassCountryRate.objects.filter(tax_class=tax_class))
-        return get_tax_rate_for_country(rates, default_tax_rate, country_code)
-
-    @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
-        from ....shipping import IncoTerm
-
         order = cls.get_node_or_error(
             info,
             data["id"],
@@ -163,6 +145,8 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             )
 
         # Validate inco_term before touching any order state.
+        from ....shipping import IncoTerm
+
         inco_term = input.get("inco_term")
         if inco_term and inco_term not in [choice[0] for choice in IncoTerm.CHOICES]:
             raise ValidationError(
@@ -185,18 +169,16 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         else:
             tax_class = order.shipping_tax_class
 
-        # Select the tax-relevant country based on the incoterm:
-        #   DAP        → zero-rated export; customer is importer of record.
-        #   EXW / FCA  → sale recognised at dispatch country (channel.default_country).
-        #   DDP / none → destination country (shipping address).
-        if inco_term == "DAP":
-            tax_rate = Decimal(0)
+        # Apply incoming inco_term to the order so get_tax_country_for_order sees it.
+        if inco_term:
+            order.inco_term = inco_term
+
+        country_code = get_tax_country_for_order(order)
+        if country_code is None:
+            shipping_country_rate = None
         else:
-            if inco_term in ("EXW", "FCA"):
-                country_code = order.channel.default_country.code
-            else:
-                country_code = get_order_country(order)
-            tax_rate = cls._resolve_shipping_tax_rate(order, tax_class, country_code)
+            shipping_country_rate = resolve_tax_class_country_rate(order, tax_class)
+        tax_rate = shipping_country_rate.rate if shipping_country_rate else Decimal(0)
 
         net_amount = input["shipping_cost_net"]
         currency = order.currency
@@ -213,6 +195,9 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         order.base_shipping_price_amount = net_amount
         order.undiscounted_base_shipping_price_amount = net_amount
         order.shipping_tax_rate = normalize_tax_rate_for_db(tax_rate)
+        order.shipping_xero_tax_code = (
+            shipping_country_rate.xero_tax_code if shipping_country_rate else None
+        )
 
         # Update order totals: total = subtotal + shipping.
         order.total_net_amount = quantize_price(
@@ -236,9 +221,6 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             manual_method = cls._get_or_create_manual_shipping_method(order.channel)
             order.shipping_method = manual_method
 
-        if inco_term:
-            order.inco_term = inco_term
-
         order.should_refresh_prices = False
 
         update_fields = [
@@ -247,6 +229,7 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             "base_shipping_price_amount",
             "undiscounted_base_shipping_price_amount",
             "shipping_tax_rate",
+            "shipping_xero_tax_code",
             "total_net_amount",
             "total_gross_amount",
             "undiscounted_total_net_amount",

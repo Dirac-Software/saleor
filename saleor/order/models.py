@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from operator import attrgetter
 from re import match
 from typing import TYPE_CHECKING, cast
@@ -298,6 +298,7 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
     shipping_tax_class_metadata = JSONField(
         blank=True, db_default={}, default=dict, encoder=CustomJsonEncoder
     )
+    shipping_xero_tax_code = models.CharField(max_length=50, blank=True, null=True)
     shipping_method_private_metadata = JSONField(
         blank=True, null=True, default=dict, encoder=CustomJsonEncoder
     )
@@ -436,6 +437,7 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
             "Timestamp when the deposit threshold was met by cumulative Xero payments."
         ),
     )
+    deposit_threshold_met_override = models.BooleanField(default=False)
     xero_deposit_prepayment_id = models.CharField(
         max_length=36,
         null=True,
@@ -518,7 +520,11 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
             return True
         if not self.deposit_percentage:
             return False
-        required = self.total_gross_amount * (self.deposit_percentage / Decimal(100))
+        if self.deposit_threshold_met_override:
+            return True
+        required = (
+            self.total_gross_amount * (self.deposit_percentage / Decimal(100))
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return self.total_deposit_paid >= required
 
     def get_remaining_deposit(self):
@@ -849,6 +855,13 @@ class OrderLine(ModelWithMetadata):
     tax_class_metadata = JSONField(
         blank=True, db_default={}, default=dict, encoder=CustomJsonEncoder
     )
+    tax_class_country_rate = models.ForeignKey(
+        "tax.TaxClassCountryRate",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
+    xero_tax_code = models.CharField(max_length=50, blank=True, null=True)
 
     is_price_overridden = models.BooleanField(null=True, blank=True)
 
@@ -1091,6 +1104,11 @@ class Fulfillment(ModelWithMetadata):
         return Money(self.deposit_allocated_amount, self.order.currency)
 
     def can_auto_transition_to_fulfilled(self):
+        """Check whether this fulfillment can auto-transition to fulfilled.
+
+        We need to have a shipment booked, pick completed and the proforma needs
+        to have been paid.
+        """
         from . import PickStatus
 
         if self.status != FulfillmentStatus.WAITING_FOR_APPROVAL:
@@ -1107,17 +1125,14 @@ class Fulfillment(ModelWithMetadata):
         if not self.shipment_id:
             return False
 
-        from .proforma import calculate_fulfillment_total
+        from . import OrderOrigin
 
         order = self.order
-        prior_total = sum(
-            calculate_fulfillment_total(f)
-            for f in order.fulfillments.exclude(pk=self.pk)
-            if f.status != FulfillmentStatus.CANCELED
-        )
-        current_total = calculate_fulfillment_total(self)
-        if order.total_deposit_paid < prior_total + current_total:
-            return False
+        if order.origin != OrderOrigin.CHECKOUT:
+            if not order.payments.filter(
+                psp_reference=self.xero_proforma_prepayment_id
+            ).exists():
+                return False
 
         return True
 

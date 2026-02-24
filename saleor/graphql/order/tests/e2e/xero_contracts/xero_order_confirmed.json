@@ -1,0 +1,53 @@
+{
+  "order": {
+    "id": "T3JkZXI6ZTBkNDFjODgtYTljNi00ZGY4LTk3ZTItZjk3N2MwMDA0YmJi",
+    "number": "2013",
+    "userEmail": "fixture@example.com",
+    "xeroBankAccountCode": "090",
+    "billingAddress": {
+      "companyName": "Fixture Ltd",
+      "firstName": "Fixture",
+      "lastName": "User",
+      "streetAddress1": "1 Test Street",
+      "streetAddress2": "",
+      "city": "London",
+      "postalCode": "EC1A 1BB",
+      "country": {
+        "code": "GB"
+      }
+    },
+    "user": {
+      "privateMetadata": [
+        {
+          "key": "xeroContactId",
+          "value": "00000000-0000-0000-0000-000000000000"
+        }
+      ]
+    },
+    "privateMetadata": []
+  },
+  "calculatedAmounts": {
+    "depositAmount": {
+      "amount": 90.0,
+      "currency": "GBP"
+    },
+    "shippingXeroTaxCode": "RRINPUT",
+    "lines": [
+      {
+        "orderLineId": "6bd07828-2df6-47dc-ba49-3ee9e48e143c",
+        "quantity": 5,
+        "productSku": "FIXTURE-001",
+        "productCode": null,
+        "xeroTaxCode": "RROUTPUT",
+        "unitPriceGross": {
+          "amount": 60.0,
+          "currency": "GBP"
+        },
+        "unitPriceNet": {
+          "amount": 50.0,
+          "currency": "GBP"
+        }
+      }
+    ]
+  }
+}

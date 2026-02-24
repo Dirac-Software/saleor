@@ -179,6 +179,10 @@ class DraftOrderInput(BaseInputObjectType):
             "If empty, all eligible warehouses are used."
         ),
     )
+    xero_bank_account_code = graphene.String(
+        required=False,
+        description="Xero bank account code for invoicing this order.",
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
@@ -190,6 +194,10 @@ class DraftOrderCreateInput(DraftOrderInput):
         description=(
             "Variant line input consisting of variant ID and quantity of products."
         ),
+    )
+    xero_bank_account_code = graphene.String(
+        required=False,
+        description="Xero bank account code for invoicing this order.",
     )
 
     class Meta:

@@ -261,10 +261,14 @@ def check_xero_prepayment_statuses_task():
         return
 
     # Check deposit prepayments: orders with a stored Xero prepayment ID and no deposit_paid_at
-    pending_deposit_orders = Order.objects.filter(
-        xero_deposit_prepayment_id__isnull=False,
-        deposit_paid_at__isnull=True,
-    ).select_related("channel")
+    pending_deposit_orders = (
+        Order.objects.filter(
+            xero_deposit_prepayment_id__isnull=False,
+            deposit_paid_at__isnull=True,
+        )
+        .exclude(payments__psp_reference=F("xero_deposit_prepayment_id"))
+        .select_related("channel")
+    )
 
     for order in pending_deposit_orders:
         if order.xero_deposit_prepayment_id is None:
@@ -272,16 +276,17 @@ def check_xero_prepayment_statuses_task():
         response = manager.xero_check_prepayment_status(
             order.xero_deposit_prepayment_id
         )
-        if not response or not response.get("isPaid"):
+        reconciled = response.get("reconciledAmount") if response else None
+        if not reconciled or Decimal(str(reconciled)) <= 0:
             continue
-        amount = Decimal(str(response["amountPaid"]))
+        amount = Decimal(str(reconciled))
         record_external_payment(
             order=order,
             amount=amount,
             gateway=CustomPaymentChoices.XERO,
             psp_reference=order.xero_deposit_prepayment_id,
             transaction_kind=TransactionKind.CAPTURE,
-            metadata={"source": "xero_cron", "datePaid": response.get("datePaid", "")},
+            metadata={"source": "xero_cron"},
             user=None,
             app=None,
             manager=manager,
@@ -305,18 +310,22 @@ def check_xero_prepayment_statuses_task():
         response = manager.xero_check_prepayment_status(
             fulfillment.xero_proforma_prepayment_id
         )
-        if not response or not response.get("isPaid"):
+        reconciled = response.get("reconciledAmount") if response else None
+        if not reconciled or Decimal(str(reconciled)) <= 0:
             continue
         order = fulfillment.order
-        amount = Decimal(str(response["amountPaid"]))
+        amount = Decimal(str(reconciled))
         record_external_payment(
             order=order,
             amount=amount,
             gateway=CustomPaymentChoices.XERO,
             psp_reference=fulfillment.xero_proforma_prepayment_id,
             transaction_kind=TransactionKind.CAPTURE,
-            metadata={"source": "xero_cron", "datePaid": response.get("datePaid", "")},
+            metadata={"source": "xero_cron"},
             user=None,
             app=None,
             manager=manager,
         )
+        from .actions import try_auto_approve_fulfillment
+
+        try_auto_approve_fulfillment(fulfillment)

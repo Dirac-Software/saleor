@@ -76,17 +76,21 @@ class OrderSetDepositRequired(BaseMutation):
     ):
         order = cls.get_node_or_error(info, id, only_type=Order)
         cls.check_channel_permissions(info, [order.channel_id])
+
+        if order.xero_deposit_prepayment_id:
+            raise ValidationError(
+                "Deposit settings cannot be changed after a Xero prepayment has been created.",
+                code=OrderErrorCode.INVALID.value,
+            )
+
         cls.clean_input(required, percentage, xero_bank_account_code)
 
         order.deposit_required = required
         order.deposit_percentage = percentage if required else None
-        order.xero_bank_account_code = xero_bank_account_code if required else None
-        order.save(
-            update_fields=[
-                "deposit_required",
-                "deposit_percentage",
-                "xero_bank_account_code",
-            ]
-        )
+        update_fields = ["deposit_required", "deposit_percentage"]
+        if xero_bank_account_code is not None:
+            order.xero_bank_account_code = xero_bank_account_code
+            update_fields.append("xero_bank_account_code")
+        order.save(update_fields=update_fields)
 
         return OrderSetDepositRequired(order=SyncWebhookControlContext(order))

@@ -510,7 +510,7 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
         inco_term=IncoTerm.DDP,
         arrived_at=timezone.now(),
     )
-    draft_poi = PurchaseOrderItem.objects.create(
+    PurchaseOrderItem.objects.create(
         order=purchase_order,
         product_variant=variant,
         quantity_ordered=100,
@@ -533,4 +533,96 @@ def test_allocate_sources_ignores_draft_and_cancelled_pois(
 
     # then - no AllocationSource created (allocation itself may exist but failed)
     assert AllocationSource.objects.count() == 0
-    assert draft_poi.quantity_allocated == 0  # Not used
+
+
+def test_allocate_sources_prefers_received_poi_over_confirmed(
+    order_line,
+    owned_warehouse,
+    purchase_order_item,
+    purchase_order,
+    channel_USD,
+):
+    """RECEIVED POIs are sourced before CONFIRMED POIs regardless of FIFO date.
+
+    Regression test: when stock has physically arrived (RECEIVED POI) alongside
+    in-transit stock (CONFIRMED POI), allocation must source from the received
+    batch so the order line reports received quantity > 0 (not 'Out of Stock').
+    """
+    from datetime import timedelta
+
+    from ...inventory import PurchaseOrderItemStatus
+    from ...inventory.models import PurchaseOrderItem
+    from ...inventory.stock_management import (
+        complete_receipt,
+        confirm_purchase_order_item,
+        receive_item,
+        start_receipt,
+    )
+    from ...shipping import IncoTerm, ShipmentType
+    from ...shipping.models import Shipment
+    from ..stock_utils import get_received_quantity_for_order_line
+
+    variant = order_line.variant
+
+    # purchase_order_item fixture is already a CONFIRMED (in-transit) POI
+    poi_confirmed = purchase_order_item
+
+    # Create a second shipment and POI that will be fully received
+    shipment_received = Shipment.objects.create(
+        source=purchase_order.source_warehouse.address,
+        destination=purchase_order.destination_warehouse.address,
+        shipment_type=ShipmentType.INBOUND,
+        tracking_url="SHIPMENT-RECEIVED-TEST",
+        shipping_cost_amount=Decimal("100.00"),
+        currency="USD",
+        carrier="TEST-CARRIER",
+        inco_term=IncoTerm.DDP,
+    )
+    poi_received = PurchaseOrderItem.objects.create(
+        order=purchase_order,
+        product_variant=variant,
+        quantity_ordered=10,
+        total_price_amount=100.00,
+        currency="USD",
+        shipment=shipment_received,
+        country_of_origin="US",
+        status=PurchaseOrderItemStatus.DRAFT,
+    )
+    confirm_purchase_order_item(poi_received)
+
+    # Make poi_confirmed older so pure FIFO would pick it first (the buggy behaviour)
+    now = timezone.now()
+    poi_confirmed.confirmed_at = now - timedelta(days=2)
+    poi_confirmed.save(update_fields=["confirmed_at"])
+    poi_received.confirmed_at = now - timedelta(days=1)
+    poi_received.save(update_fields=["confirmed_at"])
+
+    # Receive poi_received through the receipt workflow
+    receipt = start_receipt(shipment_received)
+    receive_item(receipt, variant, 10)
+    complete_receipt(receipt)
+
+    poi_received.refresh_from_db()
+    assert poi_received.status == PurchaseOrderItemStatus.RECEIVED
+
+    order_line.quantity = 1
+    order_line.save(update_fields=["quantity"])
+    stock = Stock.objects.get(warehouse=owned_warehouse, product_variant=variant)
+
+    # when
+    allocate_stocks(
+        [OrderLineInfo(line=order_line, variant=variant, quantity=1)],
+        COUNTRY_CODE,
+        channel_USD,
+        manager=get_plugins_manager(allow_replica=False),
+    )
+
+    # then - source must come from the RECEIVED POI, not the older CONFIRMED one
+    allocation = Allocation.objects.get(order_line=order_line, stock=stock)
+    assert allocation.allocation_sources.count() == 1
+    source = allocation.allocation_sources.first()
+    assert source.purchase_order_item == poi_received
+
+    # And received quantity must be > 0 so the line is not shown as 'Out of Stock'
+    received_qty = get_received_quantity_for_order_line(order_line)
+    assert received_qty > 0

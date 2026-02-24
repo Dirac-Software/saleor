@@ -378,16 +378,53 @@ def get_tax_rate_for_country(
     return tax_rate
 
 
-def get_tax_class_kwargs_for_order_line(tax_class: Optional["TaxClass"]):
+def get_tax_country_for_order(order: "Order") -> str | None:
+    from ..shipping import IncoTerm
+
+    inco_term = getattr(order, "inco_term", None)
+    if inco_term == IncoTerm.DAP:
+        return None
+    if inco_term in (IncoTerm.EXW, IncoTerm.FCA):
+        return order.channel.default_country.code
+    from ..order.utils import get_order_country
+
+    return get_order_country(order)
+
+
+def resolve_tax_class_country_rate(
+    order: "Order", tax_class: Optional["TaxClass"]
+) -> Optional["TaxClassCountryRate"]:
+    country_code = get_tax_country_for_order(order)
+    if not country_code:
+        return None
+    if tax_class:
+        rate = TaxClassCountryRate.objects.filter(
+            tax_class=tax_class, country=country_code
+        ).first()
+        if rate:
+            return rate
+    return TaxClassCountryRate.objects.filter(
+        tax_class=None, country=country_code
+    ).first()
+
+
+def get_tax_class_kwargs_for_order_line(
+    tax_class: Optional["TaxClass"],
+    country_rate: Optional["TaxClassCountryRate"] = None,
+):
     if not tax_class:
         return {}
 
-    return {
+    result = {
         "tax_class": tax_class,
         "tax_class_name": tax_class.name,
         "tax_class_private_metadata": tax_class.private_metadata,
         "tax_class_metadata": tax_class.metadata,
     }
+    if country_rate is not None:
+        result["tax_class_country_rate"] = country_rate
+        result["xero_tax_code"] = country_rate.xero_tax_code
+    return result
 
 
 def get_shipping_tax_class_kwargs_for_order(tax_class: Optional["TaxClass"]):

@@ -847,6 +847,7 @@ class WebhookEventSyncType:
 
     XERO_LIST_PAYMENTS = "xero_list_payments"
     XERO_LIST_BANK_ACCOUNTS = "xero_list_bank_accounts"
+    XERO_LIST_TAX_CODES = "xero_list_tax_codes"
     XERO_ORDER_CONFIRMED = "xero_order_confirmed"
     XERO_FULFILLMENT_CREATED = "xero_fulfillment_created"
     XERO_CHECK_PREPAYMENT_STATUS = "xero_check_prepayment_status"
@@ -950,6 +951,10 @@ class WebhookEventSyncType:
         },
         XERO_LIST_BANK_ACCOUNTS: {
             "name": "List Xero bank accounts.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        XERO_LIST_TAX_CODES: {
+            "name": "List Xero tax codes.",
             "permission": OrderPermissions.MANAGE_ORDERS,
         },
         XERO_ORDER_CONFIRMED: {

@@ -1064,13 +1064,13 @@ type Query {
   ): FulfillmentCountableConnection @doc(category: "Orders")
 
   """
-  List available Xero bank accounts for creating deposit prepayments.
+  List available Xero bank accounts for a given channel's Xero tenant.
   
   Requires one of the following permissions: MANAGE_ORDERS.
   """
   availableXeroBankAccounts(
-    """ID of the order (used to resolve the Xero tenant via its channel)."""
-    orderId: ID!
+    """Slug of the channel used to identify the Xero tenant."""
+    channelSlug: String!
   ): AvailableXeroBankAccounts @doc(category: "Orders")
 
   """
@@ -1082,6 +1082,16 @@ type Query {
     """ID of the order to fetch payments for."""
     orderId: ID!
   ): AvailableXeroPayments @doc(category: "Orders")
+
+  """
+  List available Xero tax codes for a given channel's Xero tenant.
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  availableXeroTaxCodes(
+    """Slug of the channel used to identify the Xero tenant."""
+    channelSlug: String!
+  ): AvailableXeroTaxCodes @doc(category: "Orders")
 
   """Look up a navigation menu by ID or name."""
   menu(
@@ -2534,6 +2544,7 @@ enum WebhookEventTypeEnum @doc(category: "Webhooks") {
   PAYMENT_METHOD_PROCESS_TOKENIZATION_SESSION
   XERO_LIST_PAYMENTS
   XERO_LIST_BANK_ACCOUNTS
+  XERO_LIST_TAX_CODES
   XERO_ORDER_CONFIRMED
   XERO_FULFILLMENT_CREATED
   XERO_CHECK_PREPAYMENT_STATUS
@@ -2604,6 +2615,7 @@ enum WebhookEventTypeSyncEnum @doc(category: "Webhooks") {
   PAYMENT_METHOD_PROCESS_TOKENIZATION_SESSION
   XERO_LIST_PAYMENTS
   XERO_LIST_BANK_ACCOUNTS
+  XERO_LIST_TAX_CODES
   XERO_ORDER_CONFIRMED
   XERO_FULFILLMENT_CREATED
   XERO_CHECK_PREPAYMENT_STATUS
@@ -11574,6 +11586,11 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """
   depositThresholdMet: Boolean!
 
+  """
+  Whether the deposit threshold has been manually overridden by an admin.
+  """
+  depositThresholdMetOverride: Boolean!
+
   """Date and time when deposit threshold was met."""
   depositPaidAt: DateTime
 
@@ -11887,8 +11904,8 @@ type Fulfillment implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Proforma invoice associated with this fulfillment."""
   proformaInvoice: Invoice
 
-  """Indicates if order deposits have been allocated to this fulfillment."""
-  depositAllocated: Boolean!
+  """Indicates if this fulfillment has been paid for."""
+  isPaid: Boolean!
 
   """Amount of deposit credit allocated to this fulfillment."""
   depositAllocatedAmount: Money
@@ -12001,6 +12018,9 @@ type OrderLine implements Node & ObjectWithMetadata @doc(category: "Orders") {
   Whether this line can be fulfilled now (has stock and deposit requirements met).
   """
   isReadyToFulfill: Boolean!
+
+  """Reason why this line cannot be fulfilled, or null if it is ready."""
+  notReadyReason: OrderLineNotReadyReason
 
   """Rate of tax applied on product variant."""
   taxRate: Float!
@@ -12118,6 +12138,14 @@ type OrderLine implements Node & ObjectWithMetadata @doc(category: "Orders") {
   Added in Saleor 3.21.
   """
   discounts: [OrderLineDiscount!]
+
+  """Value of the configured invoice product code attribute."""
+  productCode: String
+}
+
+enum OrderLineNotReadyReason @doc(category: "Orders") {
+  DEPOSIT_NOT_MET
+  AWAITING_STOCK
 }
 
 """
@@ -14692,6 +14720,27 @@ type XeroPaymentSummary {
 
   """Payment status in Xero."""
   status: String!
+}
+
+"""Available Xero tax codes for configuring tax class country rates."""
+type AvailableXeroTaxCodes {
+  """List of available Xero tax codes."""
+  taxCodes: [XeroTaxCodeSummary!]
+
+  """Errors encountered while fetching tax codes."""
+  errors: [OrderError!]
+}
+
+"""A Xero tax code."""
+type XeroTaxCodeSummary {
+  """Xero tax type code."""
+  code: String!
+
+  """Xero tax code display name."""
+  name: String!
+
+  """Effective tax rate (e.g. 0.2 for 20%)."""
+  rate: Float!
 }
 
 type MenuCountableConnection @doc(category: "Menu") {
@@ -18325,6 +18374,19 @@ type Mutation {
   ): FulfillmentReturnProducts @doc(category: "Orders")
 
   """
+  Replace the Xero proforma prepayment tracked by Saleor for a fulfillment. Use when the original prepayment was voided in Xero and a new one created manually. Staff must void the old prepayment in Xero before calling this mutation. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  fulfillmentReplacePrepayment(
+    """ID of the fulfillment."""
+    id: ID!
+
+    """New Xero prepayment ID for this fulfillment's proforma."""
+    xeroProformaPrepaymentId: String!
+  ): FulfillmentReplacePrepayment @doc(category: "Orders")
+
+  """
   Adds granted refund to the order. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
@@ -18496,6 +18558,40 @@ type Mutation {
     """ID of the order to refund."""
     id: ID!
   ): OrderRefund @doc(category: "Orders")
+
+  """
+  Manually override the deposit threshold check for an order. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderOverrideDepositThreshold(
+    """ID of the order."""
+    id: ID!
+
+    """Set to true to manually mark the deposit threshold as met."""
+    override: Boolean!
+  ): OrderOverrideDepositThreshold @doc(category: "Orders")
+
+  """
+  Replace the Xero deposit prepayment tracked by Saleor for an order. Use when the original prepayment was voided in Xero and a new one created manually. Staff must void the old prepayment in Xero before calling this mutation. 
+  
+  Requires one of the following permissions: MANAGE_ORDERS.
+  """
+  orderReplaceDepositPrepayment(
+    """ID of the order."""
+    id: ID!
+
+    """
+    Updated deposit percentage (0-100). If omitted, existing value is kept.
+    """
+    percentage: Decimal
+
+    """Updated Xero bank account code. If omitted, existing value is kept."""
+    xeroBankAccountCode: String
+
+    """New Xero prepayment ID for this order's deposit."""
+    xeroDepositPrepaymentId: String!
+  ): OrderReplaceDepositPrepayment @doc(category: "Orders")
 
   """
   Set whether an order requires a deposit before fulfillment. 
@@ -26484,6 +26580,9 @@ input DraftOrderCreateInput @doc(category: "Orders") {
   """
   allowedWarehouses: [ID!]
 
+  """Xero bank account code for invoicing this order."""
+  xeroBankAccountCode: String
+
   """Variant line input consisting of variant ID and quantity of products."""
   lines: [OrderLineCreateInput!]
 }
@@ -26641,6 +26740,9 @@ input DraftOrderInput @doc(category: "Orders") {
   IDs of warehouses to restrict stock allocation to. If empty, all eligible warehouses are used.
   """
   allowedWarehouses: [ID!]
+
+  """Xero bank account code for invoicing this order."""
+  xeroBankAccountCode: String
 }
 
 """
@@ -26923,6 +27025,21 @@ input OrderReturnFulfillmentLineInput @doc(category: "Orders") {
 
   """Determines, if the line should be added to replace order."""
   replace: Boolean = false
+}
+
+"""
+Replace the Xero proforma prepayment tracked by Saleor for a fulfillment. Use when the original prepayment was voided in Xero and a new one created manually. Staff must void the old prepayment in Xero before calling this mutation. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type FulfillmentReplacePrepayment @doc(category: "Orders") {
+  """Fulfillment with updated proforma prepayment."""
+  fulfillment: Fulfillment
+
+  """Order for the updated fulfillment."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
 }
 
 """
@@ -27359,6 +27476,30 @@ Requires one of the following permissions: MANAGE_ORDERS.
 """
 type OrderRefund @doc(category: "Orders") {
   """A refunded order."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Manually override the deposit threshold check for an order. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderOverrideDepositThreshold @doc(category: "Orders") {
+  """Order with updated deposit override."""
+  order: Order
+  orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
+  errors: [OrderError!]!
+}
+
+"""
+Replace the Xero deposit prepayment tracked by Saleor for an order. Use when the original prepayment was voided in Xero and a new one created manually. Staff must void the old prepayment in Xero before calling this mutation. 
+
+Requires one of the following permissions: MANAGE_ORDERS.
+"""
+type OrderReplaceDepositPrepayment @doc(category: "Orders") {
+  """Order with updated deposit prepayment."""
   order: Order
   orderErrors: [OrderError!]! @deprecated(reason: "Use `errors` field instead.")
   errors: [OrderError!]!
@@ -35706,13 +35847,43 @@ type XeroOrderConfirmed implements Event @doc(category: "Orders") {
   """The order the event relates to."""
   order: Order
 
-  """Calculated deposit amount for this order."""
+  """Calculated deposit amount and per-line data for this order."""
   calculatedAmounts: XeroOrderConfirmedCalculatedAmounts!
 }
 
 type XeroOrderConfirmedCalculatedAmounts {
   """Deposit amount due for this order."""
   depositAmount: Money!
+
+  """Snapshotted Xero tax code for shipping (null for DAP/zero-rated)."""
+  shippingXeroTaxCode: String
+
+  """
+  Per-line stored amounts. Used by Dirac to split the deposit proportionally by Xero tax code.
+  """
+  lines: [XeroOrderLineAmounts!]!
+}
+
+type XeroOrderLineAmounts {
+  """ID of the order line."""
+  orderLineId: String!
+
+  """Quantity ordered."""
+  quantity: Int!
+  productName: String!
+  productSku: String
+
+  """Value of the configured invoice product code attribute."""
+  productCode: String
+
+  """Snapshotted Xero tax code for this line (null for DAP/zero-rated)."""
+  xeroTaxCode: String
+
+  """Stored gross unit price — safe to read in sync webhook context."""
+  unitPriceGross: Money!
+
+  """Stored net unit price — safe to read in sync webhook context."""
+  unitPriceNet: Money!
 }
 
 """
@@ -35742,14 +35913,17 @@ type XeroFulfillmentCreated implements Event @doc(category: "Orders") {
 }
 
 type XeroFulfillmentCreatedCalculatedAmounts {
-  """Fulfillment total minus deposit credit."""
+  """Fulfillment total plus shipping minus deposit credit."""
   proformaAmount: Money!
 
-  """Shipping cost for this order."""
+  """Shipping gross for this order."""
   shippingCost: Money!
 
-  """VAT rate as decimal string e.g. "0.20"."""
-  shippingVatRate: String!
+  """Shipping net for this order (pass to Xero)."""
+  shippingNet: Money!
+
+  """Snapshotted Xero tax code for shipping (null for DAP/zero-rated)."""
+  shippingXeroTaxCode: String
 
   """Per-line stored amounts, safe to read in sync webhook context."""
   lines: [XeroFulfillmentLineAmounts!]!
@@ -35764,7 +35938,12 @@ type XeroFulfillmentLineAmounts {
   productName: String!
   variantName: String!
   productSku: String
-  taxRate: Float!
+
+  """Value of the configured invoice product code attribute."""
+  productCode: String
+
+  """Snapshotted Xero tax code for this line (null for DAP/zero-rated)."""
+  xeroTaxCode: String
   unitPriceGross: Money!
   unitPriceNet: Money!
   totalPriceGross: Money!
@@ -37293,6 +37472,22 @@ type XeroListPayments implements Event @doc(category: "Orders") {
 
 """List available Xero bank accounts for a domain."""
 type XeroListBankAccounts implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
+
+  """Saleor version that triggered the event."""
+  version: String
+
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
+
+  """The application receiving the webhook."""
+  recipient: App
+  domain: String!
+}
+
+"""List available Xero tax codes for a domain."""
+type XeroListTaxCodes implements Event @doc(category: "Orders") {
   """Time of the event."""
   issuedAt: DateTime
 

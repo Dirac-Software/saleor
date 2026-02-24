@@ -175,6 +175,7 @@ from .enums import (
     OrderEventsEmailsEnum,
     OrderEventsEnum,
     OrderGrantedRefundStatusEnum,
+    OrderLineNotReadyReason,
     OrderOriginEnum,
     OrderStatusEnum,
     PickStatusEnum,
@@ -908,8 +909,8 @@ class Fulfillment(
         description="Proforma invoice associated with this fulfillment.",
         required=False,
     )
-    deposit_allocated = graphene.Boolean(
-        description="Indicates if order deposits have been allocated to this fulfillment.",
+    is_paid = graphene.Boolean(
+        description="Indicates if this fulfillment has been paid for.",
         required=True,
     )
     deposit_allocated_amount = graphene.Field(
@@ -1088,10 +1089,14 @@ class Fulfillment(
             return None
 
     @staticmethod
-    def resolve_deposit_allocated(
-        root: SyncWebhookControlContext[models.Fulfillment], _info
-    ):
-        return root.node.deposit_allocated
+    def resolve_is_paid(root: SyncWebhookControlContext[models.Fulfillment], _info):
+        fulfillment = root.node
+        order = fulfillment.order
+        if order.origin == OrderOrigin.CHECKOUT:
+            return True
+        return order.payments.filter(
+            psp_reference=fulfillment.xero_proforma_prepayment_id
+        ).exists()
 
     @staticmethod
     def resolve_deposit_allocated_amount(
@@ -1143,6 +1148,10 @@ class OrderLine(
     is_ready_to_fulfill = graphene.Boolean(
         required=True,
         description="Whether this line can be fulfilled now (has stock and deposit requirements met).",
+    )
+    not_ready_reason = graphene.Field(
+        OrderLineNotReadyReason,
+        description="Reason why this line cannot be fulfilled, or null if it is ready.",
     )
     tax_rate = graphene.Float(
         required=True, description="Rate of tax applied on product variant."
@@ -1282,6 +1291,9 @@ class OrderLine(
         "saleor.graphql.discount.types.discounts.OrderLineDiscount",
         description="List of applied discounts" + ADDED_IN_321,
     )
+    product_code = graphene.String(
+        description="Value of the configured invoice product code attribute.",
+    )
 
     class Meta:
         default_resolver = (
@@ -1394,6 +1406,28 @@ class OrderLine(
             order_line, database_connection_name=database_connection_name
         )
         return can_fulfill > 0
+
+    @staticmethod
+    def resolve_not_ready_reason(
+        root: SyncWebhookControlContext[models.OrderLine], info
+    ):
+        from ...warehouse.stock_utils import get_fulfillable_quantity_for_order_line
+        from ..core.context import get_database_connection_name
+
+        order_line = root.node
+        order = order_line.order
+
+        if order.deposit_required and not order.deposit_threshold_met:
+            return OrderLineNotReadyReason.DEPOSIT_NOT_MET
+
+        database_connection_name = get_database_connection_name(info.context)
+        can_fulfill = get_fulfillable_quantity_for_order_line(
+            order_line, database_connection_name=database_connection_name
+        )
+        if can_fulfill == 0:
+            return OrderLineNotReadyReason.AWAITING_STOCK
+
+        return None
 
     @staticmethod
     @traced_resolver
@@ -1704,6 +1738,19 @@ class OrderLine(
         order = OrderByIdLoader(info.context).load(line.order_id)
         return Promise.all([manager, order]).then(with_manager_and_order)
 
+    @staticmethod
+    def resolve_product_code(root: SyncWebhookControlContext[models.OrderLine], info):
+        from ...site.models import SiteSettings
+        from ...webhook.serializers import get_product_code_for_line
+
+        site_settings = SiteSettings.objects.first()
+        slug = (
+            site_settings.invoice_product_code_attribute
+            if site_settings
+            else "product-code"
+        )
+        return get_product_code_for_line(root.node, slug)
+
 
 @federated_entity("id")
 class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Order]]):
@@ -1850,6 +1897,10 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
     deposit_threshold_met = graphene.Boolean(
         required=True,
         description="Whether the deposit threshold has been met (totalDepositPaid >= depositPercentage * total).",
+    )
+    deposit_threshold_met_override = graphene.Boolean(
+        required=True,
+        description="Whether the deposit threshold has been manually overridden by an admin.",
     )
     deposit_paid_at = DateTime(
         description="Date and time when deposit threshold was met."
@@ -3404,6 +3455,12 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         root: SyncWebhookControlContext[models.Order], _info
     ):
         return root.node.deposit_threshold_met
+
+    @staticmethod
+    def resolve_deposit_threshold_met_override(
+        root: SyncWebhookControlContext[models.Order], _info
+    ):
+        return root.node.deposit_threshold_met_override
 
     @staticmethod
     def __resolve_references(roots: list["Order"], info):

@@ -8,12 +8,15 @@ from ...core.prices import Money, TaxedMoney
 from ...core.utils.country import get_active_country
 from ...graphql.tax.enums import TaxCalculationStrategy
 from ...order.utils import get_order_country
+from ..models import TaxClass, TaxClassCountryRate
 from ..utils import (
     get_charge_taxes,
     get_display_gross_prices,
     get_shipping_tax_rate_for_checkout,
     get_shipping_tax_rate_for_order,
     get_tax_app_id,
+    get_tax_country_for_order,
+    resolve_tax_class_country_rate,
 )
 
 
@@ -437,3 +440,117 @@ def test_get_shipping_tax_rate_for_order_when_weighted_tax_is_disabled(
 
     # then
     assert shipping_tax_rate == Decimal("23.000")
+
+
+# --- get_tax_country_for_order ---
+
+
+def test_get_tax_country_for_order_dap_returns_none():
+    order = Mock()
+    order.inco_term = "DAP"
+
+    assert get_tax_country_for_order(order) is None
+
+
+def test_get_tax_country_for_order_exw_returns_channel_default_country():
+    order = Mock()
+    order.inco_term = "EXW"
+    order.channel.default_country.code = "US"
+
+    assert get_tax_country_for_order(order) == "US"
+
+
+def test_get_tax_country_for_order_fca_returns_channel_default_country():
+    order = Mock()
+    order.inco_term = "FCA"
+    order.channel.default_country.code = "DE"
+
+    assert get_tax_country_for_order(order) == "DE"
+
+
+def test_get_tax_country_for_order_ddp_returns_order_country(order_with_lines):
+    # DDP (the default) uses the shipping address country via get_order_country.
+    order = order_with_lines
+    order.inco_term = "DDP"
+
+    result = get_tax_country_for_order(order)
+
+    assert result == get_order_country(order)
+
+
+# --- resolve_tax_class_country_rate ---
+
+
+def test_resolve_tax_class_country_rate_dap_returns_none(db):
+    # DAP → no country lookup at all; always None.
+    order = Mock()
+    order.inco_term = "DAP"
+    tax_class = TaxClass.objects.create(name="Standard")
+
+    assert resolve_tax_class_country_rate(order, tax_class) is None
+
+
+def test_resolve_tax_class_country_rate_returns_specific_rate(db):
+    # When a TaxClassCountryRate exists for (tax_class, country), return it.
+    order = Mock()
+    order.inco_term = "EXW"
+    order.channel.default_country.code = "GB"
+
+    tax_class = TaxClass.objects.create(name="Standard")
+    rate = TaxClassCountryRate.objects.create(
+        tax_class=tax_class, country="GB", rate=20, xero_tax_code="OUTPUT2"
+    )
+
+    result = resolve_tax_class_country_rate(order, tax_class)
+
+    assert result == rate
+    assert result.xero_tax_code == "OUTPUT2"
+
+
+def test_resolve_tax_class_country_rate_falls_back_to_default_rate(db):
+    # No specific rate for this tax_class+country → fall back to tax_class=None.
+    order = Mock()
+    order.inco_term = "EXW"
+    order.channel.default_country.code = "GB"
+
+    tax_class = TaxClass.objects.create(name="Standard")
+    # No (tax_class, GB) row — only the country default row.
+    default_rate = TaxClassCountryRate.objects.create(
+        tax_class=None, country="GB", rate=20, xero_tax_code="OUTPUT2"
+    )
+
+    result = resolve_tax_class_country_rate(order, tax_class)
+
+    assert result == default_rate
+    assert result.xero_tax_code == "OUTPUT2"
+
+
+def test_resolve_tax_class_country_rate_specific_rate_preferred_over_default(db):
+    # Specific rate wins even when a country-default row also exists.
+    order = Mock()
+    order.inco_term = "EXW"
+    order.channel.default_country.code = "GB"
+
+    tax_class = TaxClass.objects.create(name="Reduced")
+    specific = TaxClassCountryRate.objects.create(
+        tax_class=tax_class, country="GB", rate=5, xero_tax_code="REDUCED"
+    )
+    TaxClassCountryRate.objects.create(
+        tax_class=None, country="GB", rate=20, xero_tax_code="OUTPUT2"
+    )
+
+    result = resolve_tax_class_country_rate(order, tax_class)
+
+    assert result == specific
+    assert result.xero_tax_code == "REDUCED"
+
+
+def test_resolve_tax_class_country_rate_no_rate_returns_none(db):
+    # No rows at all for this country → None.
+    order = Mock()
+    order.inco_term = "EXW"
+    order.channel.default_country.code = "GB"
+
+    tax_class = TaxClass.objects.create(name="Standard")
+
+    assert resolve_tax_class_country_rate(order, tax_class) is None

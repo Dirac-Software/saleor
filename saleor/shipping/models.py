@@ -461,13 +461,6 @@ class Shipment(models.Model):
                             "shipping_cost_amount": f"Shipping cost must be 0 for incoterm {self.inco_term} (buyer pays shipping)"
                         }
                     )
-            else:
-                if self.shipping_cost_amount == Decimal(0):
-                    raise ValidationError(
-                        {
-                            "shipping_cost_amount": f"Shipping cost must be greater than 0 for incoterm {self.inco_term} (seller pays shipping)"
-                        }
-                    )
 
         if self.shipment_type == ShipmentType.OUTBOUND:
             if self.arrived_at is not None:

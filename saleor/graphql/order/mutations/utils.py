@@ -47,6 +47,7 @@ DRAFT_ORDER_UPDATE_FIELDS = {
     "voucher",
     "voucher_code",
     "weight",
+    "xero_bank_account_code",
 }
 
 SHIPPING_METHOD_UPDATE_FIELDS = {

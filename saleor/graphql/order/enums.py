@@ -86,6 +86,14 @@ OrderGrantedRefundStatusEnum: Final[graphene.Enum] = to_enum(
 OrderGrantedRefundStatusEnum.doc_category = DOC_CATEGORY_ORDERS
 
 
+class OrderLineNotReadyReason(BaseEnum):
+    DEPOSIT_NOT_MET = "DEPOSIT_NOT_MET"
+    AWAITING_STOCK = "AWAITING_STOCK"
+
+    class Meta:
+        doc_category = DOC_CATEGORY_ORDERS
+
+
 class OrderStatusFilter(BaseEnum):
     READY_TO_FULFILL = "ready_to_fulfill"
     READY_TO_CAPTURE = "ready_to_capture"

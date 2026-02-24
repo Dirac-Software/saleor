@@ -14,6 +14,8 @@ from ...giftcard.models import GiftCardEvent
 from ...graphql.order.utils import OrderLineData
 from ...payment import TransactionEventType
 from ...plugins.manager import get_plugins_manager
+from ...shipping import IncoTerm
+from ...tax.models import TaxClassCountryRate
 from .. import OrderGrantedRefundStatus, OrderStatus
 from ..events import OrderEvents
 from ..fetch import OrderLineInfo
@@ -887,3 +889,93 @@ def test_store_user_addresses_from_draft_order_only_draft_save_billing_address_t
     order.refresh_from_db()
     assert order.draft_save_shipping_address is None
     assert order.draft_save_billing_address is None
+
+
+# --- xero_tax_code snapshotting on create_order_line ---
+
+
+def test_add_variant_to_order_exw_snapshots_xero_tax_code(
+    order_with_lines, plugins_manager
+):
+    # given - EXW order: tax is assessed at the dispatch country (channel default = US).
+    order = order_with_lines
+    order.inco_term = IncoTerm.EXW
+    order.save(update_fields=["inco_term"])
+
+    # Grab any existing variant from the order to use as the line item.
+    existing_line = order.lines.first()
+    variant = existing_line.variant
+    tax_class = existing_line.tax_class
+
+    # Create a US rate with a known Xero code for this tax class.
+    us_rate = TaxClassCountryRate.objects.create(
+        tax_class=tax_class, country="US", rate=10, xero_tax_code="OUTPUT2"
+    )
+
+    line_data = OrderLineData(variant_id=str(variant.pk), variant=variant, quantity=1)
+
+    # when
+    line = add_variant_to_order(
+        order, line_data, user=None, app=None, manager=plugins_manager
+    )
+
+    # then - the xero_tax_code was snapshotted from the US rate (EXW dispatch country).
+    line.refresh_from_db()
+    assert line.xero_tax_code == "OUTPUT2"
+    assert line.tax_class_country_rate == us_rate
+
+
+def test_add_variant_to_order_dap_xero_tax_code_is_null(
+    order_with_lines, plugins_manager
+):
+    # given - DAP order: zero-rated export, no Xero code should be set.
+    order = order_with_lines
+    order.inco_term = IncoTerm.DAP
+    order.save(update_fields=["inco_term"])
+
+    existing_line = order.lines.first()
+    variant = existing_line.variant
+
+    line_data = OrderLineData(variant_id=str(variant.pk), variant=variant, quantity=1)
+
+    # when
+    line = add_variant_to_order(
+        order, line_data, user=None, app=None, manager=plugins_manager
+    )
+
+    # then - DAP means no country lookup; both fields stay null.
+    line.refresh_from_db()
+    assert line.xero_tax_code is None
+    assert line.tax_class_country_rate is None
+
+
+def test_add_variant_to_order_falls_back_to_country_default_rate(
+    order_with_lines, plugins_manager
+):
+    # given - EXW order, but no specific rate for this tax_class+country.
+    # Should fall back to the country-default row (tax_class=None).
+    order = order_with_lines
+    order.inco_term = IncoTerm.EXW
+    order.save(update_fields=["inco_term"])
+
+    existing_line = order.lines.first()
+    variant = existing_line.variant
+    # Ensure there is no specific rate for this tax class + US.
+    TaxClassCountryRate.objects.filter(
+        tax_class=existing_line.tax_class, country="US"
+    ).delete()
+    default_rate = TaxClassCountryRate.objects.create(
+        tax_class=None, country="US", rate=20, xero_tax_code="BASEXCLUDED"
+    )
+
+    line_data = OrderLineData(variant_id=str(variant.pk), variant=variant, quantity=1)
+
+    # when
+    line = add_variant_to_order(
+        order, line_data, user=None, app=None, manager=plugins_manager
+    )
+
+    # then - fell back to the country-default rate.
+    line.refresh_from_db()
+    assert line.xero_tax_code == "BASEXCLUDED"
+    assert line.tax_class_country_rate == default_rate
