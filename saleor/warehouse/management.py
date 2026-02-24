@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import F, Sum
+from django.db.models import Case, F, IntegerField, Sum, Value, When
 from django.db.models.expressions import Exists, OuterRef
 from django.db.models.functions import Coalesce
 
@@ -146,8 +146,9 @@ def _allocate_sources_incremental(allocation: Allocation, quantity: int):
     from ..inventory import PurchaseOrderItemStatus
     from ..inventory.models import PurchaseOrderItem
 
-    # Get active POIs for this stock in FIFO order (by confirmation date)
-    # Only CONFIRMED or RECEIVED - exclude DRAFT and CANCELLED
+    # Get active POIs for this stock, prioritising RECEIVED over CONFIRMED so that
+    # goods already physically in the warehouse are sourced before in-transit stock.
+    # Within each status group, use FIFO order (confirmation date, then creation date).
     # NOTE: Cannot use annotate_available_quantity() with select_for_update()
     # because PostgreSQL doesn't allow FOR UPDATE with GROUP BY clause
     pois = (
@@ -158,7 +159,17 @@ def _allocate_sources_incremental(allocation: Allocation, quantity: int):
             quantity_ordered__gt=F("quantity_allocated"),
         )
         .select_for_update()
-        .order_by("confirmed_at", "created_at")
+        .annotate(
+            status_priority=Case(
+                When(
+                    status=PurchaseOrderItemStatus.RECEIVED,
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("status_priority", "confirmed_at", "created_at")
     )
 
     remaining = quantity

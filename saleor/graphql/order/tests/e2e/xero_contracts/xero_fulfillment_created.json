@@ -1,0 +1,74 @@
+{
+  "fulfillment": {
+    "id": "RnVsZmlsbG1lbnQ6MTg=",
+    "privateMetadata": []
+  },
+  "order": {
+    "id": "T3JkZXI6ZDRjOTcyYWQtOTkyYS00ZGQ4LTkzZmEtZjZhMGZjYWZlZTNh",
+    "number": "2014",
+    "userEmail": "fixture@example.com",
+    "xeroBankAccountCode": "090",
+    "billingAddress": {
+      "companyName": "Fixture Ltd",
+      "firstName": "Fixture",
+      "lastName": "User",
+      "streetAddress1": "1 Test Street",
+      "streetAddress2": "",
+      "city": "London",
+      "postalCode": "EC1A 1BB",
+      "country": {
+        "code": "GB"
+      }
+    },
+    "user": {
+      "privateMetadata": [
+        {
+          "key": "xeroContactId",
+          "value": "00000000-0000-0000-0000-000000000000"
+        }
+      ]
+    }
+  },
+  "calculatedAmounts": {
+    "proformaAmount": {
+      "amount": 274.0,
+      "currency": "GBP"
+    },
+    "shippingCost": {
+      "amount": 24.0,
+      "currency": "GBP"
+    },
+    "shippingNet": {
+      "amount": 20.0,
+      "currency": "GBP"
+    },
+    "shippingXeroTaxCode": "RRINPUT",
+    "lines": [
+      {
+        "orderLineId": "9b72a900-8ae5-4bb5-8c17-886d09a41246",
+        "quantity": 10,
+        "productName": "Fixture Widget",
+        "variantName": "Standard",
+        "productSku": "FIXTURE-001",
+        "productCode": null,
+        "xeroTaxCode": "RROUTPUT",
+        "unitPriceNet": {
+          "amount": 25.0,
+          "currency": "GBP"
+        },
+        "unitPriceGross": {
+          "amount": 30.0,
+          "currency": "GBP"
+        },
+        "totalPriceNet": {
+          "amount": 250.0,
+          "currency": "GBP"
+        },
+        "totalPriceGross": {
+          "amount": 300.0,
+          "currency": "GBP"
+        }
+      }
+    ]
+  }
+}

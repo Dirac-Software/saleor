@@ -2990,6 +2990,11 @@ class PluginsManager(PaymentInterface):
             "xero_list_bank_accounts", [], domain, channel_slug=None
         )
 
+    def xero_list_tax_codes(self, domain: str) -> list:
+        return self.__run_method_on_plugins(
+            "xero_list_tax_codes", [], domain, channel_slug=None
+        )
+
     def fulfillment_fulfilled(self, fulfillment) -> None:
         self.__run_method_on_plugins(
             "fulfillment_fulfilled", None, fulfillment, channel_slug=None

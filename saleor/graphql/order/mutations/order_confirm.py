@@ -87,33 +87,6 @@ class OrderConfirm(DeprecatedModelMutation):
                 }
             )
 
-        # Validate shipping cost is set if shipping is required
-        # Default inco_term is DDP (seller pays) which requires shipping cost > $0
-        # Only EXW (buyer pays) allows $0 shipping cost
-        if order.is_shipping_required():
-            from ....shipping import IncoTerm
-
-            if order.inco_term in IncoTerm.BUYER_PAYS_SHIPPING:
-                # EXW: buyer pays shipping, $0 is valid
-                pass
-            else:
-                # DDP/DAP/FOB/etc: seller pays shipping, must have cost
-                if (
-                    not order.shipping_price_net_amount
-                    or order.shipping_price_net_amount <= 0
-                ):
-                    raise ValidationError(
-                        {
-                            "id": ValidationError(
-                                f"Cannot confirm order with inco_term '{order.inco_term}' without shipping cost. "
-                                f"Seller is responsible for shipping under {order.inco_term} terms. "
-                                "Use orderUpdateShippingCost to set the shipping cost, "
-                                "or change inco_term to 'EXW' if buyer pays shipping.",
-                                code=OrderErrorCode.SHIPPING_METHOD_REQUIRED.value,
-                            )
-                        }
-                    )
-
         # Transition order from UNCONFIRMED to UNFULFILLED
         order.status = OrderStatus.UNFULFILLED
         update_order_display_gross_prices(order)

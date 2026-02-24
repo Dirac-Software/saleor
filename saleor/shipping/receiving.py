@@ -83,11 +83,6 @@ def create_shipment(
                 raise ValueError(
                     f"Shipping cost must be 0 for incoterm {inco_term} (buyer pays shipping)"
                 )
-        else:
-            if shipping_cost_decimal == Decimal(0):
-                raise ValueError(
-                    f"Shipping cost must be greater than 0 for incoterm {inco_term} (seller pays shipping)"
-                )
 
     # Create the shipment
     shipment_data = {

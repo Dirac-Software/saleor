@@ -21,18 +21,24 @@ repos:
         args: [ --fix ]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.1
+  - repo: local
     hooks:
       - id: mypy
-        args: [--cache-dir=/dev/null] # Disable cache to avoid issues with pre-commit
+        name: mypy
         language: system
+        entry: uv run mypy
+        args: [--cache-dir=/dev/null]
+        types: [python]
         exclude: (tests|vendored)/
 
-  - repo: https://github.com/fpgmaas/deptry.git
-    rev: "0.23.1"
+  - repo: local
     hooks:
       - id: deptry
+        name: deptry
+        language: system
+        entry: uv run deptry
+        args: [.]
+        pass_filenames: false
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     # uv version.
@@ -45,7 +51,7 @@ repos:
       - id: migrations-check
         language: system
         name: Check for uncreated migrations.
-        entry: sh -c "./manage.py makemigrations --check --dry-run"
+        entry: sh -c "uv run ./manage.py makemigrations --check --dry-run"
         files: "models\\.py$"
         stages: [pre-commit]
 

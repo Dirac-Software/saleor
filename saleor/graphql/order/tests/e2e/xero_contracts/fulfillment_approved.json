@@ -1,0 +1,81 @@
+{
+  "fulfillment": {
+    "id": "RnVsZmlsbG1lbnQ6MTk=",
+    "xeroProformaPrepaymentId": "00000000-0000-0000-0000-000000000001",
+    "depositAllocatedAmount": {
+      "amount": 90.0,
+      "currency": "GBP"
+    },
+    "lines": [
+      {
+        "quantity": 10,
+        "orderLine": {
+          "productName": "Fixture Widget",
+          "productSku": "FIXTURE-001",
+          "productCode": null,
+          "taxRate": 0.2,
+          "unitPrice": {
+            "net": {
+              "amount": 25.0,
+              "currency": "GBP"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "order": {
+    "id": "T3JkZXI6NDhjZjEzN2MtYzhhZS00MjM4LWIxNDgtNjkwMDkzOTRhMzRk",
+    "number": "2015",
+    "userEmail": "fixture@example.com",
+    "origin": "DRAFT",
+    "xeroDepositPrepaymentId": "00000000-0000-0000-0000-000000000000",
+    "xeroBankAccountCode": "090",
+    "billingAddress": {
+      "companyName": "Fixture Ltd",
+      "firstName": "Fixture",
+      "lastName": "User",
+      "streetAddress1": "1 Test Street",
+      "streetAddress2": "",
+      "city": "London",
+      "postalCode": "EC1A 1BB",
+      "country": {
+        "code": "GB"
+      }
+    },
+    "shippingPrice": {
+      "net": {
+        "amount": 20.0,
+        "currency": "GBP"
+      }
+    },
+    "shippingTaxRate": 0.2,
+    "total": {
+      "gross": {
+        "amount": 300.0
+      }
+    },
+    "user": {
+      "privateMetadata": [
+        {
+          "key": "xeroContactId",
+          "value": "00000000-0000-0000-0000-000000000000"
+        }
+      ]
+    },
+    "payments": [
+      {
+        "gateway": "mirumee.payments.braintree",
+        "capturedAmount": {
+          "amount": 90.0,
+          "currency": "GBP"
+        },
+        "transactions": [
+          {
+            "token": "fixture-transaction-token"
+          }
+        ]
+      }
+    ]
+  }
+}

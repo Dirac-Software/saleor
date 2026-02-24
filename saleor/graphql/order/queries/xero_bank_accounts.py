@@ -3,7 +3,6 @@ import logging
 import graphene
 
 from ....order.error_codes import OrderErrorCode
-from ....permission.enums import OrderPermissions
 from ...core import ResolveInfo
 from ...core.doc_category import DOC_CATEGORY_ORDERS
 from ...core.types import OrderError
@@ -37,52 +36,16 @@ class AvailableXeroBankAccounts(graphene.ObjectType):
 
 
 def resolve_available_xero_bank_accounts(
-    _root, info: ResolveInfo, order_id: str
+    _root, info: ResolveInfo, channel_slug: str
 ) -> AvailableXeroBankAccounts:
-    """Fetch available Xero bank accounts for the tenant linked to this order's channel."""
-    from uuid import UUID
-
-    from ....order.models import Order as OrderModel
-    from ...core.context import get_database_connection_name
-
-    if not info.context.user or not info.context.user.has_perm(
-        OrderPermissions.MANAGE_ORDERS
-    ):
-        return AvailableXeroBankAccounts(
-            bank_accounts=[],
-            errors=[
-                OrderError(
-                    code=OrderErrorCode.REQUIRED.value,
-                    message="Insufficient permissions.",
-                )
-            ],
-        )
-
-    database_connection_name = get_database_connection_name(info.context)
-    try:
-        _, order_uuid = graphene.Node.from_global_id(order_id)
-        order = (
-            OrderModel.objects.using(database_connection_name)
-            .select_related("channel")
-            .get(id=UUID(order_uuid))
-        )
-    except (OrderModel.DoesNotExist, ValueError, TypeError):
-        return AvailableXeroBankAccounts(
-            bank_accounts=[],
-            errors=[
-                OrderError(
-                    code=OrderErrorCode.NOT_FOUND.value,
-                    message="Order not found.",
-                )
-            ],
-        )
-
     manager = get_plugin_manager_promise(info.context).get()
 
     try:
-        accounts = manager.xero_list_bank_accounts(domain=order.channel.slug)
+        accounts = manager.xero_list_bank_accounts(domain=channel_slug)
     except Exception:
-        logger.exception("availableXeroBankAccounts: exception for order=%s", order.pk)
+        logger.exception(
+            "availableXeroBankAccounts: exception for channel=%s", channel_slug
+        )
         return AvailableXeroBankAccounts(
             bank_accounts=[],
             errors=[

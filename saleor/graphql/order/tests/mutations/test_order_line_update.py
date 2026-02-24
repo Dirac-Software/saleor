@@ -22,6 +22,8 @@ from .....order.models import OrderEvent
 from .....product.models import Product, ProductVariant
 from .....product.utils.variant_prices import update_discounted_prices_for_promotion
 from .....product.utils.variants import fetch_variants_for_promotion_rules
+from .....shipping import IncoTerm
+from .....tax.models import TaxClass, TaxClassCountryRate
 from .....warehouse.models import Allocation, Stock
 from .....webhook.event_types import WebhookEventAsyncType, WebhookEventSyncType
 from ....tests.utils import assert_no_permission, get_graphql_content
@@ -1822,3 +1824,75 @@ def test_order_line_update_tax_class_sets_should_refresh_prices(
     # Changing the tax class must invalidate prices so the flat-rate tax
     # engine recalculates with the new class's rate.
     assert order.should_refresh_prices is True
+
+
+def test_order_line_update_tax_class_snapshots_xero_tax_code(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    # given - DDP order with a shipping address in PL (the order fixture default).
+    # Changing the tax class should snapshot the PL rate's xero_tax_code.
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.inco_term = IncoTerm.DDP
+    order.save(update_fields=["status", "inco_term"])
+
+    new_tax_class = TaxClass.objects.create(name="Reduced PL")
+    pl_rate = TaxClassCountryRate.objects.create(
+        tax_class=new_tax_class, country="PL", rate=8, xero_tax_code="REDUCEDPL"
+    )
+
+    line = order.lines.first()
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    tax_class_id = graphene.Node.to_global_id("TaxClass", new_tax_class.id)
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_TAX_CLASS_NO_PRICE_MUTATION,
+        {"lineId": line_id, "quantity": line.quantity, "taxClassId": tax_class_id},
+    )
+    content = get_graphql_content(response)
+
+    # then - xero_tax_code and tax_class_country_rate are snapshotted from the PL rate.
+    assert not content["data"]["orderLineUpdate"]["errors"]
+    line.refresh_from_db()
+    assert line.xero_tax_code == "REDUCEDPL"
+    assert line.tax_class_country_rate == pl_rate
+
+
+def test_order_line_update_tax_class_dap_xero_tax_code_is_null(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    # given - DAP order: zero-rated export, so xero_tax_code must be null regardless
+    # of what rates exist for the tax class.
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.DRAFT
+    order.inco_term = IncoTerm.DAP
+    order.save(update_fields=["status", "inco_term"])
+
+    new_tax_class = TaxClass.objects.create(name="Standard")
+    TaxClassCountryRate.objects.create(
+        tax_class=new_tax_class, country="PL", rate=23, xero_tax_code="OUTPUT2"
+    )
+
+    line = order.lines.first()
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    tax_class_id = graphene.Node.to_global_id("TaxClass", new_tax_class.id)
+
+    # when
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_TAX_CLASS_NO_PRICE_MUTATION,
+        {"lineId": line_id, "quantity": line.quantity, "taxClassId": tax_class_id},
+    )
+    content = get_graphql_content(response)
+
+    # then - DAP → no country lookup → xero_tax_code is null.
+    assert not content["data"]["orderLineUpdate"]["errors"]
+    line.refresh_from_db()
+    assert line.xero_tax_code is None
+    assert line.tax_class_country_rate is None

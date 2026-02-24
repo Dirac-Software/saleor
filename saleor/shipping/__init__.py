@@ -48,6 +48,7 @@ class IncoTerm:
     ]
 
     BUYER_PAYS_SHIPPING = [EXW]
+    ZERO_COST_ALLOWED = [EXW, FCA, CPT, CIP, DAP, DPU, DDP, FAS, FOB, CFR, CIF]
 
 
 class ShipmentType:

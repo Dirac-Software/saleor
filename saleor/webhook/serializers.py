@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     # pylint: disable=unused-import
     from ..checkout.fetch import CheckoutInfo, CheckoutLineInfo
     from ..checkout.models import Checkout
+    from ..order.models import OrderLine
     from ..product.models import ProductVariant
 
 
@@ -159,6 +160,17 @@ def serialize_product_attributes(product: "Product") -> list[dict]:
         data.append(attr_data)
 
     return data
+
+
+def get_product_code_for_line(line: "OrderLine", attribute_slug: str) -> str | None:
+    if not line.variant_id or not line.variant:
+        return None
+    av = (
+        line.variant.product.attributevalues.select_related("value__attribute")
+        .filter(value__attribute__slug=attribute_slug)
+        .first()
+    )
+    return av.value.value if av else None
 
 
 def serialize_variant_attributes(variant: "ProductVariant") -> list[dict]:

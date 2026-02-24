@@ -2393,17 +2393,14 @@ def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
     if not fulfillment.shipment:
         return False
 
-    from .proforma import calculate_fulfillment_total
+    from . import OrderOrigin
 
     order = fulfillment.order
-    prior_total = sum(
-        calculate_fulfillment_total(f)
-        for f in order.fulfillments.exclude(pk=fulfillment.pk)
-        if f.status != FulfillmentStatus.CANCELED
-    )
-    current_total = calculate_fulfillment_total(fulfillment)
-    if order.total_deposit_paid < prior_total + current_total:
-        return False
+    if order.origin != OrderOrigin.CHECKOUT:
+        if not order.payments.filter(
+            psp_reference=fulfillment.xero_proforma_prepayment_id
+        ).exists():
+            return False
 
     from ..plugins.manager import get_plugins_manager
     from ..site.models import Site

@@ -13,6 +13,7 @@ from ....order.utils import (
 )
 from ....permission.enums import OrderPermissions
 from ....tax.models import TaxClass
+from ....tax.utils import resolve_tax_class_country_rate
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.context import SyncWebhookControlContext
@@ -133,8 +134,19 @@ class OrderLineUpdate(
             # Handle tax class override
             tax_class: TaxClass | None = cleaned_input.get("tax_class")
             if tax_class is not None:
+                country_rate = resolve_tax_class_country_rate(instance.order, tax_class)
                 instance.tax_class = tax_class
-                instance.save(update_fields=["tax_class_id"])
+                instance.tax_class_country_rate = country_rate
+                instance.xero_tax_code = (
+                    country_rate.xero_tax_code if country_rate else None
+                )
+                instance.save(
+                    update_fields=[
+                        "tax_class_id",
+                        "tax_class_country_rate_id",
+                        "xero_tax_code",
+                    ]
+                )
 
             # Handle custom price update
             if cleaned_input.get("price") is not None:

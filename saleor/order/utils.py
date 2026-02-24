@@ -52,7 +52,11 @@ from ..shipping.utils import (
     convert_to_shipping_method_data,
     initialize_shipping_method_active_status,
 )
-from ..tax.utils import get_display_gross_prices, get_tax_class_kwargs_for_order_line
+from ..tax.utils import (
+    get_display_gross_prices,
+    get_tax_class_kwargs_for_order_line,
+    resolve_tax_class_country_rate,
+)
 from ..warehouse.management import (
     decrease_allocations,
     get_order_lines_with_track_inventory,
@@ -301,6 +305,8 @@ def create_order_line(
     else:
         tax_class = product.product_type.tax_class
 
+    country_rate = resolve_tax_class_country_rate(order, tax_class)
+
     product_name = str(product)
     variant_name = str(variant)
     language_code = order.language_code
@@ -337,7 +343,7 @@ def create_order_line(
         variant=variant,
         is_price_overridden=is_price_overridden,
         draft_base_price_expire_at=price_expiration_date,
-        **get_tax_class_kwargs_for_order_line(tax_class),
+        **get_tax_class_kwargs_for_order_line(tax_class, country_rate),
     )
 
     unit_discount = line.undiscounted_unit_price - line.unit_price

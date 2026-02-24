@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import graphene
+import pytest
 from django.test import override_settings
 from django.utils import timezone
 
@@ -445,9 +446,15 @@ XERO_ORDER_CONFIRMED_QUERY = """
         ... on XeroOrderConfirmed {
           order { id xeroBankAccountCode }
           calculatedAmounts {
-            depositAmount {
-              amount
-              currency
+            depositAmount { amount currency }
+            shippingXeroTaxCode
+            lines {
+              orderLineId
+              quantity
+              productSku
+              xeroTaxCode
+              unitPriceGross { amount currency }
+              unitPriceNet { amount currency }
             }
           }
         }
@@ -459,17 +466,19 @@ XERO_ORDER_CONFIRMED_QUERY = """
 def test_xero_order_confirmed_calculated_amounts_serializes_as_decimal(
     order, app, webhook_app
 ):
-    # given - order with a known gross total and deposit percentage
-    order.total_gross_amount = Decimal("1000.00")
-    order.deposit_percentage = Decimal(30)
+    # given - order with deposit_required and a known total
     order.currency = "USD"
     order.xero_bank_account_code = "XERO-001"
+    order.deposit_required = True
+    order.deposit_percentage = Decimal("10.00")
+    order.total_gross_amount = Decimal("1000.00")
     order.save(
         update_fields=[
-            "total_gross_amount",
-            "deposit_percentage",
             "currency",
             "xero_bank_account_code",
+            "deposit_required",
+            "deposit_percentage",
+            "total_gross_amount",
         ]
     )
 
@@ -483,13 +492,84 @@ def test_xero_order_confirmed_calculated_amounts_serializes_as_decimal(
         request=request,
     )
 
-    # then - 30% of 1000 = 300, no errors, order field resolves
+    # then - depositAmount reflects the required deposit (10% of total_gross_amount)
     assert "errors" not in payload
     assert payload["order"] is not None
     assert payload["order"]["id"] is not None
     assert payload["order"]["xeroBankAccountCode"] == "XERO-001"
-    assert payload["calculatedAmounts"]["depositAmount"]["amount"] == 300.0
+    assert payload["calculatedAmounts"]["depositAmount"]["amount"] == 100.0
     assert payload["calculatedAmounts"]["depositAmount"]["currency"] == "USD"
+    # lines list is always present (may be empty if order has no lines in test fixture)
+    assert isinstance(payload["calculatedAmounts"]["lines"], list)
+
+
+def test_xero_order_confirmed_deposit_amount_is_zero_when_no_payment_recorded(
+    order, app
+):
+    # given - order confirmed before any Xero payment has been reconciled
+    order.currency = "GBP"
+    order.deposit_percentage = Decimal(30)
+    order.save(update_fields=["currency", "deposit_percentage"])
+
+    request = initialize_request(app=app)
+
+    # when
+    payload = generate_payload_from_subscription(
+        event_type=WebhookEventSyncType.XERO_ORDER_CONFIRMED,
+        subscribable_object=order,
+        subscription_query=XERO_ORDER_CONFIRMED_QUERY,
+        request=request,
+    )
+
+    # then - no Xero payments recorded yet, so depositAmount is 0
+    assert "errors" not in payload
+    assert payload["calculatedAmounts"]["depositAmount"]["amount"] == 0.0
+    assert payload["calculatedAmounts"]["depositAmount"]["currency"] == "GBP"
+    # lines are always present even with zero deposit
+    assert isinstance(payload["calculatedAmounts"]["lines"], list)
+
+
+def test_xero_order_confirmed_lines_use_stored_amounts(order_with_lines, app):
+    # given - set known stored amounts on order lines
+    order = order_with_lines
+    order.currency = "GBP"
+    order.save(update_fields=["currency"])
+
+    first_line = order.lines.first()
+    first_line.unit_price_gross_amount = Decimal("200.00")
+    first_line.unit_price_net_amount = Decimal("166.67")
+    first_line.xero_tax_code = "OUTPUT2"
+    first_line.save(
+        update_fields=[
+            "unit_price_gross_amount",
+            "unit_price_net_amount",
+            "xero_tax_code",
+        ]
+    )
+
+    request = initialize_request(app=app)
+
+    # when
+    payload = generate_payload_from_subscription(
+        event_type=WebhookEventSyncType.XERO_ORDER_CONFIRMED,
+        subscribable_object=order,
+        subscription_query=XERO_ORDER_CONFIRMED_QUERY,
+        request=request,
+    )
+
+    # then - stored values come through exactly, no calculations engine involved
+    assert "errors" not in payload
+    lines = payload["calculatedAmounts"]["lines"]
+    assert len(lines) == order.lines.count()
+
+    first = next(line for line in lines if line["orderLineId"] == str(first_line.pk))
+    assert first["quantity"] == first_line.quantity
+    assert first["xeroTaxCode"] == "OUTPUT2"
+    assert first["unitPriceGross"]["amount"] == pytest.approx(200.0)
+    assert first["unitPriceGross"]["currency"] == "GBP"
+    assert first["unitPriceNet"]["amount"] == pytest.approx(166.67, rel=1e-3)
+    assert first["unitPriceNet"]["currency"] == "GBP"
+    assert first["productSku"] == first_line.product_sku
 
 
 XERO_FULFILLMENT_CREATED_QUERY = """
@@ -500,7 +580,20 @@ XERO_FULFILLMENT_CREATED_QUERY = """
           calculatedAmounts {
             proformaAmount { amount currency }
             shippingCost { amount currency }
-            shippingVatRate
+            shippingNet { amount currency }
+            shippingXeroTaxCode
+            lines {
+              orderLineId
+              quantity
+              productName
+              variantName
+              productSku
+              xeroTaxCode
+              unitPriceNet { amount currency }
+              unitPriceGross { amount currency }
+              totalPriceNet { amount currency }
+              totalPriceGross { amount currency }
+            }
           }
         }
       }
@@ -515,11 +608,13 @@ def test_xero_fulfillment_created_calculated_amounts_serializes_as_decimal(
     order = fulfillment.order
     order.shipping_price_gross_amount = Decimal("120.00")
     order.shipping_price_net_amount = Decimal("100.00")
+    order.shipping_xero_tax_code = "OUTPUT2"
     order.currency = "USD"
     order.save(
         update_fields=[
             "shipping_price_gross_amount",
             "shipping_price_net_amount",
+            "shipping_xero_tax_code",
             "currency",
         ]
     )
@@ -528,7 +623,14 @@ def test_xero_fulfillment_created_calculated_amounts_serializes_as_decimal(
 
     for line in fulfillment.lines.all():
         line.order_line.unit_price_gross_amount = Decimal("100.00")
-        line.order_line.save(update_fields=["unit_price_gross_amount"])
+        line.order_line.unit_price_net_amount = Decimal("80.00")
+        line.order_line.save(
+            update_fields=["unit_price_gross_amount", "unit_price_net_amount"]
+        )
+
+    lines_gross = sum(
+        Decimal("100.00") * line.quantity for line in fulfillment.lines.all()
+    )
 
     request = initialize_request(app=app)
 
@@ -545,7 +647,65 @@ def test_xero_fulfillment_created_calculated_amounts_serializes_as_decimal(
     amounts = payload["calculatedAmounts"]
     assert amounts["shippingCost"]["amount"] == 120.0
     assert amounts["shippingCost"]["currency"] == "USD"
-    assert amounts["shippingVatRate"] == "0.20"
+    assert amounts["shippingNet"]["amount"] == 100.0
+    assert amounts["shippingNet"]["currency"] == "USD"
+    assert amounts["shippingXeroTaxCode"] == "OUTPUT2"
+    expected_proforma = float(lines_gross + Decimal("120.00") - Decimal("50.00"))
+    assert amounts["proformaAmount"]["amount"] == expected_proforma
+    assert amounts["proformaAmount"]["currency"] == "USD"
+    assert len(amounts["lines"]) > 0
+    for line in amounts["lines"]:
+        assert line["unitPriceGross"]["amount"] == pytest.approx(100.0)
+        assert line["unitPriceNet"]["amount"] == pytest.approx(80.0)
+
+
+def test_xero_fulfillment_created_line_amounts_use_stored_values(fulfillment, app):
+    # given - set known stored amounts on a fulfillment line
+    order = fulfillment.order
+    order.currency = "GBP"
+    order.save(update_fields=["currency"])
+
+    first_fl = fulfillment.lines.first()
+    ol = first_fl.order_line
+    ol.unit_price_gross_amount = Decimal("200.00")
+    ol.unit_price_net_amount = Decimal("166.67")
+    ol.xero_tax_code = "OUTPUT2"
+    ol.save(
+        update_fields=[
+            "unit_price_gross_amount",
+            "unit_price_net_amount",
+            "xero_tax_code",
+        ]
+    )
+
+    request = initialize_request(app=app)
+
+    # when
+    payload = generate_payload_from_subscription(
+        event_type=WebhookEventSyncType.XERO_FULFILLMENT_CREATED,
+        subscribable_object=fulfillment,
+        subscription_query=XERO_FULFILLMENT_CREATED_QUERY,
+        request=request,
+    )
+
+    # then - stored values come through exactly
+    assert "errors" not in payload
+    lines = payload["calculatedAmounts"]["lines"]
+    assert len(lines) > 0
+
+    first = next(line for line in lines if line["orderLineId"] == str(ol.pk))
+    assert first["quantity"] == first_fl.quantity
+    assert first["xeroTaxCode"] == "OUTPUT2"
+    assert first["unitPriceGross"]["amount"] == pytest.approx(200.0)
+    assert first["unitPriceGross"]["currency"] == "GBP"
+    assert first["unitPriceNet"]["amount"] == pytest.approx(166.67, rel=1e-3)
+    assert first["unitPriceNet"]["currency"] == "GBP"
+    assert first["totalPriceGross"]["amount"] == pytest.approx(
+        200.0 * first_fl.quantity
+    )
+    assert first["totalPriceNet"]["amount"] == pytest.approx(
+        166.67 * first_fl.quantity, rel=1e-3
+    )
 
 
 FULFILLMENT_APPROVED_XERO_FIELDS_QUERY = """

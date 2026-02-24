@@ -1,12 +1,10 @@
-from decimal import Decimal
-
 import pytest
 from django.utils import timezone
 
 from ...payment import ChargeStatus, CustomPaymentChoices
 from ...payment.models import Payment
 from ...shipping.models import Shipment
-from .. import FulfillmentStatus, PickStatus
+from .. import FulfillmentStatus, OrderOrigin, PickStatus
 from ..actions import (
     assign_shipment_to_fulfillment,
     auto_create_pick_for_fulfillment,
@@ -16,13 +14,13 @@ from ..actions import (
 )
 
 
-def _create_xero_payment(order, amount):
+def _create_xero_payment(order, psp_reference):
     return Payment.objects.create(
         order=order,
         gateway=CustomPaymentChoices.XERO,
-        psp_reference=f"TEST-{amount}",
-        total=amount,
-        captured_amount=amount,
+        psp_reference=psp_reference,
+        total=0,
+        captured_amount=0,
         charge_status=ChargeStatus.FULLY_CHARGED,
         currency=order.currency,
         is_active=True,
@@ -37,7 +35,7 @@ def shipment_for_fulfillment(warehouse):
         source=warehouse.address,
         destination=warehouse.address,
         tracking_url="AUTO-APPROVE-TEST",
-        shipping_cost_amount=Decimal("50.00"),
+        shipping_cost_amount=0,
         currency="USD",
         inco_term="DDP",
         carrier="TEST-CARRIER",
@@ -52,7 +50,6 @@ def test_auto_approve_when_pick_completed_last(
     staff_user,
 ):
     fulfillment = full_fulfillment_awaiting_approval
-    _create_xero_payment(fulfillment.order, Decimal("99999.00"))
 
     fulfillment.shipment = shipment_for_fulfillment
     fulfillment.save(update_fields=["shipment"])
@@ -78,7 +75,6 @@ def test_auto_approve_when_shipment_assigned_last(
     staff_user,
 ):
     fulfillment = full_fulfillment_awaiting_approval
-    _create_xero_payment(fulfillment.order, Decimal("99999.00"))
 
     pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
     start_pick(pick, user=staff_user)
@@ -173,13 +169,43 @@ def test_no_auto_approve_when_already_fulfilled(
     assert fulfillment.status == FulfillmentStatus.FULFILLED
 
 
-def test_no_auto_approve_when_payments_insufficient(
+def test_no_auto_approve_when_proforma_not_paid(
     full_fulfillment_awaiting_approval,
     shipment_for_fulfillment,
     staff_user,
 ):
     fulfillment = full_fulfillment_awaiting_approval
-    # No Xero payment created — total_deposit_paid=0 < fulfillment total > 0
+    order = fulfillment.order
+
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
+
+    fulfillment.xero_proforma_prepayment_id = "PREPAY-001"
+    fulfillment.shipment = shipment_for_fulfillment
+    fulfillment.save(update_fields=["xero_proforma_prepayment_id", "shipment"])
+
+    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
+    start_pick(pick, user=staff_user)
+    for pick_item in pick.items.all():
+        update_pick_item(
+            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
+        )
+    complete_pick(pick, user=staff_user, auto_approve=True)
+
+    fulfillment.refresh_from_db()
+    assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
+
+
+def test_no_auto_approve_when_no_prepayment_id(
+    full_fulfillment_awaiting_approval,
+    shipment_for_fulfillment,
+    staff_user,
+):
+    fulfillment = full_fulfillment_awaiting_approval
+    order = fulfillment.order
+
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
 
     fulfillment.shipment = shipment_for_fulfillment
     fulfillment.save(update_fields=["shipment"])
@@ -196,7 +222,7 @@ def test_no_auto_approve_when_payments_insufficient(
     assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
 
 
-def test_no_auto_approve_when_deposit_not_allocated(
+def test_auto_approve_when_proforma_paid(
     full_fulfillment_awaiting_approval,
     shipment_for_fulfillment,
     staff_user,
@@ -204,45 +230,14 @@ def test_no_auto_approve_when_deposit_not_allocated(
     fulfillment = full_fulfillment_awaiting_approval
     order = fulfillment.order
 
-    order.deposit_required = True
-    order.save(update_fields=["deposit_required"])
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
 
-    fulfillment.deposit_allocated_amount = Decimal(0)
-    fulfillment.save(update_fields=["deposit_allocated_amount"])
-
+    fulfillment.xero_proforma_prepayment_id = "PREPAY-001"
     fulfillment.shipment = shipment_for_fulfillment
-    fulfillment.save(update_fields=["shipment"])
+    fulfillment.save(update_fields=["xero_proforma_prepayment_id", "shipment"])
 
-    pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
-    start_pick(pick, user=staff_user)
-    for pick_item in pick.items.all():
-        update_pick_item(
-            pick_item, quantity_picked=pick_item.quantity_to_pick, user=staff_user
-        )
-    complete_pick(pick, user=staff_user, auto_approve=True)
-
-    fulfillment.refresh_from_db()
-    assert fulfillment.status == FulfillmentStatus.WAITING_FOR_APPROVAL
-
-
-def test_auto_approve_when_all_conditions_met_with_deposit(
-    full_fulfillment_awaiting_approval,
-    shipment_for_fulfillment,
-    staff_user,
-):
-    fulfillment = full_fulfillment_awaiting_approval
-    order = fulfillment.order
-
-    order.deposit_required = True
-    order.save(update_fields=["deposit_required"])
-
-    _create_xero_payment(order, Decimal("99999.00"))
-
-    fulfillment.deposit_allocated_amount = Decimal("100.00")
-    fulfillment.save(update_fields=["deposit_allocated_amount"])
-
-    fulfillment.shipment = shipment_for_fulfillment
-    fulfillment.save(update_fields=["shipment"])
+    _create_xero_payment(order, psp_reference="PREPAY-001")
 
     pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
     start_pick(pick, user=staff_user)

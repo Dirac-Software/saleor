@@ -32,9 +32,11 @@ from ...product.models import (
     ProductVariantTranslation,
 )
 from ...shipping.models import ShippingMethodTranslation
+from ...site.models import SiteSettings
 from ...thumbnail.views import TYPE_TO_MODEL_DATA_MAPPING
 from ...webhook.const import MAX_FILTERABLE_CHANNEL_SLUGS_LIMIT
 from ...webhook.event_types import WebhookEventAsyncType, WebhookEventSyncType
+from ...webhook.serializers import get_product_code_for_line
 from ..account.types import User as UserType
 from ..app.types import App as AppType
 from ..channel.enums import TransactionFlowStrategyEnum
@@ -1450,11 +1452,11 @@ class FulfillmentProformaInvoiceGenerated(SubscriptionObjectType, FulfillmentBas
         for line in fulfillment.lines.all():
             fulfillment_total += line.order_line.unit_price_gross_amount * line.quantity
 
-        deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
-        proforma_amount = fulfillment_total - deposit_credit
-
         shipping_gross = order.shipping_price_gross_amount or Decimal(0)
         shipping_net = order.shipping_price_net_amount or Decimal(0)
+        deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
+        proforma_amount = fulfillment_total + shipping_gross - deposit_credit
+
         if shipping_net > 0:
             vat_rate = (shipping_gross - shipping_net) / shipping_net
             shipping_vat_rate = f"{vat_rate:.2f}"
@@ -1462,10 +1464,10 @@ class FulfillmentProformaInvoiceGenerated(SubscriptionObjectType, FulfillmentBas
             shipping_vat_rate = "0.00"
 
         return ProformaCalculatedAmounts(
-            fulfillment_total=Money(amount=float(fulfillment_total), currency=currency),
-            deposit_credit=Money(amount=float(deposit_credit), currency=currency),
-            proforma_amount=Money(amount=float(proforma_amount), currency=currency),
-            shipping_cost=Money(amount=float(shipping_gross), currency=currency),
+            fulfillment_total=Money(amount=fulfillment_total, currency=currency),
+            deposit_credit=Money(amount=deposit_credit, currency=currency),
+            proforma_amount=Money(amount=proforma_amount, currency=currency),
+            shipping_cost=Money(amount=shipping_gross, currency=currency),
             shipping_vat_rate=shipping_vat_rate,
         )
 
@@ -1479,9 +1481,43 @@ class FulfillmentFulfilled(SubscriptionObjectType, FulfillmentBase):
         doc_category = DOC_CATEGORY_ORDERS
 
 
+class XeroOrderLineAmounts(graphene.ObjectType):
+    order_line_id = graphene.String(required=True, description="ID of the order line.")
+    quantity = graphene.Int(required=True, description="Quantity ordered.")
+    product_name = graphene.String(required=True)
+    product_sku = graphene.String()
+    product_code = graphene.String(
+        description="Value of the configured invoice product code attribute.",
+    )
+    xero_tax_code = graphene.String(
+        description="Snapshotted Xero tax code for this line (null for DAP/zero-rated).",
+    )
+    unit_price_gross = graphene.Field(
+        Money,
+        required=True,
+        description="Stored gross unit price — safe to read in sync webhook context.",
+    )
+    unit_price_net = graphene.Field(
+        Money,
+        required=True,
+        description="Stored net unit price — safe to read in sync webhook context.",
+    )
+
+
 class XeroOrderConfirmedCalculatedAmounts(graphene.ObjectType):
     deposit_amount = graphene.Field(
         Money, required=True, description="Deposit amount due for this order."
+    )
+    shipping_xero_tax_code = graphene.String(
+        description="Snapshotted Xero tax code for shipping (null for DAP/zero-rated).",
+    )
+    lines = graphene.List(
+        graphene.NonNull(XeroOrderLineAmounts),
+        required=True,
+        description=(
+            "Per-line stored amounts. Used by Dirac to split the deposit "
+            "proportionally by Xero tax code."
+        ),
     )
 
 
@@ -1489,7 +1525,7 @@ class XeroOrderConfirmed(SubscriptionObjectType, OrderBase):
     calculated_amounts = graphene.Field(
         XeroOrderConfirmedCalculatedAmounts,
         required=True,
-        description="Calculated deposit amount for this order.",
+        description="Calculated deposit amount and per-line data for this order.",
     )
 
     class Meta:
@@ -1507,10 +1543,40 @@ class XeroOrderConfirmed(SubscriptionObjectType, OrderBase):
         from decimal import Decimal
 
         _, order = root
-        percentage = order.deposit_percentage or Decimal(0)
-        deposit_amount = order.total_gross_amount * (percentage / Decimal(100))
+        if order.deposit_required and order.deposit_percentage:
+            deposit_amount = order.total_gross_amount * (
+                order.deposit_percentage / Decimal(100)
+            )
+        else:
+            deposit_amount = Decimal(0)
+        currency = order.currency
+        site_settings = SiteSettings.objects.first()
+        product_code_slug = (
+            site_settings.invoice_product_code_attribute
+            if site_settings
+            else "product-code"
+        )
+        lines = [
+            XeroOrderLineAmounts(
+                order_line_id=str(ol.pk),
+                quantity=ol.quantity,
+                product_name=ol.product_name,
+                product_sku=ol.product_sku,
+                product_code=get_product_code_for_line(ol, product_code_slug),
+                xero_tax_code=ol.xero_tax_code,
+                unit_price_gross=Money(
+                    amount=ol.unit_price_gross_amount, currency=currency
+                ),
+                unit_price_net=Money(
+                    amount=ol.unit_price_net_amount, currency=currency
+                ),
+            )
+            for ol in order.lines.all()
+        ]
         return XeroOrderConfirmedCalculatedAmounts(
-            deposit_amount=Money(amount=deposit_amount, currency=order.currency)
+            deposit_amount=Money(amount=deposit_amount, currency=currency),
+            shipping_xero_tax_code=order.shipping_xero_tax_code,
+            lines=lines,
         )
 
 
@@ -1520,7 +1586,12 @@ class XeroFulfillmentLineAmounts(graphene.ObjectType):
     product_name = graphene.String(required=True)
     variant_name = graphene.String(required=True)
     product_sku = graphene.String()
-    tax_rate = graphene.Float(required=True)
+    product_code = graphene.String(
+        description="Value of the configured invoice product code attribute.",
+    )
+    xero_tax_code = graphene.String(
+        description="Snapshotted Xero tax code for this line (null for DAP/zero-rated).",
+    )
     unit_price_gross = graphene.Field(Money, required=True)
     unit_price_net = graphene.Field(Money, required=True)
     total_price_gross = graphene.Field(Money, required=True)
@@ -1529,14 +1600,18 @@ class XeroFulfillmentLineAmounts(graphene.ObjectType):
 
 class XeroFulfillmentCreatedCalculatedAmounts(graphene.ObjectType):
     proforma_amount = graphene.Field(
-        Money, required=True, description="Fulfillment total minus deposit credit."
+        Money,
+        required=True,
+        description="Fulfillment total plus shipping minus deposit credit.",
     )
     shipping_cost = graphene.Field(
-        Money, required=True, description="Shipping cost for this order."
+        Money, required=True, description="Shipping gross for this order."
     )
-    shipping_vat_rate = graphene.String(
-        required=True,
-        description='VAT rate as decimal string e.g. "0.20".',
+    shipping_net = graphene.Field(
+        Money, required=True, description="Shipping net for this order (pass to Xero)."
+    )
+    shipping_xero_tax_code = graphene.String(
+        description="Snapshotted Xero tax code for shipping (null for DAP/zero-rated).",
     )
     lines = graphene.List(
         graphene.NonNull(XeroFulfillmentLineAmounts),
@@ -1569,6 +1644,12 @@ class XeroFulfillmentCreated(SubscriptionObjectType, FulfillmentBase):
         _, fulfillment = root
         order = fulfillment.order
 
+        site_settings = SiteSettings.objects.first()
+        product_code_slug = (
+            site_settings.invoice_product_code_attribute
+            if site_settings
+            else "product-code"
+        )
         fulfillment_total = Decimal(0)
         lines = []
         for line in fulfillment.lines.all():
@@ -1583,35 +1664,29 @@ class XeroFulfillmentCreated(SubscriptionObjectType, FulfillmentBase):
                     product_name=ol.product_name,
                     variant_name=ol.variant_name,
                     product_sku=ol.product_sku,
-                    tax_rate=float(ol.tax_rate),
-                    unit_price_gross=Money(
-                        amount=float(gross), currency=order.currency
-                    ),
-                    unit_price_net=Money(amount=float(net), currency=order.currency),
+                    product_code=get_product_code_for_line(ol, product_code_slug),
+                    xero_tax_code=ol.xero_tax_code,
+                    unit_price_gross=Money(amount=gross, currency=order.currency),
+                    unit_price_net=Money(amount=net, currency=order.currency),
                     total_price_gross=Money(
-                        amount=float(gross * line.quantity), currency=order.currency
+                        amount=gross * line.quantity, currency=order.currency
                     ),
                     total_price_net=Money(
-                        amount=float(net * line.quantity), currency=order.currency
+                        amount=net * line.quantity, currency=order.currency
                     ),
                 )
             )
 
-        deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
-        proforma_amount = fulfillment_total - deposit_credit
-
         shipping_gross = order.shipping_price_gross_amount or Decimal(0)
         shipping_net = order.shipping_price_net_amount or Decimal(0)
-        if shipping_net > 0:
-            vat_rate = (shipping_gross - shipping_net) / shipping_net
-            shipping_vat_rate = f"{vat_rate:.2f}"
-        else:
-            shipping_vat_rate = "0.00"
+        deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
+        proforma_amount = fulfillment_total + shipping_gross - deposit_credit
 
         return XeroFulfillmentCreatedCalculatedAmounts(
             proforma_amount=Money(amount=proforma_amount, currency=order.currency),
             shipping_cost=Money(amount=shipping_gross, currency=order.currency),
-            shipping_vat_rate=shipping_vat_rate,
+            shipping_net=Money(amount=shipping_net, currency=order.currency),
+            shipping_xero_tax_code=order.shipping_xero_tax_code,
             lines=lines,
         )
 
@@ -3160,6 +3235,17 @@ class XeroListBankAccounts(SubscriptionObjectType):
         doc_category = DOC_CATEGORY_ORDERS
 
 
+class XeroListTaxCodes(SubscriptionObjectType):
+    domain = graphene.String(required=True)
+
+    class Meta:
+        root_type = None
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = "List available Xero tax codes for a domain."
+        doc_category = DOC_CATEGORY_ORDERS
+
+
 SYNC_WEBHOOK_TYPES_MAP = {
     WebhookEventSyncType.PAYMENT_AUTHORIZE: PaymentAuthorize,
     WebhookEventSyncType.PAYMENT_CAPTURE: PaymentCaptureEvent,
@@ -3202,6 +3288,7 @@ SYNC_WEBHOOK_TYPES_MAP = {
     ),
     WebhookEventSyncType.XERO_LIST_PAYMENTS: XeroListPayments,
     WebhookEventSyncType.XERO_LIST_BANK_ACCOUNTS: XeroListBankAccounts,
+    WebhookEventSyncType.XERO_LIST_TAX_CODES: XeroListTaxCodes,
 }
 
 

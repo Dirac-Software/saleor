@@ -1,0 +1,26 @@
+{
+  "user": {
+    "id": "VXNlcjoyMw==",
+    "email": "fixture@example.com",
+    "firstName": "Fixture",
+    "lastName": "User",
+    "defaultBillingAddress": {
+      "companyName": "Fixture Ltd",
+      "firstName": "Fixture",
+      "lastName": "User",
+      "streetAddress1": "1 Test Street",
+      "streetAddress2": "",
+      "city": "London",
+      "postalCode": "EC1A 1BB",
+      "country": {
+        "code": "GB"
+      }
+    },
+    "privateMetadata": [
+      {
+        "key": "xeroContactId",
+        "value": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}

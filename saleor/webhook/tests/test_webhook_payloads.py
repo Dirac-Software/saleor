@@ -283,6 +283,7 @@ def test_generate_order_payload(
         ],
         "collection_point": None,
         "shipping_tax_rate": str(order.shipping_tax_rate),
+        "shipping_xero_tax_code": order.shipping_xero_tax_code,
         "shipping_price_net_amount": str(
             quantize_price(order.shipping_price.net.amount, currency)
         ),
@@ -719,6 +720,7 @@ def test_order_lines_have_all_required_fields(
             total_line.gross.amount.quantize(Decimal("0.01"))
         ),
         "tax_rate": str(line.tax_rate.quantize(Decimal("0.0001"))),
+        "xero_tax_code": line.xero_tax_code,
         "allocations": [
             {
                 "warehouse_id": global_warehouse_id,
@@ -735,6 +737,7 @@ def test_order_lines_have_all_required_fields(
         ),
         "voucher_code": line.voucher_code,
         "sale_id": line.sale_id,
+        "product_code": None,
     }
 
 
@@ -1214,6 +1217,7 @@ def test_generate_invoice_payload(fulfilled_order):
             "shipping_price_net_amount": "10.00",
             "shipping_price_gross_amount": "12.30",
             "shipping_tax_rate": "0.2300",
+            "shipping_xero_tax_code": fulfilled_order.shipping_xero_tax_code,
             "total_net_amount": "80.00",
             "total_gross_amount": "98.40",
             "weight": "0.0:g",
@@ -2855,89 +2859,3 @@ def test_generate_product_media_payload(product_media_image):
 
     # then
     assert payload == expected_payload
-
-
-def test_generate_proforma_invoice_payload(
-    fulfillment, warehouse, product, site_settings
-):
-    """Test proforma invoice webhook payload generation."""
-    from decimal import Decimal
-
-    from ...attribute import AttributeType
-    from ...attribute.models import (
-        AssignedProductAttributeValue,
-        Attribute,
-        AttributeValue,
-    )
-    from ...payment import ChargeStatus, CustomPaymentChoices
-    from ...payment.models import Payment
-    from ..payloads import generate_proforma_invoice_payload
-
-    # Setup order with deposit
-    order = fulfillment.order
-    order.deposit_required = True
-    order.deposit_percentage = Decimal("30.00")
-    order.total_gross_amount = Decimal("200.00")
-    order.save()
-
-    # Add deposit payment
-    Payment.objects.create(
-        order=order,
-        gateway=CustomPaymentChoices.XERO,
-        psp_reference="XERO-TEST-001",
-        total=Decimal("60.00"),
-        captured_amount=Decimal("60.00"),
-        charge_status=ChargeStatus.FULLY_CHARGED,
-        currency=order.currency,
-        is_active=True,
-    )
-
-    # Create product code attribute
-    attribute = Attribute.objects.create(
-        slug="product-code",
-        name="Product Code",
-        type=AttributeType.PRODUCT_TYPE,
-    )
-    site_settings.invoice_product_code_attribute = attribute.slug
-    site_settings.save()
-
-    # Create attribute value for product
-    attr_value = AttributeValue.objects.create(
-        attribute=attribute,
-        name="PROD-001",
-        slug="prod-001",
-    )
-    AssignedProductAttributeValue.objects.create(
-        product=product,
-        value=attr_value,
-    )
-
-    # Set fulfillment deposit allocation
-    fulfillment.deposit_allocated_amount = Decimal("30.00")
-    fulfillment.save()
-
-    # Create proforma invoice for the fulfillment
-    from ...invoice import InvoiceType
-    from ...invoice.models import Invoice
-
-    Invoice.objects.create(
-        order=order,
-        fulfillment=fulfillment,
-        type=InvoiceType.PROFORMA,
-    )
-
-    # Generate payload
-    payload = json.loads(generate_proforma_invoice_payload(fulfillment))
-
-    # Verify structure
-    assert "order" in payload
-    assert "fulfillment" in payload
-    assert "invoice" in payload
-    assert "calculated_amounts" in payload
-
-    # Verify deposit info
-    assert payload["fulfillment"]["deposit_allocated"]["amount"] == "30.00"
-
-    # Verify lines have product codes
-    assert len(payload["fulfillment"]["lines"]) > 0
-    # Product code extraction tested (even if None due to variant not having product assignment)

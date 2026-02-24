@@ -1944,5 +1944,8 @@ class BasePlugin:
     def xero_list_bank_accounts(self, domain: str, previous_value: list) -> list:
         return NotImplemented
 
+    def xero_list_tax_codes(self, domain: str, previous_value: list) -> list:
+        return NotImplemented
+
     def fulfillment_fulfilled(self, fulfillment, previous_value: None) -> None:
         return NotImplemented
