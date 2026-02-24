@@ -284,3 +284,33 @@ def test_tax_class_update_zero_rate(staff_api_client, permission_manage_taxes):
     assert data["taxClass"]["name"] == new_name
     assert len(data["taxClass"]["countries"]) == 1
     assert data["taxClass"]["countries"][0]["rate"] == 0.0
+
+
+def test_tax_class_update_preserves_xero_tax_code_when_not_provided(
+    staff_api_client, permission_manage_taxes
+):
+    # given
+    tax_class = TaxClass.objects.create(name="Tax Class")
+    tax_class.country_rates.create(country="PL", rate=21, xero_tax_code="EXISTING")
+
+    id = graphene.Node.to_global_id("TaxClass", tax_class.pk)
+
+    # when - update rate without providing xeroTaxCode
+    variables = {
+        "id": id,
+        "input": {
+            "updateCountryRates": [{"countryCode": "PL", "rate": 25}],
+        },
+    }
+    response = staff_api_client.post_graphql(
+        MUTATION, variables, permissions=[permission_manage_taxes]
+    )
+
+    # then - existing xeroTaxCode should be preserved
+    content = get_graphql_content(response)
+    data = content["data"]["taxClassUpdate"]
+    assert not data["errors"]
+
+    pl_rate = tax_class.country_rates.get(country="PL")
+    assert pl_rate.rate == 25
+    assert pl_rate.xero_tax_code == "EXISTING"

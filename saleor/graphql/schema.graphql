@@ -21928,6 +21928,9 @@ input TaxClassRateInput @doc(category: "Taxes") {
 
   """Tax rate value."""
   rate: Float
+
+  """Xero tax code to assign for this country rate."""
+  xeroTaxCode: String
 }
 
 """

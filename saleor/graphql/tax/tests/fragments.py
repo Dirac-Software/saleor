@@ -56,6 +56,7 @@ TAX_COUNTRY_CONFIGURATION_FRAGMENT = """
     }
     taxClassCountryRates {
       rate
+      xeroTaxCode
       taxClass {
         id
         name

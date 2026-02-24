@@ -33,6 +33,7 @@ def _test_field_resolvers(
     for country_rate in country_rates:
         expected_rate_data = {
             "rate": country_rate.rate,
+            "xeroTaxCode": country_rate.xero_tax_code,
             "taxClass": {
                 "id": graphene.Node.to_global_id("TaxClass", country_rate.tax_class.pk),
                 "name": country_rate.tax_class.name,

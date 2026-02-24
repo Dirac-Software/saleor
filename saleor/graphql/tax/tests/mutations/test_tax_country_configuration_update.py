@@ -282,3 +282,59 @@ def test_validate_negative_rates(staff_api_client, permission_manage_taxes):
     assert data["errors"][0]["code"] == code.name
     assert len(data["errors"][0]["taxClassIds"]) == 1
     assert id_1 in data["errors"][0]["taxClassIds"]
+
+
+def test_create_country_rate_with_xero_tax_code(
+    staff_api_client, permission_manage_taxes
+):
+    # given
+    tax_class = TaxClass.objects.create(name="Books")
+    id_1 = graphene.Node.to_global_id("TaxClass", tax_class.pk)
+
+    # when
+    variables = {
+        "countryCode": "PL",
+        "updateTaxClassRates": [
+            {"taxClassId": id_1, "rate": 23, "xeroTaxCode": "TAX001"},
+        ],
+    }
+    response = staff_api_client.post_graphql(
+        MUTATION, variables, permissions=[permission_manage_taxes]
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["taxCountryConfigurationUpdate"]
+    assert not data["errors"]
+
+    rate = TaxClassCountryRate.objects.get(country="PL", tax_class=tax_class)
+    assert rate.xero_tax_code == "TAX001"
+
+
+def test_update_country_rate_preserves_xero_tax_code_when_not_provided(
+    staff_api_client, permission_manage_taxes
+):
+    # given
+    tax_class = TaxClass.objects.create(name="Books")
+    tax_class.country_rates.create(country="PL", rate=20, xero_tax_code="EXISTING")
+    id_1 = graphene.Node.to_global_id("TaxClass", tax_class.pk)
+
+    # when - update rate without providing xeroTaxCode
+    variables = {
+        "countryCode": "PL",
+        "updateTaxClassRates": [
+            {"taxClassId": id_1, "rate": 25},
+        ],
+    }
+    response = staff_api_client.post_graphql(
+        MUTATION, variables, permissions=[permission_manage_taxes]
+    )
+
+    # then - existing xeroTaxCode should be preserved
+    content = get_graphql_content(response)
+    data = content["data"]["taxCountryConfigurationUpdate"]
+    assert not data["errors"]
+
+    rate = TaxClassCountryRate.objects.get(country="PL", tax_class=tax_class)
+    assert rate.rate == 25
+    assert rate.xero_tax_code == "EXISTING"

@@ -118,7 +118,8 @@ class TaxClassUpdate(DeprecatedModelMutation):
             rate = data.get("rate")
             if rate is not None:
                 obj.rate = rate
-                obj.xero_tax_code = data.get("xero_tax_code")
+                if "xero_tax_code" in data:
+                    obj.xero_tax_code = data["xero_tax_code"]
                 updated_countries.append(obj.country.code)
         models.TaxClassCountryRate.objects.bulk_update(
             to_update, fields=("rate", "xero_tax_code")
