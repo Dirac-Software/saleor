@@ -34,6 +34,10 @@
       "amount": 274.0,
       "currency": "GBP"
     },
+    "depositAmount": {
+      "amount": 50.0,
+      "currency": "GBP"
+    },
     "shippingCost": {
       "amount": 24.0,
       "currency": "GBP"

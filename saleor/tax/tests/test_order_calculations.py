@@ -281,13 +281,9 @@ def test_calculations_calculate_order_total_no_rates(order_with_lines_untaxed):
 
     TaxClassCountryRate.objects.all().delete()
 
-    # when
-    update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax)
-
-    # then
-    assert order.total == TaxedMoney(
-        net=Money("80.00", "USD"), gross=Money("80.00", "USD")
-    )
+    # when / then
+    with pytest.raises(ValueError, match="No TaxClassCountryRate"):
+        update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax)
 
 
 def test_calculations_calculate_order_total_default_country_rate(
@@ -303,13 +299,9 @@ def test_calculations_calculate_order_total_default_country_rate(
     TaxClassCountryRate.objects.all().delete()
     TaxClassCountryRate.objects.create(country=country, rate=23)
 
-    # when
-    update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax)
-
-    # then
-    assert order.total == TaxedMoney(
-        net=Money("65.04", "USD"), gross=Money("80.00", "USD")
-    )
+    # when / then - country-level default does not satisfy per-tax-class requirement
+    with pytest.raises(ValueError, match="No TaxClassCountryRate"):
+        update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax)
 
 
 def test_calculations_calculate_order_total_voucher(order_with_lines_untaxed, voucher):

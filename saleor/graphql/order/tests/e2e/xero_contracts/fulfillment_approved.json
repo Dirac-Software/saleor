@@ -65,14 +65,14 @@
     },
     "payments": [
       {
-        "gateway": "mirumee.payments.braintree",
+        "gateway": "xero",
         "capturedAmount": {
           "amount": 90.0,
           "currency": "GBP"
         },
         "transactions": [
           {
-            "token": "fixture-transaction-token"
+            "token": "00000000-0000-0000-0000-000000000000"
           }
         ]
       }

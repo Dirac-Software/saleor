@@ -579,6 +579,7 @@ XERO_FULFILLMENT_CREATED_QUERY = """
           fulfillment { id }
           calculatedAmounts {
             proformaAmount { amount currency }
+            depositAmount { amount currency }
             shippingCost { amount currency }
             shippingNet { amount currency }
             shippingXeroTaxCode
@@ -653,6 +654,8 @@ def test_xero_fulfillment_created_calculated_amounts_serializes_as_decimal(
     expected_proforma = float(lines_gross + Decimal("120.00") - Decimal("50.00"))
     assert amounts["proformaAmount"]["amount"] == expected_proforma
     assert amounts["proformaAmount"]["currency"] == "USD"
+    assert amounts["depositAmount"]["amount"] == 50.0
+    assert amounts["depositAmount"]["currency"] == "USD"
     assert len(amounts["lines"]) > 0
     for line in amounts["lines"]:
         assert line["unitPriceGross"]["amount"] == pytest.approx(100.0)

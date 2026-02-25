@@ -344,13 +344,23 @@ def test_order_update_shipping_cost_persists_inco_term(
     staff_api_client,
     permission_group_manage_orders,
     draft_order,
+    site_settings,
 ):
     # The inco_term field should be stored for any valid value passed in.
     # (EXW-specific zero-rate tax behaviour is tested separately.)
 
+    from .....tax.models import TaxClass, TaxClassCountryRate
+
     # Arrange
     permission_group_manage_orders.user_set.add(staff_api_client.user)
     order = draft_order
+    zero_class = TaxClass.objects.create(name="Zero Rated Export")
+    channel_country = order.channel.default_country.code
+    TaxClassCountryRate.objects.create(
+        tax_class=zero_class, country=channel_country, rate=0
+    )
+    site_settings.zero_rated_export_tax_class = zero_class
+    site_settings.save(update_fields=["zero_rated_export_tax_class"])
     order_id = graphene.Node.to_global_id("Order", order.id)
 
     # Act

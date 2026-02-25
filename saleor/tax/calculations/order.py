@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Iterable
 from decimal import Decimal
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from django.conf import settings
 from prices import TaxedMoney
@@ -9,18 +9,20 @@ from prices import TaxedMoney
 from ...core.prices import quantize_price
 from ...core.taxes import zero_taxed_money
 from ...order import base_calculations
-from ...order.utils import get_order_country
 from ..models import TaxClassCountryRate
 from ..utils import (
     denormalize_tax_rate_from_db,
+    get_configured_zero_rated_export_tax_class_pk,
     get_shipping_tax_rate_for_order,
-    get_tax_rate_for_country,
+    get_tax_country_for_order,
+    get_zero_rated_export_tax_class,
     normalize_tax_rate_for_db,
 )
 from . import calculate_flat_rate_tax
 
 if TYPE_CHECKING:
     from ...order.models import Order, OrderLine
+    from ...tax.models import TaxClass
 
 
 def update_order_prices_with_flat_rates(
@@ -29,7 +31,27 @@ def update_order_prices_with_flat_rates(
     prices_entered_with_tax: bool,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ):
-    country_code = get_order_country(order)
+    export_tax_class = get_zero_rated_export_tax_class(order)
+    if export_tax_class is not None:
+        country_code = order.channel.default_country.code
+    else:
+        country_code = get_tax_country_for_order(order)
+
+    # When not in export mode, detect any stale zero-rated export class that was
+    # written to lines/shipping during a prior non-DDP run and persisted to the DB.
+    # Restore shipping's tax class from the shipping method (its natural source).
+    stale_export_class_pk: int | None = None
+    if export_tax_class is None:
+        stale_export_class_pk = get_configured_zero_rated_export_tax_class_pk()
+        if (
+            stale_export_class_pk
+            and order.shipping_tax_class_id == stale_export_class_pk
+        ):
+            shipping_method = order.shipping_method
+            order.shipping_tax_class = (
+                shipping_method.tax_class if shipping_method else None
+            )
+
     default_country_rate_obj = (
         TaxClassCountryRate.objects.using(database_connection_name)
         .filter(country=country_code, tax_class=None)
@@ -46,15 +68,22 @@ def update_order_prices_with_flat_rates(
         country_code,
         default_tax_rate,
         prices_entered_with_tax,
+        export_tax_class=export_tax_class,
+        stale_export_class_pk=stale_export_class_pk,
         database_connection_name=database_connection_name,
     )
 
     # Calculate order shipping.
+    if export_tax_class:
+        order.shipping_tax_class = export_tax_class
     shipping_tax_rate = get_shipping_tax_rate_for_order(
         order,
         lines,
         default_tax_rate,
         country_code,
+        shipping_tax_class_id_override=export_tax_class.pk
+        if export_tax_class
+        else None,
         database_connection_name=database_connection_name,
     )
 
@@ -128,6 +157,8 @@ def update_taxes_for_order_lines(
     country_code: str,
     default_tax_rate: Decimal,
     prices_entered_with_tax: bool,
+    export_tax_class: Optional["TaxClass"] = None,
+    stale_export_class_pk: int | None = None,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> tuple[Iterable["OrderLine"], TaxedMoney]:
     currency = order.currency
@@ -135,30 +166,55 @@ def update_taxes_for_order_lines(
 
     undiscounted_subtotal = zero_taxed_money(order.currency)
 
-    tax_class_ids: set[int] = {
-        line.tax_class_id for line in lines if line.tax_class_id is not None
-    }
+    # Restore any stale zero-rated export class on lines from a prior non-DDP run.
+    # This must happen before building the tax_class_ids set so the restored IDs
+    # are included in the rates lookup.
+    if not export_tax_class and stale_export_class_pk:
+        for line in lines:
+            if line.variant and line.tax_class_id == stale_export_class_pk:
+                line.tax_class_id = line.variant.product.tax_class_id
 
-    tax_rates_per_tax_class_ic: dict[int, list[TaxClassCountryRate]] = defaultdict(list)
-    for rate in TaxClassCountryRate.objects.using(database_connection_name).filter(
-        tax_class_id__in=tax_class_ids
-    ):
-        rate_tax_class_id = cast(int, rate.tax_class_id)
-        tax_rates_per_tax_class_ic[rate_tax_class_id].append(rate)
+    if export_tax_class:
+        export_tax_class_rates = list(
+            TaxClassCountryRate.objects.using(database_connection_name).filter(
+                tax_class=export_tax_class
+            )
+        )
+        tax_rates_per_tax_class_ic: dict[int, list[TaxClassCountryRate]] = {
+            export_tax_class.pk: export_tax_class_rates
+        }
+    else:
+        tax_class_ids: set[int] = {
+            line.tax_class_id for line in lines if line.tax_class_id is not None
+        }
+        tax_rates_per_tax_class_ic = defaultdict(list)
+        for rate in TaxClassCountryRate.objects.using(database_connection_name).filter(
+            tax_class_id__in=tax_class_ids
+        ):
+            rate_tax_class_id = cast(int, rate.tax_class_id)
+            tax_rates_per_tax_class_ic[rate_tax_class_id].append(rate)
 
     for line in lines:
         variant = line.variant
         if not variant:
             continue
 
+        if export_tax_class:
+            line.tax_class = export_tax_class
+
         tax_rate = default_tax_rate
-        tax_class_id = line.tax_class_id
+        tax_class_id = export_tax_class.pk if export_tax_class else line.tax_class_id
         if tax_class_id:
-            tax_rate = get_tax_rate_for_country(
-                tax_rates_per_tax_class_ic.get(tax_class_id, []),
-                default_tax_rate,
-                country_code,
+            rates_for_class = tax_rates_per_tax_class_ic.get(tax_class_id, [])
+            country_rate = next(
+                (r for r in rates_for_class if r.country == country_code), None
             )
+            if country_rate is None:
+                raise ValueError(
+                    f"No TaxClassCountryRate for country '{country_code}'"
+                    f" on tax_class_id={tax_class_id}"
+                )
+            tax_rate = country_rate.rate
         elif line.tax_class_name is not None and line.tax_rate is not None:
             # If tax_class is None but tax_class_name is set, the tax class was set
             # for this line before, but is now removed from the system. In this case

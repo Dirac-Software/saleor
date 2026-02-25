@@ -11,6 +11,7 @@ from ....order.error_codes import OrderErrorCode
 from ....permission.enums import OrderPermissions
 from ....tax.utils import (
     get_tax_country_for_order,
+    get_zero_rated_export_tax_class,
     normalize_tax_rate_for_db,
     resolve_tax_class_country_rate,
 )
@@ -38,7 +39,9 @@ class OrderUpdateShippingCostInput(BaseInputObjectType):
             "The rate is looked up from the tax class's country rate for the "
             "order's shipping address country. "
             "If omitted, the order's existing shipping tax class is reused; "
-            "if none is set, the country default rate applies."
+            "if none is set, the country default rate applies. "
+            "Ignored for non-DDP exports, which always use the site-wide "
+            "zero_rated_export_tax_class."
         ),
         required=False,
     )
@@ -144,7 +147,6 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
                 }
             )
 
-        # Validate inco_term before touching any order state.
         from ....shipping import IncoTerm
 
         inco_term = input.get("inco_term")
@@ -159,8 +161,7 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
                 }
             )
 
-        # Resolve tax class: explicit input takes precedence, then fall back to
-        # whatever is already stored on the order.
+        # Resolve explicit tax class from input (may be overridden below for exports).
         tax_class_id = input.get("tax_class")
         if tax_class_id:
             tax_class = cls.get_node_or_error(
@@ -169,9 +170,24 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
         else:
             tax_class = order.shipping_tax_class
 
-        # Apply incoming inco_term to the order so get_tax_country_for_order sees it.
+        # Apply inco_term so get_zero_rated_export_tax_class sees the new value.
         if inco_term:
             order.inco_term = inco_term
+
+        # Non-DDP exports always use zero_rated_export_tax_class — consistent with
+        # update_order_prices_with_flat_rates. Explicit tax_class input is ignored.
+        try:
+            export_tax_class = get_zero_rated_export_tax_class(order)
+        except ValueError as e:
+            raise ValidationError(
+                {
+                    "inco_term": ValidationError(
+                        str(e), code=OrderErrorCode.INVALID.value
+                    )
+                }
+            ) from e
+        if export_tax_class is not None:
+            tax_class = export_tax_class
 
         country_code = get_tax_country_for_order(order)
         if country_code is None:
@@ -186,7 +202,6 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             net_amount * (Decimal(1) + tax_rate / Decimal(100)), currency
         )
 
-        # Capture old shipping amounts before overwriting so we can adjust totals.
         old_shipping_net = order.shipping_price_net_amount
         old_shipping_gross = order.shipping_price_gross_amount
 
@@ -199,7 +214,6 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             shipping_country_rate.xero_tax_code if shipping_country_rate else None
         )
 
-        # Update order totals: total = subtotal + shipping.
         order.total_net_amount = quantize_price(
             order.total_net_amount - old_shipping_net + net_amount, currency
         )
@@ -221,7 +235,11 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             manual_method = cls._get_or_create_manual_shipping_method(order.channel)
             order.shipping_method = manual_method
 
-        order.should_refresh_prices = False
+        # When inco_term changes, line taxes may need recalculating on the next
+        # access (e.g. switching from DDP to EXW changes line tax classes).
+        # Save should_refresh_prices=True to DB but keep it False in memory so
+        # the current response reflects the inline calculation, not a re-fetch.
+        order.should_refresh_prices = bool(inco_term)
 
         update_fields = [
             "shipping_price_net_amount",
@@ -237,11 +255,14 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             "should_refresh_prices",
             "updated_at",
         ]
-        if tax_class_id and tax_class:
-            order.shipping_tax_class = tax_class
-            order.shipping_tax_class_name = tax_class.name
-            order.shipping_tax_class_metadata = tax_class.metadata
-            order.shipping_tax_class_private_metadata = tax_class.private_metadata
+        effective_tax_class = export_tax_class or (tax_class if tax_class_id else None)
+        if effective_tax_class:
+            order.shipping_tax_class = effective_tax_class
+            order.shipping_tax_class_name = effective_tax_class.name
+            order.shipping_tax_class_metadata = effective_tax_class.metadata
+            order.shipping_tax_class_private_metadata = (
+                effective_tax_class.private_metadata
+            )
             update_fields.extend(
                 [
                     "shipping_tax_class",
@@ -256,6 +277,9 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
             update_fields.append("inco_term")
 
         order.save(update_fields=update_fields)
+        # Reset in memory so resolve_shipping_price uses the inline values above,
+        # not a TAX_APP recalculation that would ignore our flat-rate calculation.
+        order.should_refresh_prices = False
 
         manager = get_plugin_manager_promise(info.context).get()
         event_to_emit = (

@@ -578,6 +578,60 @@ def test_activate_raises_for_owned_warehouse(db):
         activate_price_list_task(pl.pk)
 
 
+def test_activate_raises_when_category_missing_product_type(
+    db, warehouse, required_attributes
+):
+    from saleor.product import PriceListStatus
+
+    pl, _ = _make_processed_price_list(warehouse, product=None)
+
+    with pytest.raises(ValueError, match="no ProductType or Category"):
+        activate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.status != PriceListStatus.ACTIVE
+
+
+def test_activate_raises_when_missing_database_setup(db, warehouse):
+    from unittest.mock import patch
+
+    from saleor.product import PriceListStatus
+    from saleor.product.ingestion import MissingDatabaseSetup
+
+    pl, _ = _make_processed_price_list(warehouse, product=None)
+
+    with pytest.raises(MissingDatabaseSetup):
+        with patch(
+            "saleor.product.ingestion.get_products_by_code_and_brand",
+            side_effect=MissingDatabaseSetup("Product Code attribute not found"),
+        ):
+            activate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.status != PriceListStatus.ACTIVE
+
+
+def test_replace_raises_when_category_missing_product_type(
+    db, warehouse, required_attributes
+):
+    from saleor.product import PriceListStatus
+
+    product, _, _ = _make_product_with_variant_and_stock(warehouse)
+    old_pl, _ = _make_processed_price_list(warehouse, product=product)
+    old_pl.status = PriceListStatus.ACTIVE
+    old_pl.save(update_fields=["status"])
+
+    new_pl, _ = _make_processed_price_list(warehouse, product=None)
+
+    with pytest.raises(ValueError, match="no ProductType or Category"):
+        replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    new_pl.refresh_from_db()
+    assert new_pl.status != PriceListStatus.ACTIVE
+    old_pl.refresh_from_db()
+    assert old_pl.status == PriceListStatus.ACTIVE
+
+
 def test_activate_creates_variant_for_new_size(db, warehouse):
     from saleor.product.models import ProductVariant
 

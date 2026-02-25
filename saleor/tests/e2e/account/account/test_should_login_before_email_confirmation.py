@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 
 from .....account.models import User
@@ -8,13 +10,22 @@ from ..utils import account_register, token_create
 
 
 @pytest.mark.e2e
+@patch("saleor.account.throttling.get_client_ip")
+@patch("saleor.account.throttling.cache")
 def test_should_login_before_email_confirmation_core_1510(
+    mocked_cache,
+    mocked_get_ip,
     e2e_not_logged_api_client,
     e2e_staff_api_client,
     permission_manage_product_types_and_attributes,
     shop_permissions,
+    setup_mock_for_cache,
 ):
     # Before
+    dummy_cache = {}
+    setup_mock_for_cache(dummy_cache, mocked_cache)
+    mocked_get_ip.return_value = "127.0.0.1"
+
     permissions = [
         permission_manage_product_types_and_attributes,
         *shop_permissions,

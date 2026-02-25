@@ -3435,6 +3435,9 @@ def test_draft_order_update_no_changes(
     order.redirect_url = "https://www.example.com"
     order.external_reference = "some_reference_string"
     order.language_code = "pl"
+    order.xero_bank_account_code = "BANK123"
+    order.xero_bank_account_sort_code = "12-34-56"
+    order.xero_bank_account_number = "12345678"
     order.save()
 
     shipping_method_id = graphene.Node.to_global_id(
@@ -3478,6 +3481,9 @@ def test_draft_order_update_no_changes(
         "metadata": [{"key": key, "value": value}],
         "privateMetadata": [{"key": key, "value": value}],
         "languageCode": "PL",
+        "xeroBankAccountCode": "BANK123",
+        "xeroBankAccountSortCode": "12-34-56",
+        "xeroBankAccountNumber": "12345678",
     }
     assert set(input_fields) == set(input.keys())
 
@@ -3581,6 +3587,9 @@ def test_draft_order_update_emit_events(
         "redirectUrl": "https://www.example.com",
         "externalReference": order.external_reference + "_new",
         "languageCode": "PL",
+        "xeroBankAccountCode": "BANK123",
+        "xeroBankAccountSortCode": "12-34-56",
+        "xeroBankAccountNumber": "12345678",
     }
     assert set(input_fields) == set(input.keys())
 

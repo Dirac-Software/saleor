@@ -1604,6 +1604,11 @@ class XeroFulfillmentCreatedCalculatedAmounts(graphene.ObjectType):
         required=True,
         description="Fulfillment total plus shipping minus deposit credit.",
     )
+    deposit_amount = graphene.Field(
+        Money,
+        required=True,
+        description="Deposit credit allocated to this fulfillment.",
+    )
     shipping_cost = graphene.Field(
         Money, required=True, description="Shipping gross for this order."
     )
@@ -1684,6 +1689,7 @@ class XeroFulfillmentCreated(SubscriptionObjectType, FulfillmentBase):
 
         return XeroFulfillmentCreatedCalculatedAmounts(
             proforma_amount=Money(amount=proforma_amount, currency=order.currency),
+            deposit_amount=Money(amount=deposit_credit, currency=order.currency),
             shipping_cost=Money(amount=shipping_gross, currency=order.currency),
             shipping_net=Money(amount=shipping_net, currency=order.currency),
             shipping_xero_tax_code=order.shipping_xero_tax_code,

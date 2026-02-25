@@ -139,6 +139,7 @@ def fetch_order_prices_if_expired(
                         "shipping_price_gross_amount",
                         "base_shipping_price_amount",
                         "shipping_tax_rate",
+                        "shipping_tax_class_id",
                         "should_refresh_prices",
                         "tax_error",
                     ]
@@ -155,6 +156,7 @@ def fetch_order_prices_if_expired(
                         "undiscounted_total_price_net_amount",
                         "undiscounted_total_price_gross_amount",
                         "tax_rate",
+                        "tax_class_id",
                     ],
                 )
 

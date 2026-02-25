@@ -10287,6 +10287,9 @@ type Shop implements ObjectWithMetadata {
   """
   invoiceProductCodeAttribute: String!
 
+  """Tax class applied to export orders with zero-rated VAT."""
+  zeroRatedExportTaxClass: TaxClass
+
   """
   This field is used as a default value for `ProductVariant.trackInventory`.
   """
@@ -11511,6 +11514,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Method used for shipping."""
   shippingMethodName: String
 
+  """Incoterm defining shipping cost responsibility."""
+  incoTerm: IncoTermEnum
+
   """
   Name of the collection point where the order should be picked up by the customer.
   """
@@ -11830,6 +11836,20 @@ enum OrderStatus @doc(category: "Orders") {
   FULFILLED
   CANCELED
   EXPIRED
+}
+
+enum IncoTermEnum @doc(category: "Shipping") {
+  EXW
+  FCA
+  CPT
+  CIP
+  DAP
+  DPU
+  DDP
+  FAS
+  FOB
+  CFR
+  CIF
 }
 
 """Represents order fulfillment."""
@@ -12441,20 +12461,6 @@ enum JobStatusEnum {
 enum InvoiceType @doc(category: "Orders") {
   FINAL
   PROFORMA
-}
-
-enum IncoTermEnum @doc(category: "Shipping") {
-  EXW
-  FCA
-  CPT
-  CIP
-  DAP
-  DPU
-  DDP
-  FAS
-  FOB
-  CFR
-  CIF
 }
 
 enum ShipmentTypeEnum @doc(category: "Shipping") {
@@ -22271,6 +22277,9 @@ input ShopSettingsInput {
   """
   invoiceProductCodeAttribute: String
 
+  """ID of the tax class to apply to export orders with zero-rated VAT."""
+  zeroRatedExportTaxClassId: ID
+
   """Default number of max downloads per digital content URL."""
   defaultDigitalMaxDownloads: Int
 
@@ -27649,7 +27658,7 @@ input OrderUpdateShippingCostInput @doc(category: "Orders") {
   shippingCostNet: PositiveDecimal!
 
   """
-  Tax class used to determine the VAT rate for shipping. The rate is looked up from the tax class's country rate for the order's shipping address country. If omitted, the order's existing shipping tax class is reused; if none is set, the country default rate applies.
+  Tax class used to determine the VAT rate for shipping. The rate is looked up from the tax class's country rate for the order's shipping address country. If omitted, the order's existing shipping tax class is reused; if none is set, the country default rate applies. Ignored for non-DDP exports, which always use the site-wide zero_rated_export_tax_class.
   """
   taxClass: ID
 
@@ -35961,6 +35970,9 @@ type XeroFulfillmentCreated implements Event @doc(category: "Orders") {
 type XeroFulfillmentCreatedCalculatedAmounts {
   """Fulfillment total plus shipping minus deposit credit."""
   proformaAmount: Money!
+
+  """Deposit credit allocated to this fulfillment."""
+  depositAmount: Money!
 
   """Shipping gross for this order."""
   shippingCost: Money!
