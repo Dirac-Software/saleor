@@ -90,7 +90,16 @@ def test_xero_list_bank_accounts_calls_webhook_and_returns_accounts(
     # given
     fake_webhook = MagicMock()
     mock_get_webhooks.return_value = [fake_webhook]
-    mock_trigger.return_value = {"bank_accounts": [{"code": "ACC001", "name": "Main"}]}
+    mock_trigger.return_value = {
+        "bank_accounts": [
+            {
+                "code": "ACC001",
+                "name": "Main",
+                "sort_code": "123456",
+                "account_number": "12345678",
+            }
+        ]
+    }
 
     # when
     result = manager.xero_list_bank_accounts(domain="default-channel")
@@ -105,7 +114,14 @@ def test_xero_list_bank_accounts_calls_webhook_and_returns_accounts(
     assert call_kwargs["pregenerated_subscription_payload"] == {
         "domain": "default-channel"
     }
-    assert result == [{"code": "ACC001", "name": "Main"}]
+    assert result == [
+        {
+            "code": "ACC001",
+            "name": "Main",
+            "sort_code": "123456",
+            "account_number": "12345678",
+        }
+    ]
 
 
 @pytest.mark.django_db

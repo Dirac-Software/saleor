@@ -360,6 +360,18 @@ def get_default_order_payload(
             "shipping_address": get_address_payload(order.shipping_address),
             "shipping_method_name": order.shipping_method_name,
             "collection_point_name": order.collection_point_name,
+            "deposit_required": order.deposit_required,
+            "deposit_percentage": order.deposit_percentage,
+            "deposit_amount": (
+                quantize_price(
+                    order.total_gross_amount * (order.deposit_percentage / 100),
+                    currency,
+                )
+                if order.deposit_required and order.deposit_percentage
+                else None
+            ),
+            "xero_bank_account_sort_code": order.xero_bank_account_sort_code,
+            "xero_bank_account_number": order.xero_bank_account_number,
             **get_discounts_payload(order),
         }
     )

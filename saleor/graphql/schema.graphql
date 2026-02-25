@@ -11605,6 +11605,14 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """Xero bank account code used for deposit prepayments on this order."""
   xeroBankAccountCode: String
 
+  """Bank sort code for the Xero bank account used for deposit prepayments."""
+  xeroBankAccountSortCode: String
+
+  """
+  Bank account number for the Xero bank account used for deposit prepayments.
+  """
+  xeroBankAccountNumber: String
+
   """Returns True if order has to be exempt from taxes."""
   taxExemption: Boolean!
 
@@ -14699,6 +14707,12 @@ type XeroBankAccountSummary {
 
   """Xero bank account name."""
   name: String!
+
+  """Bank sort code."""
+  sortCode: String
+
+  """Bank account number."""
+  accountNumber: String
 }
 
 """Available Xero payments for an order's customer."""
@@ -18594,6 +18608,12 @@ type Mutation {
     """Updated Xero bank account code. If omitted, existing value is kept."""
     xeroBankAccountCode: String
 
+    """Updated bank account number. If omitted, existing value is kept."""
+    xeroBankAccountNumber: String
+
+    """Updated bank sort code. If omitted, existing value is kept."""
+    xeroBankAccountSortCode: String
+
     """New Xero prepayment ID for this order's deposit."""
     xeroDepositPrepaymentId: String!
   ): OrderReplaceDepositPrepayment @doc(category: "Orders")
@@ -18615,6 +18635,12 @@ type Mutation {
 
     """Xero bank account code to use for deposit prepayments."""
     xeroBankAccountCode: String
+
+    """Bank account number for the selected Xero bank account."""
+    xeroBankAccountNumber: String
+
+    """Bank sort code for the selected Xero bank account."""
+    xeroBankAccountSortCode: String
   ): OrderSetDepositRequired @doc(category: "Orders")
 
   """
@@ -26591,6 +26617,12 @@ input DraftOrderCreateInput @doc(category: "Orders") {
   """Xero bank account code for invoicing this order."""
   xeroBankAccountCode: String
 
+  """Bank sort code for the selected Xero bank account."""
+  xeroBankAccountSortCode: String
+
+  """Bank account number for the selected Xero bank account."""
+  xeroBankAccountNumber: String
+
   """Variant line input consisting of variant ID and quantity of products."""
   lines: [OrderLineCreateInput!]
 }
@@ -26751,6 +26783,12 @@ input DraftOrderInput @doc(category: "Orders") {
 
   """Xero bank account code for invoicing this order."""
   xeroBankAccountCode: String
+
+  """Bank sort code for the selected Xero bank account."""
+  xeroBankAccountSortCode: String
+
+  """Bank account number for the selected Xero bank account."""
+  xeroBankAccountNumber: String
 }
 
 """

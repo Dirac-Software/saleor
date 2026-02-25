@@ -450,6 +450,18 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
         blank=True,
         help_text="Xero bank account code used for deposit prepayments on this order.",
     )
+    xero_bank_account_sort_code = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Bank sort code for the Xero bank account used for deposit prepayments.",
+    )
+    xero_bank_account_number = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Bank account number for the Xero bank account used for deposit prepayments.",
+    )
 
     objects = OrderManager()
 

@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 class XeroBankAccountSummary(graphene.ObjectType):
     code = graphene.String(required=True, description="Xero bank account code.")
     name = graphene.String(required=True, description="Xero bank account name.")
+    sort_code = graphene.String(description="Bank sort code.")
+    account_number = graphene.String(description="Bank account number.")
 
     class Meta:
         description = "A Xero bank account."
@@ -58,7 +60,13 @@ def resolve_available_xero_bank_accounts(
 
     return AvailableXeroBankAccounts(
         bank_accounts=[
-            XeroBankAccountSummary(code=a["code"], name=a["name"]) for a in accounts
+            XeroBankAccountSummary(
+                code=a["code"],
+                name=a["name"],
+                sort_code=a.get("sort_code"),
+                account_number=a.get("account_number"),
+            )
+            for a in accounts
         ],
         errors=[],
     )

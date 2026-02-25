@@ -25,11 +25,16 @@ ORDER_OVERRIDE_DEPOSIT_THRESHOLD_MUTATION = """
 
 ORDER_SET_DEPOSIT_REQUIRED_MUTATION = """
     mutation setDeposit(
-        $id: ID!, $required: Boolean!, $percentage: Decimal, $xeroBankAccountCode: String
+        $id: ID!, $required: Boolean!, $percentage: Decimal,
+        $xeroBankAccountCode: String,
+        $xeroBankAccountSortCode: String,
+        $xeroBankAccountNumber: String
     ) {
         orderSetDepositRequired(
             id: $id, required: $required, percentage: $percentage,
-            xeroBankAccountCode: $xeroBankAccountCode
+            xeroBankAccountCode: $xeroBankAccountCode,
+            xeroBankAccountSortCode: $xeroBankAccountSortCode,
+            xeroBankAccountNumber: $xeroBankAccountNumber
         ) {
             errors {
                 field
@@ -41,6 +46,8 @@ ORDER_SET_DEPOSIT_REQUIRED_MUTATION = """
                 depositRequired
                 depositPercentage
                 xeroBankAccountCode
+                xeroBankAccountSortCode
+                xeroBankAccountNumber
             }
         }
     }
@@ -61,6 +68,8 @@ def test_order_set_deposit_required(
             "required": True,
             "percentage": 30.0,
             "xeroBankAccountCode": "090",
+            "xeroBankAccountSortCode": "123456",
+            "xeroBankAccountNumber": "12345678",
         },
     )
 
@@ -70,11 +79,15 @@ def test_order_set_deposit_required(
     assert data["order"]["depositRequired"] is True
     assert float(data["order"]["depositPercentage"]) == 30.0
     assert data["order"]["xeroBankAccountCode"] == "090"
+    assert data["order"]["xeroBankAccountSortCode"] == "123456"
+    assert data["order"]["xeroBankAccountNumber"] == "12345678"
 
     order.refresh_from_db()
     assert order.deposit_required is True
     assert order.deposit_percentage == Decimal("30.0")
     assert order.xero_bank_account_code == "090"
+    assert order.xero_bank_account_sort_code == "123456"
+    assert order.xero_bank_account_number == "12345678"
 
 
 def test_order_set_deposit_required_without_bank_account_fails(
@@ -102,7 +115,16 @@ def test_order_set_deposit_not_required_clears_bank_account(
     order = order_with_lines
     order.deposit_required = True
     order.xero_bank_account_code = "090"
-    order.save(update_fields=["deposit_required", "xero_bank_account_code"])
+    order.xero_bank_account_sort_code = "123456"
+    order.xero_bank_account_number = "12345678"
+    order.save(
+        update_fields=[
+            "deposit_required",
+            "xero_bank_account_code",
+            "xero_bank_account_sort_code",
+            "xero_bank_account_number",
+        ]
+    )
     order_id = graphene.Node.to_global_id("Order", order.id)
 
     response = staff_api_client.post_graphql(
@@ -115,9 +137,13 @@ def test_order_set_deposit_not_required_clears_bank_account(
     assert not data["errors"]
     assert data["order"]["depositRequired"] is False
     assert data["order"]["xeroBankAccountCode"] is None
+    assert data["order"]["xeroBankAccountSortCode"] is None
+    assert data["order"]["xeroBankAccountNumber"] is None
 
     order.refresh_from_db()
     assert order.xero_bank_account_code is None
+    assert order.xero_bank_account_sort_code is None
+    assert order.xero_bank_account_number is None
 
 
 def test_order_set_deposit_required_blocked_after_prepayment_created(
@@ -158,11 +184,14 @@ def test_order_set_deposit_required_blocked_after_prepayment_created(
 ORDER_REPLACE_DEPOSIT_PREPAYMENT_MUTATION = """
     mutation replaceDeposit(
         $id: ID!, $xeroDepositPrepaymentId: String!,
-        $percentage: Decimal, $xeroBankAccountCode: String
+        $percentage: Decimal, $xeroBankAccountCode: String,
+        $xeroBankAccountSortCode: String, $xeroBankAccountNumber: String
     ) {
         orderReplaceDepositPrepayment(
             id: $id, xeroDepositPrepaymentId: $xeroDepositPrepaymentId,
-            percentage: $percentage, xeroBankAccountCode: $xeroBankAccountCode
+            percentage: $percentage, xeroBankAccountCode: $xeroBankAccountCode,
+            xeroBankAccountSortCode: $xeroBankAccountSortCode,
+            xeroBankAccountNumber: $xeroBankAccountNumber
         ) {
             errors {
                 field
@@ -173,6 +202,8 @@ ORDER_REPLACE_DEPOSIT_PREPAYMENT_MUTATION = """
                 id
                 depositPercentage
                 xeroBankAccountCode
+                xeroBankAccountSortCode
+                xeroBankAccountNumber
             }
         }
     }
@@ -246,17 +277,23 @@ def test_order_replace_deposit_prepayment_updates_percentage_and_bank_account(
                 "xeroDepositPrepaymentId": "new-prepayment-uuid",
                 "percentage": 50.0,
                 "xeroBankAccountCode": "091",
+                "xeroBankAccountSortCode": "654321",
+                "xeroBankAccountNumber": "87654321",
             },
         )
 
     content = get_graphql_content(response)
     data = content["data"]["orderReplaceDepositPrepayment"]
     assert not data["errors"]
+    assert data["order"]["xeroBankAccountSortCode"] == "654321"
+    assert data["order"]["xeroBankAccountNumber"] == "87654321"
 
     order.refresh_from_db()
     assert order.xero_deposit_prepayment_id == "new-prepayment-uuid"
     assert order.deposit_percentage == Decimal(50)
     assert order.xero_bank_account_code == "091"
+    assert order.xero_bank_account_sort_code == "654321"
+    assert order.xero_bank_account_number == "87654321"
 
 
 def test_order_replace_deposit_prepayment_records_payment_if_already_paid(

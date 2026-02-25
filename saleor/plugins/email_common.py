@@ -211,7 +211,7 @@ def send_email(
     config: EmailConfig, recipient_list, context, subject="", template_str=""
 ):
     sender_name = config.sender_name or ""
-    sender_address = config.sender_address
+    sender_address = config.sender_address or None
 
     from_email = str(Address(sender_name, addr_spec=sender_address))
 

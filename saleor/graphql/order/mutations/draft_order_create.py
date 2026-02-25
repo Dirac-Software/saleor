@@ -183,6 +183,14 @@ class DraftOrderInput(BaseInputObjectType):
         required=False,
         description="Xero bank account code for invoicing this order.",
     )
+    xero_bank_account_sort_code = graphene.String(
+        required=False,
+        description="Bank sort code for the selected Xero bank account.",
+    )
+    xero_bank_account_number = graphene.String(
+        required=False,
+        description="Bank account number for the selected Xero bank account.",
+    )
 
     class Meta:
         doc_category = DOC_CATEGORY_ORDERS
@@ -198,6 +206,14 @@ class DraftOrderCreateInput(DraftOrderInput):
     xero_bank_account_code = graphene.String(
         required=False,
         description="Xero bank account code for invoicing this order.",
+    )
+    xero_bank_account_sort_code = graphene.String(
+        required=False,
+        description="Bank sort code for the selected Xero bank account.",
+    )
+    xero_bank_account_number = graphene.String(
+        required=False,
+        description="Bank account number for the selected Xero bank account.",
     )
 
     class Meta:

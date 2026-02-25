@@ -30,6 +30,14 @@ class OrderSetDepositRequired(BaseMutation):
             required=False,
             description="Xero bank account code to use for deposit prepayments.",
         )
+        xero_bank_account_sort_code = graphene.String(
+            required=False,
+            description="Bank sort code for the selected Xero bank account.",
+        )
+        xero_bank_account_number = graphene.String(
+            required=False,
+            description="Bank account number for the selected Xero bank account.",
+        )
 
     class Meta:
         description = "Set whether an order requires a deposit before fulfillment."
@@ -73,6 +81,8 @@ class OrderSetDepositRequired(BaseMutation):
         required,
         percentage=None,
         xero_bank_account_code=None,
+        xero_bank_account_sort_code=None,
+        xero_bank_account_number=None,
     ):
         order = cls.get_node_or_error(info, id, only_type=Order)
         cls.check_channel_permissions(info, [order.channel_id])
@@ -88,9 +98,25 @@ class OrderSetDepositRequired(BaseMutation):
         order.deposit_required = required
         order.deposit_percentage = percentage if required else None
         update_fields = ["deposit_required", "deposit_percentage"]
-        if xero_bank_account_code is not None:
-            order.xero_bank_account_code = xero_bank_account_code
-            update_fields.append("xero_bank_account_code")
+        if not required:
+            order.xero_bank_account_code = None
+            order.xero_bank_account_sort_code = None
+            order.xero_bank_account_number = None
+            update_fields += [
+                "xero_bank_account_code",
+                "xero_bank_account_sort_code",
+                "xero_bank_account_number",
+            ]
+        else:
+            if xero_bank_account_code is not None:
+                order.xero_bank_account_code = xero_bank_account_code
+                update_fields.append("xero_bank_account_code")
+            if xero_bank_account_sort_code is not None:
+                order.xero_bank_account_sort_code = xero_bank_account_sort_code
+                update_fields.append("xero_bank_account_sort_code")
+            if xero_bank_account_number is not None:
+                order.xero_bank_account_number = xero_bank_account_number
+                update_fields.append("xero_bank_account_number")
         order.save(update_fields=update_fields)
 
         return OrderSetDepositRequired(order=SyncWebhookControlContext(order))
