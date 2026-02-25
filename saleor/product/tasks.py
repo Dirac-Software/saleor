@@ -539,6 +539,7 @@ def _activate_item(
         assign_variant_attributes,
         create_product,
         create_product_channel_listing,
+        create_product_media,
         create_variant,
         create_variant_channel_listing,
     )
@@ -566,6 +567,8 @@ def _activate_item(
             for channel in channels:
                 create_product_channel_listing(product, channel)
             assign_product_attributes(product, product_data, attribute_map, moq_value=1)
+            if product_data.image_url:
+                create_product_media(product, product_data.image_url)
             item.product_id = product.pk
             if newly_created is not None:
                 newly_created[cache_key] = product
@@ -585,6 +588,9 @@ def _activate_item(
 
         product_data = _build_product_data_from_item(item)
         product = Product.objects.get(pk=item.product_id)
+
+        if product_data.image_url and not product.media.exists():
+            create_product_media(product, product_data.image_url)
 
         # Ensure ProductChannelListing exists and is published for each channel
         for channel in channels:
