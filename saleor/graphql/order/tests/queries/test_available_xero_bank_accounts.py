@@ -11,6 +11,8 @@ AVAILABLE_XERO_BANK_ACCOUNTS_QUERY = """
             bankAccounts {
                 code
                 name
+                sortCode
+                accountNumber
             }
             errors {
                 code
@@ -30,8 +32,18 @@ def test_available_xero_bank_accounts_returns_accounts(
     staff_api_client.user.user_permissions.add(permission_manage_orders)
     mock_manager = mock_manager_promise.return_value.get.return_value
     mock_manager.xero_list_bank_accounts.return_value = [
-        {"code": "090", "name": "Business Account"},
-        {"code": "091", "name": "Savings Account"},
+        {
+            "code": "090",
+            "name": "Business Account",
+            "sort_code": "123456",
+            "account_number": "12345678",
+        },
+        {
+            "code": "091",
+            "name": "Savings Account",
+            "sort_code": "654321",
+            "account_number": "87654321",
+        },
     ]
 
     # when
@@ -46,6 +58,8 @@ def test_available_xero_bank_accounts_returns_accounts(
     assert len(data["bankAccounts"]) == 2
     assert data["bankAccounts"][0]["code"] == "090"
     assert data["bankAccounts"][0]["name"] == "Business Account"
+    assert data["bankAccounts"][0]["sortCode"] == "123456"
+    assert data["bankAccounts"][0]["accountNumber"] == "12345678"
     assert data["bankAccounts"][1]["code"] == "091"
     mock_manager.xero_list_bank_accounts.assert_called_once_with(
         domain="default-channel"

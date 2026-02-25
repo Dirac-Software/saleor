@@ -90,12 +90,7 @@
               <tr>
                 <td align="left" style="font-size: 0px; padding: 10px 25px; word-break: break-word;">
 
-      <div style="font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:13px;line-height:1;text-align:left;color:#000000;">{{#if order.order_details_url}}
-              Your order has been confirmed by staff. To see your order details please visit:
-               <a href="{{order.order_details_url}}">{{order.order_details_url}}</a>
-          {{else}}
-              Your order has been confirmed by staff. Below is the list of ordered products.
-          {{/if}}</div>
+      <div style="font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:13px;line-height:1;text-align:left;color:#000000;">Your order quantities have been confirmed by staff. Below is a summary of your order.{{#if order.order_details_url}} To see your full order details please visit: <a href="{{order.order_details_url}}">{{order.order_details_url}}</a>{{/if}}</div>
 
                 </td>
               </tr>
@@ -141,24 +136,22 @@
             {{price order.subtotal_net_amount order.subtotal_gross_amount order.currency display_gross=order.display_gross_prices}}
           </td>
         </tr>
+        {{#if order.shipping_price_gross_amount}}
         <tr>
           <td colspan="3" style="padding: 5px; text-align: right;" align="right">
               Shipping
           </td>
           <td style="padding: 5px; text-align: right;" align="right">
-            {{price order.shipping_price_net_amount order.shipping_price_gross_amount order.currency display_gross=order.display_gross_prices}}
+            {{price order.shipping_price_gross_amount order.shipping_price_gross_amount order.currency display_gross=true}}
           </td>
         </tr>
+        {{/if}}
         <tr>
           <td colspan="3" style="padding: 5px; text-align: right;" align="right">
-            {{#if order.display_gross_prices}}
-                Taxes (included)
-            {{else}}
-                Taxes
-            {{/if}}
+            VAT
           </td>
           <td style="padding: 5px; text-align: right;" align="right">
-            {{price order.tax_amount order.tax_amount order.currency display_gross=order.display_gross_prices}}
+            {{price order.tax_amount order.tax_amount order.currency display_gross=true}}
           </td>
         </tr>
         {{#if order.voucher_discount}}
@@ -167,22 +160,34 @@
                 Discount
             </td>
             <td style="padding: 5px; text-align: right;" align="right">
-              {{price order.voucher_discount.amount_value order.voucher_discount.amount_value order.currency display_gross=order.display_gross_prices}}
+              {{price order.voucher_discount.amount_value order.voucher_discount.amount_value order.currency display_gross=true}}
             </td>
           </tr>
         {{/if}}
         <tr>
           <td colspan="3" style="padding: 5px; text-align: right;" align="right">
             <strong>
-              Total
+              Total (inc. VAT)
             </strong>
           </td>
           <td style="padding: 5px; text-align: right;" align="right">
             <strong>
-              {{price order.total_net_amount order.total_gross_amount order.currency display_gross=order.display_gross_prices}}
+              {{price order.total_gross_amount order.total_gross_amount order.currency display_gross=true}}
             </strong>
           </td>
         </tr>
+        {{#if order.deposit_required}}
+        <tr>
+          <td colspan="3" style="padding: 5px; text-align: right;" align="right">
+            <strong>Deposit Due ({{order.deposit_percentage}}%)</strong>
+          </td>
+          <td style="padding: 5px; text-align: right;" align="right">
+            <strong>
+              {{price order.deposit_amount order.deposit_amount order.currency display_gross=true}}
+            </strong>
+          </td>
+        </tr>
+        {{/if}}
       </tfoot>
       <thead class="table-header-row" style="border-bottom: 2px solid #000;">
         <tr>
@@ -228,6 +233,41 @@
 
       </div>
 
+
+      <!--[if mso | IE]></td></tr></table><table align="center" border="0" cellpadding="0" cellspacing="0" class="" style="width:600px;" width="600" ><tr><td style="line-height:0px;font-size:0px;mso-line-height-rule:exactly;"><![endif]-->
+
+      {{#if order.deposit_required}}
+      <div style="margin:0px auto;max-width:600px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width:100%;">
+          <tbody>
+            <tr>
+              <td style="direction: ltr; font-size: 0px; padding: 20px 0; text-align: center;" align="center">
+                <div class="mj-column-per-100 mj-outlook-group-fix" style="font-size:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top;width:100%;">
+                  <table border="0" cellpadding="0" cellspacing="0" role="presentation" style="vertical-align:top;" width="100%">
+                    <tbody>
+                      <tr>
+                        <td align="left" style="font-size: 0px; padding: 10px 25px; word-break: break-word;">
+                          <div style="font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:13px;line-height:1.5;text-align:left;color:#000000;">
+                            <strong>A deposit of {{order.deposit_percentage}}% is required before your order is packed and dispatched.</strong>
+                            Please arrange payment of your deposit at your earliest convenience to avoid delays.
+                            {{#if order.xero_bank_account_sort_code}}
+                            <br><br>Please make payment by bank transfer using the following details:<br>
+                            Sort code: <strong>{{order.xero_bank_account_sort_code}}</strong><br>
+                            Account number: <strong>{{order.xero_bank_account_number}}</strong><br>
+                            Amount: <strong>{{price order.deposit_amount order.deposit_amount order.currency display_gross=true}}</strong>
+                            {{/if}}
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {{/if}}
 
       <!--[if mso | IE]></td></tr></table><table align="center" border="0" cellpadding="0" cellspacing="0" class="" style="width:600px;" width="600" ><tr><td style="line-height:0px;font-size:0px;mso-line-height-rule:exactly;"><![endif]-->
 

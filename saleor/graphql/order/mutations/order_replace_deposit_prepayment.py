@@ -33,6 +33,14 @@ class OrderReplaceDepositPrepayment(BaseMutation):
             required=False,
             description="Updated Xero bank account code. If omitted, existing value is kept.",
         )
+        xero_bank_account_sort_code = graphene.String(
+            required=False,
+            description="Updated bank sort code. If omitted, existing value is kept.",
+        )
+        xero_bank_account_number = graphene.String(
+            required=False,
+            description="Updated bank account number. If omitted, existing value is kept.",
+        )
 
     class Meta:
         description = (
@@ -56,6 +64,8 @@ class OrderReplaceDepositPrepayment(BaseMutation):
         xero_deposit_prepayment_id,
         percentage=None,
         xero_bank_account_code=None,
+        xero_bank_account_sort_code=None,
+        xero_bank_account_number=None,
     ):
         order = cls.get_node_or_error(info, id, only_type=Order)
         cls.check_channel_permissions(info, [order.channel_id])
@@ -94,6 +104,12 @@ class OrderReplaceDepositPrepayment(BaseMutation):
         if xero_bank_account_code is not None:
             order.xero_bank_account_code = xero_bank_account_code
             update_fields.append("xero_bank_account_code")
+        if xero_bank_account_sort_code is not None:
+            order.xero_bank_account_sort_code = xero_bank_account_sort_code
+            update_fields.append("xero_bank_account_sort_code")
+        if xero_bank_account_number is not None:
+            order.xero_bank_account_number = xero_bank_account_number
+            update_fields.append("xero_bank_account_number")
 
         order.save(update_fields=update_fields)
 

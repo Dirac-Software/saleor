@@ -1913,6 +1913,14 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         description="Xero bank account code used for deposit prepayments on this order.",
         required=False,
     )
+    xero_bank_account_sort_code = graphene.String(
+        description="Bank sort code for the Xero bank account used for deposit prepayments.",
+        required=False,
+    )
+    xero_bank_account_number = graphene.String(
+        description="Bank account number for the Xero bank account used for deposit prepayments.",
+        required=False,
+    )
     tax_exemption = graphene.Boolean(
         description="Returns True if order has to be exempt from taxes.",
         required=True,
