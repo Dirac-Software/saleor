@@ -116,6 +116,14 @@ class SiteSettings(ModelWithMetadata):
     include_taxes_in_prices = models.BooleanField(default=True)
     display_gross_prices = models.BooleanField(default=True)
 
+    zero_rated_export_tax_class = models.ForeignKey(
+        "tax.TaxClass",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+
     # legacy settings
     use_legacy_update_webhook_emission = models.BooleanField(
         default=False,

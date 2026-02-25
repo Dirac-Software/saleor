@@ -231,14 +231,15 @@ def _gen_fulfillment_approved(query, output_dir, channel, request, stdout):
             )
 
             payment = Payment.objects.create(
-                gateway="mirumee.payments.braintree",
+                gateway="xero",
                 order=order,
                 currency=channel.currency_code,
                 captured_amount=Decimal("90.00"),
+                psp_reference=order.xero_deposit_prepayment_id,
             )
             Transaction.objects.create(
                 payment=payment,
-                token="fixture-transaction-token",
+                token=order.xero_deposit_prepayment_id,
                 kind=TransactionKind.CAPTURE,
                 currency=channel.currency_code,
                 amount=Decimal("90.00"),

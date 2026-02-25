@@ -144,6 +144,7 @@ from ..shipping.dataloaders import (
     ShippingMethodChannelListingByChannelSlugLoader,
     ShippingMethodChannelListingByShippingMethodIdAndChannelSlugLoader,
 )
+from ..shipping.enums import IncoTermEnum
 from ..shipping.types import ShippingMethod
 from ..tax.dataloaders import (
     TaxClassByIdLoader,
@@ -1797,6 +1798,9 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         ),
     )
     shipping_method_name = graphene.String(description="Method used for shipping.")
+    inco_term = IncoTermEnum(
+        description="Incoterm defining shipping cost responsibility."
+    )
     collection_point_name = graphene.String(
         description="Name of the collection point where the order should be picked up by the customer."
     )

@@ -1381,7 +1381,6 @@ def _create_order_from_checkout(
     is_automatic_completion: bool = False,
     force_update: bool = False,
 ):
-    from ..account.vat_utils import should_apply_vat_exemption
     from ..order.utils import add_gift_cards_to_order
 
     site_settings = Site.objects.get_current().settings
@@ -1391,10 +1390,6 @@ def _create_order_from_checkout(
     reservation_enabled = is_reservation_enabled(site_settings)
     tax_configuration = checkout_info.tax_configuration
     prices_entered_with_tax = tax_configuration.prices_entered_with_tax
-
-    if should_apply_vat_exemption(checkout_info.billing_address):
-        checkout_info.checkout.tax_exemption = True
-        checkout_info.checkout.save(update_fields=["tax_exemption"])
 
     # total
     taxed_total = calculations.calculate_checkout_total_with_gift_cards(

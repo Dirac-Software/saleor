@@ -95,6 +95,11 @@ def test_get_custom_order_payload(order, site_settings):
             "voucher_discount": None,
             "discounts": [],
             "discount_amount": 0,
+            "deposit_required": order.deposit_required,
+            "deposit_percentage": order.deposit_percentage,
+            "deposit_amount": None,
+            "xero_bank_account_sort_code": order.xero_bank_account_sort_code,
+            "xero_bank_account_number": order.xero_bank_account_number,
         },
         "recipient_email": "test@example.com",
         **get_site_context_payload(site_settings.site),
@@ -291,6 +296,11 @@ def test_get_default_order_payload(order_line):
         "undiscounted_total_gross_amount": order.undiscounted_total.gross.amount,
         "undiscounted_total_net_amount": order.undiscounted_total.net.amount,
         "voucher_discount": None,
+        "deposit_required": False,
+        "deposit_percentage": None,
+        "deposit_amount": None,
+        "xero_bank_account_sort_code": None,
+        "xero_bank_account_number": None,
     }
 
 

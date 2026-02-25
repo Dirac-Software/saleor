@@ -578,6 +578,60 @@ def test_activate_raises_for_owned_warehouse(db):
         activate_price_list_task(pl.pk)
 
 
+def test_activate_raises_when_category_missing_product_type(
+    db, warehouse, required_attributes
+):
+    from saleor.product import PriceListStatus
+
+    pl, _ = _make_processed_price_list(warehouse, product=None)
+
+    with pytest.raises(ValueError, match="no ProductType or Category"):
+        activate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.status != PriceListStatus.ACTIVE
+
+
+def test_activate_raises_when_missing_database_setup(db, warehouse):
+    from unittest.mock import patch
+
+    from saleor.product import PriceListStatus
+    from saleor.product.ingestion import MissingDatabaseSetup
+
+    pl, _ = _make_processed_price_list(warehouse, product=None)
+
+    with pytest.raises(MissingDatabaseSetup):
+        with patch(
+            "saleor.product.ingestion.get_products_by_code_and_brand",
+            side_effect=MissingDatabaseSetup("Product Code attribute not found"),
+        ):
+            activate_price_list_task(pl.pk)
+
+    pl.refresh_from_db()
+    assert pl.status != PriceListStatus.ACTIVE
+
+
+def test_replace_raises_when_category_missing_product_type(
+    db, warehouse, required_attributes
+):
+    from saleor.product import PriceListStatus
+
+    product, _, _ = _make_product_with_variant_and_stock(warehouse)
+    old_pl, _ = _make_processed_price_list(warehouse, product=product)
+    old_pl.status = PriceListStatus.ACTIVE
+    old_pl.save(update_fields=["status"])
+
+    new_pl, _ = _make_processed_price_list(warehouse, product=None)
+
+    with pytest.raises(ValueError, match="no ProductType or Category"):
+        replace_price_list_task(old_pl.pk, new_pl.pk)
+
+    new_pl.refresh_from_db()
+    assert new_pl.status != PriceListStatus.ACTIVE
+    old_pl.refresh_from_db()
+    assert old_pl.status == PriceListStatus.ACTIVE
+
+
 def test_activate_creates_variant_for_new_size(db, warehouse):
     from saleor.product.models import ProductVariant
 
@@ -914,6 +968,75 @@ def test_activate_creates_product_when_no_product_fk(
         warehouse=warehouse,
         quantity=7,
     ).exists()
+
+
+def test_activate_creates_product_media_for_new_product(
+    db, warehouse, required_attributes
+):
+    from unittest.mock import patch
+
+    from saleor.product.models import Category, ProductType
+
+    ProductType.objects.get_or_create(
+        slug="apparel-type", defaults={"name": "Apparel", "has_variants": True}
+    )
+    Category.objects.create(name="Apparel", slug="apparel")
+
+    pl, item = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 1}, product=None
+    )
+    item.image_url = "https://example.com/image.jpg"
+    item.save(update_fields=["image_url"])
+
+    with patch("saleor.product.ingestion.create_product_media") as mock_create_media:
+        activate_price_list_task(pl.pk)
+
+    item.refresh_from_db()
+    mock_create_media.assert_called_once()
+    call_args = mock_create_media.call_args
+    assert call_args.args[1] == "https://example.com/image.jpg"
+
+
+def test_activate_creates_product_media_for_existing_product_without_media(
+    db, warehouse
+):
+    from unittest.mock import patch
+
+    product, _, _ = _make_product_with_variant_and_stock(warehouse, size="S")
+    assert not product.media.exists()
+
+    pl, item = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 1}, product=product
+    )
+    item.image_url = "https://example.com/image.jpg"
+    item.save(update_fields=["image_url"])
+
+    with patch("saleor.product.ingestion.create_product_media") as mock_create_media:
+        activate_price_list_task(pl.pk)
+
+    mock_create_media.assert_called_once()
+    call_args = mock_create_media.call_args
+    assert call_args.args[1] == "https://example.com/image.jpg"
+
+
+def test_activate_skips_product_media_for_existing_product_with_media(db, warehouse):
+    from unittest.mock import patch
+
+    from saleor.product.models import ProductMedia
+
+    product, _, _ = _make_product_with_variant_and_stock(warehouse, size="S")
+    ProductMedia.objects.create(product=product, alt="existing")
+
+    pl, item = _make_processed_price_list(
+        warehouse, sizes_and_qty={"S": 1}, product=product
+    )
+    item.image_url = "https://example.com/image.jpg"
+    item.save(update_fields=["image_url"])
+
+    with patch("saleor.product.ingestion.create_product_media") as mock_create_media:
+        activate_price_list_task(pl.pk)
+
+    mock_create_media.assert_not_called()
 
 
 def test_activate_is_idempotent(db, warehouse):

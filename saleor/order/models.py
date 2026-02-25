@@ -1137,10 +1137,8 @@ class Fulfillment(ModelWithMetadata):
         if not self.shipment_id:
             return False
 
-        from . import OrderOrigin
-
-        order = self.order
-        if order.origin != OrderOrigin.CHECKOUT:
+        if self.lines.exists():
+            order = self.order
             if not order.payments.filter(
                 psp_reference=self.xero_proforma_prepayment_id
             ).exists():

@@ -249,8 +249,6 @@ class DraftOrderUpdate(
         metadata_collection,
         private_metadata_collection,
     ) -> tuple[bool, bool]:
-        from ....account.vat_utils import should_apply_vat_exemption
-
         instance = cast(models.Order, instance_tracker.instance)
         with traced_atomic_transaction():
             modified_foreign_fields = instance_tracker.get_foreign_modified_fields()
@@ -265,8 +263,6 @@ class DraftOrderUpdate(
                     instance.billing_address,
                     modified_foreign_fields["billing_address"],
                 )
-                if should_apply_vat_exemption(instance.billing_address):
-                    instance.tax_exemption = True
 
             update_meta_fields(
                 instance, metadata_collection, private_metadata_collection

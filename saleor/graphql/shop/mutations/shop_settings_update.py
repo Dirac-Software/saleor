@@ -44,6 +44,9 @@ class ShopSettingsInput(graphene.InputObjectType):
             "Defaults to 'product-code'."
         )
     )
+    zero_rated_export_tax_class_id = graphene.ID(
+        description="ID of the tax class to apply to export orders with zero-rated VAT."
+    )
     default_digital_max_downloads = graphene.Int(
         description="Default number of max downloads per digital content URL."
     )
@@ -160,7 +163,7 @@ class ShopSettingsUpdate(BaseMutation):
         ]
 
     @classmethod
-    def clean_input(cls, _info, _instance, data):
+    def clean_input(cls, info, _instance, data):
         if data.get("customer_set_password_url"):
             try:
                 validate_storefront_url(data["customer_set_password_url"])
@@ -169,6 +172,18 @@ class ShopSettingsUpdate(BaseMutation):
                     {"customer_set_password_url": e},
                     code=ShopErrorCode.INVALID.value,
                 ) from e
+
+        if "zero_rated_export_tax_class_id" in data:
+            tax_class_id = data.pop("zero_rated_export_tax_class_id")
+            if tax_class_id:
+                data["zero_rated_export_tax_class"] = cls.get_node_or_error(
+                    info,
+                    tax_class_id,
+                    only_type="TaxClass",
+                    field="zero_rated_export_tax_class_id",
+                )
+            else:
+                data["zero_rated_export_tax_class"] = None
 
         if "reserve_stock_duration_anonymous_user" in data:
             new_value = data["reserve_stock_duration_anonymous_user"]

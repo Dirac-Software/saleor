@@ -47,6 +47,7 @@ from ..payment.types import PaymentGateway
 from ..plugins.dataloaders import plugin_manager_promise_callback
 from ..shipping.types import ShippingMethod
 from ..site.dataloaders import get_site_promise, load_site_callback
+from ..tax.types import TaxClass
 from ..translations.fields import TranslationField
 from ..translations.resolvers import resolve_translation
 from ..translations.types import ShopTranslation
@@ -269,6 +270,10 @@ class Shop(graphene.ObjectType):
             "Defaults to 'product-code'."
         ),
         required=True,
+    )
+    zero_rated_export_tax_class = graphene.Field(
+        TaxClass,
+        description="Tax class applied to export orders with zero-rated VAT.",
     )
     track_inventory_by_default = graphene.Boolean(
         description=(
@@ -525,6 +530,11 @@ class Shop(graphene.ObjectType):
     @load_site_callback
     def resolve_invoice_product_code_attribute(_, info, site):
         return site.settings.invoice_product_code_attribute
+
+    @staticmethod
+    @load_site_callback
+    def resolve_zero_rated_export_tax_class(_, _info, site):
+        return site.settings.zero_rated_export_tax_class
 
     @staticmethod
     @load_site_callback

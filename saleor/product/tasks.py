@@ -456,11 +456,7 @@ def process_price_list_task(price_list_id: int):
                     if updates:
                         PriceListItem.objects.bulk_update(updates, ["product_id"])
                 except MissingDatabaseSetup:
-                    logger.warning(
-                        "Skipping product FK population for price list %s: "
-                        "required attributes not found in database.",
-                        price_list_id,
-                    )
+                    pass
 
             price_list.processing_completed_at = timezone.now()
             price_list.processing_failed_at = None
@@ -543,6 +539,7 @@ def _activate_item(
         assign_variant_attributes,
         create_product,
         create_product_channel_listing,
+        create_product_media,
         create_variant,
         create_variant_channel_listing,
     )
@@ -561,17 +558,17 @@ def _activate_item(
             product_type = product_type_map.get(item.category)
             category = category_map.get(item.category)
             if product_type is None or category is None:
-                logger.warning(
-                    "Cannot create product for item %s: missing product_type or category '%s'",
-                    item.product_code,
-                    item.category,
+                raise ValueError(
+                    f"Cannot activate PriceListItem {item.product_code!r}: "
+                    f"no ProductType or Category found for '{item.category}'"
                 )
-                return False
 
             product = create_product(product_data, product_type, category)
             for channel in channels:
                 create_product_channel_listing(product, channel)
             assign_product_attributes(product, product_data, attribute_map, moq_value=1)
+            if product_data.image_url:
+                create_product_media(product, product_data.image_url)
             item.product_id = product.pk
             if newly_created is not None:
                 newly_created[cache_key] = product
@@ -591,6 +588,9 @@ def _activate_item(
 
         product_data = _build_product_data_from_item(item)
         product = Product.objects.get(pk=item.product_id)
+
+        if product_data.image_url and not product.media.exists():
+            create_product_media(product, product_data.image_url)
 
         # Ensure ProductChannelListing exists and is published for each channel
         for channel in channels:
@@ -642,13 +642,12 @@ def _activate_item(
                     ProductVariantChannelListing.objects.filter(
                         pk=existing_listing.pk
                     ).update(discounted_price_amount=price)
-    return True
 
 
 @app.task
 @allow_writer()
 def activate_price_list_task(price_list_id: int):
-    from .ingestion import MissingDatabaseSetup, get_products_by_code_and_brand
+    from .ingestion import get_products_by_code_and_brand
 
     try:
         with transaction.atomic():
@@ -687,15 +686,12 @@ def activate_price_list_task(price_list_id: int):
 
             unresolved = [i for i in items if i.product_id is None]
             if unresolved:
-                try:
-                    codes = [i.product_code for i in unresolved]
-                    product_map = get_products_by_code_and_brand(codes)
-                    for item in unresolved:
-                        p = product_map.get((item.product_code, item.brand))
-                        if p:
-                            item.product_id = p.pk
-                except MissingDatabaseSetup:
-                    pass
+                codes = [i.product_code for i in unresolved]
+                product_map = get_products_by_code_and_brand(codes)
+                for item in unresolved:
+                    p = product_map.get((item.product_code, item.brand))
+                    if p:
+                        item.product_id = p.pk
 
             categories = {i.category for i in items if i.category}
             product_type_map, category_map, attribute_map, channels, exchange_rates = (
@@ -706,7 +702,7 @@ def activate_price_list_task(price_list_id: int):
             updated_items = []
             for item in items:
                 old_product_id = item.product_id
-                if not _activate_item(
+                _activate_item(
                     item,
                     price_list.warehouse,
                     product_type_map,
@@ -715,15 +711,7 @@ def activate_price_list_task(price_list_id: int):
                     channels,
                     exchange_rates,
                     newly_created=newly_created,
-                ):
-                    logger.warning(
-                        "Skipped PriceListItem %s (product_code=%s) during activation of "
-                        "PriceList %s: missing category or product type",
-                        item.pk,
-                        item.product_code,
-                        price_list_id,
-                    )
-                    continue
+                )
                 if item.product_id != old_product_id:
                     updated_items.append(item)
 
@@ -886,7 +874,6 @@ def replace_price_list_task(old_id: int, new_id: int):
 
     from ..warehouse.models import Stock
     from .ingestion import (
-        MissingDatabaseSetup,
         create_variant,
         create_variant_channel_listing,
         get_products_by_code_and_brand,
@@ -943,19 +930,16 @@ def replace_price_list_task(old_id: int, new_id: int):
 
             unresolved_new = [i for i in new_items if i.product_id is None]
             if unresolved_new:
-                try:
-                    codes = [i.product_code for i in unresolved_new]
-                    product_map = get_products_by_code_and_brand(codes)
-                    resolved_new = []
-                    for item in unresolved_new:
-                        p = product_map.get((item.product_code, item.brand))
-                        if p:
-                            item.product_id = p.pk
-                            resolved_new.append(item)
-                    if resolved_new:
-                        PriceListItem.objects.bulk_update(resolved_new, ["product_id"])
-                except MissingDatabaseSetup:
-                    pass
+                codes = [i.product_code for i in unresolved_new]
+                product_map = get_products_by_code_and_brand(codes)
+                resolved_new = []
+                for item in unresolved_new:
+                    p = product_map.get((item.product_code, item.brand))
+                    if p:
+                        item.product_id = p.pk
+                        resolved_new.append(item)
+                if resolved_new:
+                    PriceListItem.objects.bulk_update(resolved_new, ["product_id"])
 
             old_product_ids = {
                 i.product_id for i in old_items if i.product_id is not None
@@ -1022,11 +1006,10 @@ def replace_price_list_task(old_id: int, new_id: int):
                 product_data = _build_product_data_from_item(new_item)
                 product = both_products.get(product_id)
                 if product is None:
-                    logger.warning(
-                        "replace_price_list_task: Product %s not found; skipping",
-                        product_id,
+                    raise ValueError(
+                        f"replace_price_list_task: Product {product_id} not found "
+                        f"while replacing PriceList {old_id} with {new_id}"
                     )
-                    continue
 
                 for size, qty in new_item.sizes_and_qty.items():
                     if (product_id, size) in existing_variant_names:
@@ -1056,7 +1039,7 @@ def replace_price_list_task(old_id: int, new_id: int):
             for product_id in new_only:
                 new_item = new_item_by_product[product_id]
                 old_product_id = new_item.product_id
-                if not _activate_item(
+                _activate_item(
                     new_item,
                     warehouse,
                     product_type_map,
@@ -1065,17 +1048,26 @@ def replace_price_list_task(old_id: int, new_id: int):
                     channels,
                     exchange_rates,
                     newly_created=newly_created,
-                ):
-                    logger.warning(
-                        "Skipped PriceListItem %s (product_code=%s) during replace of "
-                        "PriceList %s: missing category or product type",
-                        new_item.pk,
-                        new_item.product_code,
-                        new_id,
-                    )
-                    continue
+                )
                 if new_item.product_id != old_product_id:
                     updated_new_items.append(new_item)
+
+            for item in new_items:
+                if item.product_id is not None:
+                    continue
+                old_product_id = item.product_id
+                _activate_item(
+                    item,
+                    warehouse,
+                    product_type_map,
+                    category_map,
+                    attribute_map,
+                    channels,
+                    exchange_rates,
+                    newly_created=newly_created,
+                )
+                if item.product_id != old_product_id:
+                    updated_new_items.append(item)
 
             if updated_new_items:
                 PriceListItem.objects.bulk_update(updated_new_items, ["product_id"])

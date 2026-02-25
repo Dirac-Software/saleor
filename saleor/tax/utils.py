@@ -304,6 +304,7 @@ def get_shipping_tax_rate_for_order(
     lines: Iterable["OrderLine"],
     default_tax_rate: Decimal,
     country_code: str,
+    shipping_tax_class_id_override: int | None = None,
     database_connection_name: str = settings.DATABASE_CONNECTION_DEFAULT_NAME,
 ) -> Decimal:
     should_use_weighted_tax_for_shipping = (
@@ -314,15 +315,22 @@ def get_shipping_tax_rate_for_order(
 
     shipping_tax_rate = default_tax_rate
 
-    if order.shipping_tax_class_id:
-        shipping_tax_rates = TaxClassCountryRate.objects.using(
-            database_connection_name
-        ).filter(tax_class_id=order.shipping_tax_class_id)
-        shipping_tax_rate = get_tax_rate_for_country(
-            tax_class_country_rates=shipping_tax_rates,
-            default_tax_rate=default_tax_rate,
-            country_code=country_code,
+    tax_class_id = shipping_tax_class_id_override or order.shipping_tax_class_id
+    if tax_class_id:
+        shipping_tax_rates = list(
+            TaxClassCountryRate.objects.using(database_connection_name).filter(
+                tax_class_id=tax_class_id
+            )
         )
+        country_rate = next(
+            (r for r in shipping_tax_rates if r.country == country_code), None
+        )
+        if country_rate is None:
+            raise ValueError(
+                f"No TaxClassCountryRate for country '{country_code}'"
+                f" on shipping tax_class_id={tax_class_id}"
+            )
+        shipping_tax_rate = country_rate.rate
     elif (
         order.shipping_tax_class_name is not None
         and order.shipping_tax_rate is not None
@@ -376,6 +384,49 @@ def get_tax_rate_for_country(
         if country_rate.country == country_code:
             tax_rate = country_rate.rate
     return tax_rate
+
+
+def get_configured_zero_rated_export_tax_class_pk() -> int | None:
+    """Return the PK of the configured zero_rated_export_tax_class, or None.
+
+    Unlike get_zero_rated_export_tax_class, this does not check the order's
+    inco_term and never raises — it simply reads the site setting.
+    """
+    from django.contrib.sites.models import Site
+
+    tc = Site.objects.get_current().settings.zero_rated_export_tax_class
+    return tc.pk if tc else None
+
+
+def get_zero_rated_export_tax_class(order: "Order") -> Optional["TaxClass"]:
+    """Return the zero-rated export tax class for a non-DDP export order.
+
+    Returns None if the order is not a zero-rated export.
+    Raises ValueError if the tax class is not configured in SiteSettings.
+    """
+    if not is_zero_rated_export(order):
+        return None
+    from django.contrib.sites.models import Site
+
+    tax_class = Site.objects.get_current().settings.zero_rated_export_tax_class
+    if tax_class is None:
+        raise ValueError(
+            "zero_rated_export_tax_class is not configured in SiteSettings"
+        )
+    return tax_class
+
+
+def is_zero_rated_export(order: "Order") -> bool:
+    from ..shipping import IncoTerm
+
+    inco_term = order.inco_term
+    if not inco_term or inco_term == IncoTerm.DDP:
+        return False
+    shipping_country = (
+        order.shipping_address.country.code if order.shipping_address else None
+    )
+    channel_country = order.channel.default_country.code
+    return bool(shipping_country and shipping_country != channel_country)
 
 
 def get_tax_country_for_order(order: "Order") -> str | None:

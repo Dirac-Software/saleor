@@ -1,22 +1,22 @@
 """Tests for incoterm-driven VAT country selection in orderUpdateShippingCost.
 
-Design rules:
-  EXW / FCA  → rate looked up using dispatch country (channel.default_country)
-  DAP        → always 0% (zero-rated export; customer is importer of record)
-  DDP        → rate looked up using destination country (order shipping address)
+Design rules (post zero-rated export feature):
+  EXW / FCA / DAP → non-DDP export to a different country → zero-rated export
+                    (zero_rated_export_tax_class used, 0% VAT)
+  DDP             → rate looked up using destination country (order shipping address)
+  no inco_term    → existing inco_term used (default DDP → destination country rate)
 
 The draft_order fixture has:
   - channel.default_country = "US"  (dispatch country)
   - shipping address country  = "PL" (destination country)
+  - inco_term = DDP (model default)
 
 The tax class created in each test has:
   - US rate:  10%
   - PL rate:  23%
 
-This makes the two countries unambiguously distinguishable in assertions:
-  EXW/FCA  → gross = net * 1.10
-  DDP      → gross = net * 1.23
-  DAP      → gross = net * 1.00
+For zero-rated exports, site_settings.zero_rated_export_tax_class is configured
+with US=0%, making the 0% outcome unambiguous.
 """
 
 from decimal import Decimal
@@ -61,6 +61,21 @@ def two_country_tax_class(db):
     return tc
 
 
+@pytest.fixture
+def zero_rated_export_tax_class(db, site_settings):
+    """Configure zero_rated_export_tax_class with US=0% on site_settings."""
+    tc = TaxClass.objects.create(name="Zero Rated Export")
+    TaxClassCountryRate.objects.create(tax_class=tc, country="US", rate=0)
+    site_settings.zero_rated_export_tax_class = tc
+    site_settings.save(update_fields=["zero_rated_export_tax_class"])
+    return tc
+
+
+def _set_shipping_country(order, country_code):
+    order.shipping_address.country = country_code
+    order.shipping_address.save(update_fields=["country"])
+
+
 def _call(staff_api_client, order_id, tax_class_gid, inco_term=None):
     variables = {
         "orderId": order_id,
@@ -76,22 +91,21 @@ def _call(staff_api_client, order_id, tax_class_gid, inco_term=None):
     )
 
 
-def test_dap_incoterm_always_zero_rates_shipping(
+def test_dap_incoterm_zero_rates_shipping(
     staff_api_client,
     permission_group_manage_orders,
     draft_order,
     two_country_tax_class,
+    zero_rated_export_tax_class,
 ):
-    """DAP: we are the exporter; rate must be 0% regardless of tax class or country."""
-    # Arrange
+    """DAP: non-DDP export → zero-rated export tax class → 0% VAT."""
     permission_group_manage_orders.user_set.add(staff_api_client.user)
+    _set_shipping_country(draft_order, "PL")
     order_id = graphene.Node.to_global_id("Order", draft_order.id)
     tax_class_gid = graphene.Node.to_global_id("TaxClass", two_country_tax_class.id)
 
-    # Act
     data = _call(staff_api_client, order_id, tax_class_gid, inco_term="DAP")
 
-    # Assert
     assert not data["data"]["orderUpdateShippingCost"]["errors"]
     shipping = data["data"]["orderUpdateShippingCost"]["order"]["shippingPrice"]
     assert shipping["net"]["amount"] == float(NET)
@@ -108,15 +122,13 @@ def test_ddp_incoterm_uses_destination_country_rate(
     two_country_tax_class,
 ):
     """DDP: we are the importer; rate from destination country (PL = 23%)."""
-    # Arrange
     permission_group_manage_orders.user_set.add(staff_api_client.user)
+    _set_shipping_country(draft_order, "PL")
     order_id = graphene.Node.to_global_id("Order", draft_order.id)
     tax_class_gid = graphene.Node.to_global_id("TaxClass", two_country_tax_class.id)
 
-    # Act
     data = _call(staff_api_client, order_id, tax_class_gid, inco_term="DDP")
 
-    # Assert – PL rate (23%) → gross = 10.00 * 1.23 = 12.30
     assert not data["data"]["orderUpdateShippingCost"]["errors"]
     shipping = data["data"]["orderUpdateShippingCost"]["order"]["shippingPrice"]
     assert shipping["gross"]["amount"] == pytest.approx(12.30, abs=0.01)
@@ -125,52 +137,50 @@ def test_ddp_incoterm_uses_destination_country_rate(
     assert draft_order.shipping_price_gross_amount == Decimal("12.30")
 
 
-def test_exw_incoterm_uses_dispatch_country_rate(
+def test_exw_incoterm_zero_rates_shipping(
     staff_api_client,
     permission_group_manage_orders,
     draft_order,
     two_country_tax_class,
+    zero_rated_export_tax_class,
 ):
-    """EXW: sale recognised at origin; rate from dispatch country (channel US = 10%)."""
-    # Arrange
+    """EXW: non-DDP export to different country → zero-rated export → 0% VAT."""
     permission_group_manage_orders.user_set.add(staff_api_client.user)
+    _set_shipping_country(draft_order, "PL")
     order_id = graphene.Node.to_global_id("Order", draft_order.id)
     tax_class_gid = graphene.Node.to_global_id("TaxClass", two_country_tax_class.id)
 
-    # Act
     data = _call(staff_api_client, order_id, tax_class_gid, inco_term="EXW")
 
-    # Assert – US rate (10%) → gross = 10.00 * 1.10 = 11.00, NOT PL 12.30
     assert not data["data"]["orderUpdateShippingCost"]["errors"]
     shipping = data["data"]["orderUpdateShippingCost"]["order"]["shippingPrice"]
-    assert shipping["gross"]["amount"] == pytest.approx(11.00, abs=0.01)
+    assert shipping["gross"]["amount"] == float(NET)  # 0% VAT
 
     draft_order.refresh_from_db()
-    assert draft_order.shipping_price_gross_amount == Decimal("11.00")
+    assert draft_order.shipping_price_gross_amount == NET
 
 
-def test_fca_incoterm_uses_dispatch_country_rate(
+def test_fca_incoterm_zero_rates_shipping(
     staff_api_client,
     permission_group_manage_orders,
     draft_order,
     two_country_tax_class,
+    zero_rated_export_tax_class,
 ):
-    """FCA: goods handed to carrier at origin; rate from dispatch country (channel US = 10%)."""
-    # Arrange
+    """FCA: non-DDP export to different country → zero-rated export → 0% VAT."""
     permission_group_manage_orders.user_set.add(staff_api_client.user)
+    _set_shipping_country(draft_order, "PL")
     order_id = graphene.Node.to_global_id("Order", draft_order.id)
     tax_class_gid = graphene.Node.to_global_id("TaxClass", two_country_tax_class.id)
 
-    # Act
     data = _call(staff_api_client, order_id, tax_class_gid, inco_term="FCA")
 
-    # Assert – US rate (10%) → gross = 10.00 * 1.10 = 11.00, NOT PL 12.30
     assert not data["data"]["orderUpdateShippingCost"]["errors"]
     shipping = data["data"]["orderUpdateShippingCost"]["order"]["shippingPrice"]
-    assert shipping["gross"]["amount"] == pytest.approx(11.00, abs=0.01)
+    assert shipping["gross"]["amount"] == float(NET)  # 0% VAT
 
     draft_order.refresh_from_db()
-    assert draft_order.shipping_price_gross_amount == Decimal("11.00")
+    assert draft_order.shipping_price_gross_amount == NET
 
 
 def test_no_incoterm_uses_destination_country_rate(
@@ -179,16 +189,14 @@ def test_no_incoterm_uses_destination_country_rate(
     draft_order,
     two_country_tax_class,
 ):
-    """No incoterm: default behaviour uses destination country (PL = 23%)."""
-    # Arrange
+    """No incoterm change: existing DDP inco_term uses destination country (PL = 23%)."""
     permission_group_manage_orders.user_set.add(staff_api_client.user)
+    _set_shipping_country(draft_order, "PL")
     order_id = graphene.Node.to_global_id("Order", draft_order.id)
     tax_class_gid = graphene.Node.to_global_id("TaxClass", two_country_tax_class.id)
 
-    # Act – no incoTerm key in input
     data = _call(staff_api_client, order_id, tax_class_gid, inco_term=None)
 
-    # Assert – PL rate (23%) → gross = 12.30
     assert not data["data"]["orderUpdateShippingCost"]["errors"]
     shipping = data["data"]["orderUpdateShippingCost"]["order"]["shippingPrice"]
     assert shipping["gross"]["amount"] == pytest.approx(12.30, abs=0.01)
