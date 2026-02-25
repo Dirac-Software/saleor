@@ -92,6 +92,7 @@ def resolve_get_pack_allocation(
     pack_size,
     channel_slug,
     checkout_id=None,
+    order_id=None,
 ):
     """Resolve pack allocation preview with validation."""
     from ...attribute.models import Attribute
@@ -113,8 +114,24 @@ def resolve_get_pack_allocation(
             slug=channel_slug
         )
 
+        # Resolve warehouse restriction from order.allowed_warehouses if order_id provided.
+        # Empty allowed_warehouses means no restriction (all warehouses).
+        warehouse_ids = None
+        if order_id:
+            from ...order.models import Order
+
+            _, order_pk = from_global_id_or_error(order_id, "Order")
+            order = Order.objects.using(get_database_connection_name(info.context)).get(
+                pk=order_pk
+            )
+            allowed = list(order.allowed_warehouses.values_list("id", flat=True))
+            if allowed:
+                warehouse_ids = [str(wid) for wid in allowed]
+
         # Get pack allocation
-        pack_allocation = get_pack_for_product(product, pack_size, channel)
+        pack_allocation = get_pack_for_product(
+            product, pack_size, channel, warehouse_ids=warehouse_ids
+        )
         pack_qty = sum(qty for _, qty in pack_allocation)
 
         # Get current quantity in checkout
@@ -167,6 +184,7 @@ def resolve_get_pack_allocation(
                             country_code,
                             channel.slug,
                             check_reservations=True,
+                            warehouse_ids=warehouse_ids,
                         )
                         total_available += available
 

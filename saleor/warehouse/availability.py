@@ -524,11 +524,14 @@ def get_available_quantity(
     channel_slug: str,
     checkout_lines: list["CheckoutLine"] | None = None,
     check_reservations: bool = False,
+    warehouse_ids: list[str] | None = None,
 ) -> int:
     """Return available quantity for given product in given country."""
     stocks = Stock.objects.get_variant_stocks_for_country(
         country_code, channel_slug, variant
     )
+    if warehouse_ids is not None:
+        stocks = stocks.filter(warehouse_id__in=warehouse_ids)
     if not stocks:
         return 0
     return _get_available_quantity(stocks, checkout_lines, check_reservations)
