@@ -11,6 +11,7 @@ def get_pack_for_product(
     product: "Product",
     pack_size: int,
     channel: "Channel",
+    warehouse_ids: list[str] | None = None,
 ) -> list[tuple["ProductVariant", int]]:
     """Select variants for pack using Hamilton's method for fair allocation.
 
@@ -37,7 +38,11 @@ def get_pack_for_product(
 
     for variant in variants:
         available = get_available_quantity(
-            variant, country_code, channel.slug, check_reservations=True
+            variant,
+            country_code,
+            channel.slug,
+            check_reservations=True,
+            warehouse_ids=warehouse_ids,
         )
         if available > 0:
             variant_stock[variant] = available

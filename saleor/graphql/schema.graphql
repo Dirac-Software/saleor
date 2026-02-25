@@ -1659,6 +1659,11 @@ type Query {
 
     """Optional checkout ID to check current quantity."""
     checkoutId: ID
+
+    """
+    Optional order ID. When provided, allocation is restricted to the order's allowedWarehouses (empty list means no restriction).
+    """
+    orderId: ID
   ): PackAllocation @doc(category: "Checkout")
 
   """Look up a channel by ID or slug."""

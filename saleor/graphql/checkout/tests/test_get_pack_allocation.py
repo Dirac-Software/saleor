@@ -2,8 +2,34 @@
 
 import graphene
 
+from ....warehouse.models import Stock
 from ...core.utils import to_global_id_or_none
 from ...tests.utils import get_graphql_content
+
+QUERY_GET_PACK_ALLOCATION_WITH_ORDER = """
+query getPackAllocation(
+  $productId: ID!
+  $packSize: Int!
+  $channelSlug: String!
+  $orderId: ID
+) {
+  getPackAllocation(
+    productId: $productId
+    packSize: $packSize
+    channelSlug: $channelSlug
+    orderId: $orderId
+  ) {
+    allocation {
+      variant {
+        id
+      }
+      quantity
+    }
+    canAdd
+    packQuantity
+  }
+}
+"""
 
 QUERY_GET_PACK_ALLOCATION = """
 query getPackAllocation(
@@ -574,3 +600,135 @@ def test_get_pack_allocation_prevents_insufficient_remaining_stock_large(
     assert data["shortfall"] == 9
     assert "Cannot leave less than 10 items remaining" in data["message"]
     assert "Add 9 more to order all 38 available" in data["message"]
+
+
+def test_get_pack_allocation_with_order_respects_allowed_warehouses(
+    staff_api_client,
+    permission_group_manage_orders,
+    product_with_two_variants,
+    draft_order,
+    warehouse,
+    address,
+    shipping_zone,
+    channel_USD,
+):
+    """Pack allocation only considers stock from order.allowed_warehouses when set."""
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    restricted_warehouse = warehouse
+    excluded_warehouse = type(warehouse).objects.create(
+        address=address,
+        name="Excluded Warehouse",
+        slug="excluded-warehouse",
+        email="excluded@example.com",
+    )
+    excluded_warehouse.shipping_zones.add(shipping_zone)
+    excluded_warehouse.channels.add(channel_USD)
+
+    for stock in variants[0].stocks.filter(warehouse=restricted_warehouse):
+        stock.quantity = 6
+        stock.save()
+    for stock in variants[1].stocks.filter(warehouse=restricted_warehouse):
+        stock.quantity = 4
+        stock.save()
+
+    Stock.objects.create(
+        warehouse=excluded_warehouse, product_variant=variants[0], quantity=100
+    )
+    Stock.objects.create(
+        warehouse=excluded_warehouse, product_variant=variants[1], quantity=100
+    )
+
+    draft_order.allowed_warehouses.set([restricted_warehouse])
+    order_id = graphene.Node.to_global_id("Order", draft_order.pk)
+
+    variables = {
+        "productId": product_id,
+        "packSize": 20,
+        "channelSlug": channel_USD.slug,
+        "orderId": order_id,
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_PACK_ALLOCATION_WITH_ORDER, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["getPackAllocation"]
+
+    # Only 10 units available in the restricted warehouse, not 210
+    assert data["packQuantity"] == 10
+    total = sum(alloc["quantity"] for alloc in data["allocation"])
+    assert total == 10
+
+
+def test_get_pack_allocation_with_order_empty_allowed_warehouses_uses_all(
+    staff_api_client,
+    permission_group_manage_orders,
+    product_with_two_variants,
+    draft_order,
+    warehouse,
+    address,
+    shipping_zone,
+    channel_USD,
+):
+    """Pack allocation uses all warehouses when order.allowed_warehouses is empty."""
+    # given
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    product = product_with_two_variants
+    variants = list(product.variants.all())
+    product_id = graphene.Node.to_global_id("Product", product.pk)
+
+    second_warehouse = type(warehouse).objects.create(
+        address=address,
+        name="Second Warehouse",
+        slug="second-warehouse-pack",
+        email="second@example.com",
+    )
+    second_warehouse.shipping_zones.add(shipping_zone)
+    second_warehouse.channels.add(channel_USD)
+
+    # Use distinct quantities per warehouse to avoid Sum(distinct=True) deduplication
+    for stock in variants[0].stocks.filter(warehouse=warehouse):
+        stock.quantity = 6
+        stock.save()
+    for stock in variants[1].stocks.filter(warehouse=warehouse):
+        stock.quantity = 4
+        stock.save()
+
+    Stock.objects.create(
+        warehouse=second_warehouse, product_variant=variants[0], quantity=7
+    )
+    Stock.objects.create(
+        warehouse=second_warehouse, product_variant=variants[1], quantity=3
+    )
+
+    assert draft_order.allowed_warehouses.count() == 0
+    order_id = graphene.Node.to_global_id("Order", draft_order.pk)
+
+    variables = {
+        "productId": product_id,
+        "packSize": 30,
+        "channelSlug": channel_USD.slug,
+        "orderId": order_id,
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        QUERY_GET_PACK_ALLOCATION_WITH_ORDER, variables
+    )
+
+    # then
+    content = get_graphql_content(response)
+    data = content["data"]["getPackAllocation"]
+
+    # 20 total across both warehouses (6+7=13 for v0, 4+3=7 for v1), capped at pack size of 20
+    assert data["packQuantity"] == 20
+    total = sum(alloc["quantity"] for alloc in data["allocation"])
+    assert total == 20

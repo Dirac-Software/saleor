@@ -125,6 +125,10 @@ class CheckoutQueries(graphene.ObjectType):
             graphene.ID,
             description="Optional checkout ID to check current quantity.",
         ),
+        order_id=graphene.Argument(
+            graphene.ID,
+            description="Optional order ID. When provided, allocation is restricted to the order's allowedWarehouses (empty list means no restriction).",
+        ),
         doc_category=DOC_CATEGORY_CHECKOUT,
     )
 
