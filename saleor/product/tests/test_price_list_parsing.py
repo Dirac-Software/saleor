@@ -63,13 +63,13 @@ def test_parse_required_str_whitespace_only():
 
 def test_parse_product_code_valid():
     val, errs = parse_product_code("IS1637")
-    assert val == "IS1637"
+    assert val == "is1637"
     assert errs == []
 
 
 def test_parse_product_code_with_hyphens_ok():
     val, errs = parse_product_code("ABC-123")
-    assert val == "ABC-123"
+    assert val == "abc-123"
     assert errs == []
 
 
@@ -79,9 +79,9 @@ def test_parse_product_code_with_spaces_errors():
 
 
 def test_parse_product_code_leading_trailing_spaces_stripped_then_checked():
-    # After strip, "IS1637" has no spaces — valid
+    # After strip and lowercase, "IS1637" becomes "is1637" — valid
     val, errs = parse_product_code("  IS1637  ")
-    assert val == "IS1637"
+    assert val == "is1637"
     assert errs == []
 
 
@@ -556,8 +556,8 @@ VALID_RAW = {
 
 def test_parse_row_valid():
     row = parse_row(0, VALID_RAW, "GBP", valid_categories={"Apparel"})
-    assert row.product_code == "IS1637"
-    assert row.brand == "Adidas"
+    assert row.product_code == "is1637"
+    assert row.brand == "adidas"
     assert row.sizes_and_qty == {"XS": 20, "M": 50, "L": 50, "XL": 50, "3XL": 20}
     assert row.rrp == Decimal("40.0")
     assert row.sell_price == Decimal("9.025")
@@ -733,8 +733,8 @@ def test_parse_sheet_sequential_indices(hk_df):
 def test_parse_sheet_maps_columns_correctly(hk_df):
     rows = parse_sheet(hk_df, HK_COLUMN_MAP, "GBP")
     first = rows[0]
-    assert first.brand == "Adidas"
-    assert first.product_code == "IS1637"
+    assert first.brand == "adidas"
+    assert first.product_code == "is1637"
     assert first.rrp == Decimal(40)
     assert first.weight_kg == Decimal("0.2")
     assert first.category == "Apparel"
@@ -747,7 +747,7 @@ def test_parse_sheet_uses_col_13_for_sizes(hk_df):
 
 def test_parse_sheet_numeric_sizes(hk_df):
     rows = parse_sheet(hk_df, HK_COLUMN_MAP, "GBP")
-    h59 = next(r for r in rows if r.product_code == "H59015")
+    h59 = next(r for r in rows if r.product_code == "h59015")
     assert h59.sizes_and_qty == {"32": 58, "34": 34, "36": 23, "38": 11, "40": 12}
 
 
@@ -841,6 +841,6 @@ def test_parse_sheet_empty_dataframe():
 def test_parse_sheet_skips_unmapped_columns(hk_df):
     minimal = {0: "brand", 1: "product_code", 13: "sizes"}
     rows = parse_sheet(hk_df, minimal, "GBP")
-    assert rows[0].brand == "Adidas"
+    assert rows[0].brand == "adidas"
     assert rows[0].rrp is None
     assert rows[0].description == ""

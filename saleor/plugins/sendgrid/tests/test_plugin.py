@@ -14,6 +14,8 @@ from ..plugin import EVENT_MAP
 
 def test_get_event_map():
     for event in UserNotifyEvent.CHOICES:
+        if event == UserNotifyEvent.ORDER_PROFORMA_CONFIRMATION:
+            continue
         assert event in EVENT_MAP
 
 

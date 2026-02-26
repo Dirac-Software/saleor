@@ -4,6 +4,7 @@ import uuid
 from tempfile import NamedTemporaryFile
 from typing import IO, TYPE_CHECKING, Any, cast
 
+import openpyxl
 import petl as etl
 from django.conf import settings
 from django.utils import timezone
@@ -14,6 +15,7 @@ from ...core.db.connection import allow_writer
 from ...core.utils.batches import queryset_in_batches
 from ...discount.models import VoucherCode
 from ...giftcard.models import GiftCard
+from ...order.models import Order
 from ...product.models import Product
 from .. import FileTypes
 from ..notifications import send_export_download_link_notification
@@ -174,6 +176,214 @@ def export_gift_cards(
     save_csv_file_in_export_file(export_file, temporary_file, file_name)
     temporary_file.close()
     send_export_download_link_notification(export_file, "gift cards")
+
+
+ORDER_SUMMARY_HEADERS = [
+    "Number",
+    "Date",
+    "Status",
+    "Charge Status",
+    "Customer Name",
+    "Customer Email",
+    "Billing Address",
+    "Shipping Address",
+    "Channel",
+    "Currency",
+    "Shipping Method",
+    "Shipping Net",
+    "Shipping Gross",
+    "Incoterm",
+    "Voucher Code",
+    "Total Net",
+    "Total Gross",
+]
+
+ORDER_LINE_HEADERS = [
+    "Number",
+    "Product Name",
+    "Variant Name",
+    "SKU",
+    "Quantity",
+    "Unit Price Net",
+    "Unit Price Gross",
+    "Line Total Net",
+    "Line Total Gross",
+    "Tax Rate",
+    "Tax Class",
+    "Tax Class Country",
+]
+
+# Flat/denormalized headers for CSV (order fields + line fields, no duplicate Number)
+ORDER_EXPORT_HEADERS = ORDER_SUMMARY_HEADERS + [
+    h for h in ORDER_LINE_HEADERS if h != "Number"
+]
+
+
+def _format_address(address) -> str:
+    if not address:
+        return ""
+    parts = [
+        f"{address.first_name} {address.last_name}".strip(),
+        address.company_name,
+        address.street_address_1,
+        address.street_address_2,
+        address.city,
+        address.city_area,
+        address.postal_code,
+        address.country_area,
+        str(address.country) if address.country else "",
+    ]
+    return ", ".join(p for p in parts if p)
+
+
+def _build_order_rows(order) -> tuple[dict, list[dict]]:
+    billing = _format_address(order.billing_address)
+    shipping_addr = _format_address(order.shipping_address)
+    customer_name = ""
+    if order.billing_address:
+        customer_name = f"{order.billing_address.first_name} {order.billing_address.last_name}".strip()
+
+    summary: dict = {
+        "Number": str(order.number),
+        "Date": order.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        if order.created_at
+        else "",
+        "Status": order.status,
+        "Charge Status": order.charge_status,
+        "Customer Name": customer_name,
+        "Customer Email": order.user_email or "",
+        "Billing Address": billing,
+        "Shipping Address": shipping_addr,
+        "Channel": order.channel.name if order.channel_id else "",
+        "Currency": order.currency,
+        "Shipping Method": order.shipping_method_name or "",
+        "Shipping Net": str(order.shipping_price_net_amount),
+        "Shipping Gross": str(order.shipping_price_gross_amount),
+        "Incoterm": order.inco_term or "",
+        "Voucher Code": order.voucher_code or "",
+        "Total Net": str(order.total_net_amount),
+        "Total Gross": str(order.total_gross_amount),
+    }
+
+    line_rows: list[dict] = []
+    for line in order.lines.all():
+        tax_class_country = ""
+        if line.tax_class_country_rate_id and line.tax_class_country_rate:
+            tax_class_country = str(line.tax_class_country_rate.country)
+        line_rows.append(
+            {
+                "Number": str(order.number),
+                "Product Name": line.product_name,
+                "Variant Name": line.variant_name,
+                "SKU": line.product_sku or "",
+                "Quantity": line.quantity,
+                "Unit Price Net": str(line.unit_price_net_amount),
+                "Unit Price Gross": str(line.unit_price_gross_amount),
+                "Line Total Net": str(line.total_price_net_amount),
+                "Line Total Gross": str(line.total_price_gross_amount),
+                "Tax Rate": str(line.tax_rate) if line.tax_rate is not None else "",
+                "Tax Class": line.tax_class_name or "",
+                "Tax Class Country": tax_class_country,
+            }
+        )
+
+    return summary, line_rows
+
+
+def _order_batch_queryset(batch_pks):
+    return (
+        Order.objects.using(settings.DATABASE_CONNECTION_REPLICA_NAME)
+        .filter(pk__in=batch_pks)
+        .select_related(
+            "billing_address",
+            "shipping_address",
+            "channel",
+            "shipping_method",
+            "user",
+        )
+        .prefetch_related(
+            "lines",
+            "lines__tax_class_country_rate",
+        )
+        .order_by("pk")
+    )
+
+
+def export_orders(
+    export_file: "ExportFile",
+    scope: dict[str, str | dict],
+    file_type: str,
+    delimiter: str = ",",
+):
+    from ...graphql.order.filters import OrderFilter
+
+    file_name = get_filename("order", file_type)
+    queryset = get_queryset(Order, OrderFilter, scope)
+
+    if file_type == FileTypes.XLSX:
+        summary_rows: list[dict] = []
+        lines_rows: list[dict] = []
+        for batch_pks in queryset_in_batches(queryset, BATCH_SIZE):
+            for order in _order_batch_queryset(batch_pks):
+                summary, line_rows = _build_order_rows(order)
+                summary_rows.append(summary)
+                lines_rows.extend(line_rows)
+
+        temp_file = NamedTemporaryFile("ab+", suffix=".xlsx")
+        _write_orders_xlsx(summary_rows, lines_rows, temp_file.name)
+        temporary_file = temp_file
+    else:
+        temporary_file = create_file_with_headers(
+            ORDER_EXPORT_HEADERS, delimiter, file_type
+        )
+        export_orders_in_batches(queryset, delimiter, temporary_file)
+
+    save_csv_file_in_export_file(export_file, temporary_file, file_name)
+    temporary_file.close()
+    send_export_download_link_notification(export_file, "orders")
+
+
+def _write_orders_xlsx(summary_rows: list[dict], lines_rows: list[dict], filename: str):
+    wb = openpyxl.Workbook()
+
+    ws_orders = wb.active
+    ws_orders.title = "Orders"
+    ws_orders.append(ORDER_SUMMARY_HEADERS)
+    for row in summary_rows:
+        ws_orders.append([row.get(h, "") for h in ORDER_SUMMARY_HEADERS])
+
+    ws_lines = wb.create_sheet("Lines")
+    ws_lines.append(ORDER_LINE_HEADERS)
+    for row in lines_rows:
+        ws_lines.append([row.get(h, "") for h in ORDER_LINE_HEADERS])
+
+    wb.save(filename)
+
+
+def export_orders_in_batches(
+    queryset: "QuerySet",
+    delimiter: str,
+    temporary_file: Any,
+):
+    for batch_pks in queryset_in_batches(queryset, BATCH_SIZE):
+        export_data: list[dict] = []
+        for order in _order_batch_queryset(batch_pks):
+            summary, line_rows = _build_order_rows(order)
+            if not line_rows:
+                export_data.append(
+                    {**summary, **{h: "" for h in ORDER_LINE_HEADERS if h != "Number"}}
+                )
+            else:
+                for line_row in line_rows:
+                    export_data.append(
+                        {
+                            **summary,
+                            **{k: v for k, v in line_row.items() if k != "Number"},
+                        }
+                    )
+        append_to_file(
+            export_data, ORDER_EXPORT_HEADERS, temporary_file, FileTypes.CSV, delimiter
+        )
 
 
 def export_voucher_codes(

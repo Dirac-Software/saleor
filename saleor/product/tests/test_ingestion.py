@@ -264,8 +264,8 @@ def test_get_products_by_code_and_brand(
     # Test the function
     result = get_products_by_code_and_brand(["TEST-001"])
 
-    assert ("TEST-001", "TestBrand") in result
-    assert result[("TEST-001", "TestBrand")] == simple_product
+    assert ("test-001", "testbrand") in result
+    assert result[("test-001", "testbrand")] == simple_product
 
 
 def test_get_products_by_code_and_brand_no_attribute(simple_product):

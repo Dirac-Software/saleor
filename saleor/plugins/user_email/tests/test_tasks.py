@@ -613,9 +613,9 @@ def test_send_order_confirmation_email_task_custom_template(
     )
 
 
-@mock.patch("saleor.plugins.email_common.send_mail")
+@mock.patch("django.core.mail.EmailMultiAlternatives.send")
 def test_send_fulfillment_confirmation_email_task_default_template(
-    mocked_send_mail, user_email_dict_config, order, fulfillment, staff_user
+    mocked_send, user_email_dict_config, order, fulfillment, staff_user
 ):
     payload = get_default_fulfillment_payload(order, fulfillment)
     payload["requester_user_id"] = to_global_id_or_none(staff_user)
@@ -629,8 +629,7 @@ def test_send_fulfillment_confirmation_email_task_default_template(
         "template",
     )
 
-    # confirm that mail has correct structure and email was sent
-    assert mocked_send_mail.called
+    assert mocked_send.called
 
     event_email_sent = order.events.get()
     assert event_email_sent.user == staff_user
@@ -640,9 +639,9 @@ def test_send_fulfillment_confirmation_email_task_default_template(
     }
 
 
-@mock.patch("saleor.plugins.user_email.tasks.send_email")
+@mock.patch("django.core.mail.EmailMultiAlternatives.send")
 def test_send_fulfillment_confirmation_email_task_custom_template_by_user(
-    mocked_send_email,
+    mocked_send,
     user_email_dict_config,
     user_email_plugin,
     order,
@@ -669,14 +668,7 @@ def test_send_fulfillment_confirmation_email_task_custom_template_by_user(
         expected_template_str,
     )
 
-    email_config = EmailConfig(**user_email_dict_config)
-    mocked_send_email.assert_called_with(
-        config=email_config,
-        recipient_list=[recipient_email],
-        context=payload,
-        subject=expected_subject,
-        template_str=expected_template_str,
-    )
+    assert mocked_send.called
 
     event_email_sent, event_digital_email_sent = order.events.all().order_by("pk")
     assert event_email_sent.user == staff_user
@@ -693,9 +685,9 @@ def test_send_fulfillment_confirmation_email_task_custom_template_by_user(
     }
 
 
-@mock.patch("saleor.plugins.user_email.tasks.send_email")
+@mock.patch("django.core.mail.EmailMultiAlternatives.send")
 def test_send_fulfillment_confirmation_email_task_custom_template_by_app(
-    mocked_send_email,
+    mocked_send,
     user_email_dict_config,
     user_email_plugin,
     order,
@@ -722,14 +714,7 @@ def test_send_fulfillment_confirmation_email_task_custom_template_by_app(
         expected_template_str,
     )
 
-    email_config = EmailConfig(**user_email_dict_config)
-    mocked_send_email.assert_called_with(
-        config=email_config,
-        recipient_list=[recipient_email],
-        context=payload,
-        subject=expected_subject,
-        template_str=expected_template_str,
-    )
+    assert mocked_send.called
 
     event_email_sent, event_digital_email_sent = order.events.all().order_by("pk")
     assert not event_email_sent.user

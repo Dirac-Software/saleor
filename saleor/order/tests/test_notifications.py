@@ -345,6 +345,9 @@ def test_get_default_fulfillment_payload(fulfillment, digital_content, site_sett
             get_default_fulfillment_line_payload(digital_line, attribute_data)
         ],
         "recipient_email": order.get_customer_email(),
+        "invoice_id": None,
+        "invoice_url": None,
+        "invoice_number": None,
         **get_site_context_payload(site_settings.site),
     }
 

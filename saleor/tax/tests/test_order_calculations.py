@@ -6,7 +6,7 @@ from prices import Money, TaxedMoney
 from saleor.tax.models import TaxClass, TaxClassCountryRate
 
 from ...core.prices import quantize_price
-from ...core.taxes import zero_money, zero_taxed_money
+from ...core.taxes import TaxDataError, zero_money, zero_taxed_money
 from ...discount import DiscountType, DiscountValueType
 from ...order import OrderStatus
 from ...order.base_calculations import calculate_prices
@@ -282,7 +282,7 @@ def test_calculations_calculate_order_total_no_rates(order_with_lines_untaxed):
     TaxClassCountryRate.objects.all().delete()
 
     # when / then
-    with pytest.raises(ValueError, match="No TaxClassCountryRate"):
+    with pytest.raises(TaxDataError, match="No TaxClassCountryRate"):
         update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax)
 
 
@@ -300,7 +300,7 @@ def test_calculations_calculate_order_total_default_country_rate(
     TaxClassCountryRate.objects.create(country=country, rate=23)
 
     # when / then - country-level default does not satisfy per-tax-class requirement
-    with pytest.raises(ValueError, match="No TaxClassCountryRate"):
+    with pytest.raises(TaxDataError, match="No TaxClassCountryRate"):
         update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax)
 
 

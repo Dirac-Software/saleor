@@ -47,6 +47,7 @@ from decimal import Decimal
 
 import pytest
 
+from ...core.taxes import TaxDataError
 from ...shipping import IncoTerm
 from .. import TaxCalculationStrategy
 from ..calculations.order import update_order_prices_with_flat_rates
@@ -233,5 +234,5 @@ def test_missing_tax_class_country_raises_error(order_with_lines_untaxed):
     _enable_flat_rates(order, prices_entered_with_tax=False)
 
     # when / then
-    with pytest.raises(ValueError, match="No TaxClassCountryRate"):
+    with pytest.raises(TaxDataError, match="No TaxClassCountryRate"):
         update_order_prices_with_flat_rates(order, lines, prices_entered_with_tax=False)
