@@ -449,7 +449,9 @@ def process_price_list_task(price_list_id: int):
                     product_map = get_products_by_code_and_brand(codes)
                     updates = []
                     for item in valid_items:
-                        p = product_map.get((item.product_code, item.brand))
+                        p = product_map.get(
+                            (item.product_code.lower(), item.brand.lower())
+                        )
                         if p:
                             item.product_id = p.pk
                             updates.append(item)
@@ -676,7 +678,7 @@ def activate_price_list_task(price_list_id: int):
                 codes = [i.product_code for i in unresolved]
                 product_map = get_products_by_code_and_brand(codes)
                 for item in unresolved:
-                    p = product_map.get((item.product_code, item.brand))
+                    p = product_map.get((item.product_code.lower(), item.brand.lower()))
                     if p:
                         item.product_id = p.pk
 
@@ -921,7 +923,7 @@ def replace_price_list_task(old_id: int, new_id: int):
                 product_map = get_products_by_code_and_brand(codes)
                 resolved_new = []
                 for item in unresolved_new:
-                    p = product_map.get((item.product_code, item.brand))
+                    p = product_map.get((item.product_code.lower(), item.brand.lower()))
                     if p:
                         item.product_id = p.pk
                         resolved_new.append(item)
