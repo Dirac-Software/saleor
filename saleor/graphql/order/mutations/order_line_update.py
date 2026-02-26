@@ -100,22 +100,23 @@ class OrderLineUpdate(
 
         manager = get_plugin_manager_promise(info.context).get()
 
-        order_is_unconfirmed = instance.order.is_unconfirmed()
-        line_allocation = instance.allocations.first()
-        warehouse_pk = (
-            line_allocation.stock.warehouse.pk
-            if line_allocation and order_is_unconfirmed
-            else None
-        )
         app = get_app_promise(info.context).get()
         with traced_atomic_transaction():
+            order = models.Order.objects.select_for_update().get(pk=instance.order_id)
+            instance.order = order
+            order_is_unconfirmed = order.is_unconfirmed()
+            line_allocation = instance.allocations.first()
+            warehouse_pk = (
+                line_allocation.stock.warehouse.pk
+                if line_allocation and order_is_unconfirmed
+                else None
+            )
             line_info = OrderLineInfo(
                 line=instance,
                 quantity=instance.quantity,
                 variant=instance.variant,
                 warehouse_pk=warehouse_pk,
             )
-            order = instance.order
             try:
                 change_order_line_quantity(
                     info.context.user,

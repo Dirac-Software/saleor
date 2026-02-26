@@ -74,9 +74,15 @@ def parse_optional_str(val) -> str:
 
 def parse_product_code(val) -> tuple[str, list[str]]:
     s, errs = parse_required_str(val, "product_code")
+    s = s.lower()
     if s and " " in s:
         errs.append("product_code: must not contain spaces")
     return s, errs
+
+
+def parse_brand(val) -> tuple[str, list[str]]:
+    s, errs = parse_required_str(val, "brand")
+    return s.lower(), errs
 
 
 def parse_category(val, valid_categories: set[str] | None) -> tuple[str, list[str]]:
@@ -218,7 +224,7 @@ def parse_row(
         return value
 
     product_code = collect(parse_product_code(raw.get("product_code")))
-    brand = collect(parse_required_str(raw.get("brand"), "brand"))
+    brand = collect(parse_brand(raw.get("brand")))
     category = collect(parse_category(raw.get("category"), valid_categories))
     sizes_and_qty = collect(parse_sizes(raw.get("sizes")))
     rrp = collect(parse_price(raw.get("rrp"), "rrp"))
