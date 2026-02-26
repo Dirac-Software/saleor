@@ -56,8 +56,10 @@ def _gen_order_confirmed(query, output_dir, channel, request, stdout):
     try:
         with transaction.atomic():
             order = _make_order(channel)
+            variant = _make_product_variant_with_code("FIXTURE-CODE")
             OrderLine.objects.create(
                 order=order,
+                variant=variant,
                 product_name="Fixture Widget",
                 variant_name="Standard",
                 product_sku="FIXTURE-001",
@@ -103,8 +105,10 @@ def _gen_fulfillment_created(query, output_dir, channel, request, stdout):
                 ]
             )
 
+            variant = _make_product_variant_with_code("FIXTURE-CODE")
             order_line = OrderLine.objects.create(
                 order=order,
+                variant=variant,
                 product_name="Fixture Widget",
                 variant_name="Standard",
                 product_sku="FIXTURE-001",
@@ -174,8 +178,8 @@ def _gen_list_payments(query, output_dir, channel, request, stdout):
     )
 
 
-def _gen_fulfillment_approved(query, output_dir, channel, request, stdout):
-    from ....payment import TransactionKind
+def _gen_xero_fulfillment_approved(query, output_dir, channel, request, stdout):
+    from ....payment import ChargeStatus, TransactionKind
     from ....payment.models import Payment, Transaction
 
     payload = None
@@ -197,8 +201,10 @@ def _gen_fulfillment_approved(query, output_dir, channel, request, stdout):
                 ]
             )
 
+            variant = _make_product_variant_with_code("FIXTURE-CODE")
             order_line = OrderLine.objects.create(
                 order=order,
+                variant=variant,
                 product_name="Fixture Widget",
                 variant_name="Standard",
                 product_sku="FIXTURE-001",
@@ -217,6 +223,7 @@ def _gen_fulfillment_approved(query, output_dir, channel, request, stdout):
                 is_shipping_required=True,
                 is_gift_card=False,
                 tax_rate=Decimal("0.20"),
+                xero_tax_code="RROUTPUT",
             )
 
             fulfillment = Fulfillment.objects.create(
@@ -234,8 +241,11 @@ def _gen_fulfillment_approved(query, output_dir, channel, request, stdout):
                 gateway="xero",
                 order=order,
                 currency=channel.currency_code,
+                total=Decimal("90.00"),
                 captured_amount=Decimal("90.00"),
+                charge_status=ChargeStatus.FULLY_CHARGED,
                 psp_reference=order.xero_deposit_prepayment_id,
+                is_active=True,
             )
             Transaction.objects.create(
                 payment=payment,
@@ -248,18 +258,15 @@ def _gen_fulfillment_approved(query, output_dir, channel, request, stdout):
             )
 
             payload = generate_payload_from_subscription(
-                event_type=WebhookEventAsyncType.FULFILLMENT_APPROVED,
-                subscribable_object={
-                    "fulfillment": fulfillment,
-                    "notify_customer": True,
-                },
+                event_type=WebhookEventSyncType.XERO_FULFILLMENT_APPROVED,
+                subscribable_object=fulfillment,
                 subscription_query=query,
                 request=request,
             )
             raise _Rollback()
     except _Rollback:
         pass
-    _write(output_dir, "fulfillment_approved.json", payload, stdout)
+    _write(output_dir, "xero_fulfillment_approved.json", payload, stdout)
 
 
 def _gen_customer_created(query, output_dir, channel, request, stdout):
@@ -301,11 +308,11 @@ def _gen_customer_created(query, output_dir, channel, request, stdout):
 EVENT_GENERATORS = {
     "XERO_ORDER_CONFIRMED": _gen_order_confirmed,
     "XERO_FULFILLMENT_CREATED": _gen_fulfillment_created,
+    "XERO_FULFILLMENT_APPROVED": _gen_xero_fulfillment_approved,
     "XERO_LIST_BANK_ACCOUNTS": _gen_list_bank_accounts,
     "XERO_LIST_TAX_CODES": _gen_list_tax_codes,
     "XERO_CHECK_PREPAYMENT_STATUS": _gen_check_prepayment_status,
     "XERO_LIST_PAYMENTS": _gen_list_payments,
-    "FULFILLMENT_APPROVED": _gen_fulfillment_approved,
     "CUSTOMER_CREATED": _gen_customer_created,
 }
 
@@ -375,6 +382,35 @@ def _create_temp_app(manifest: dict) -> App:
         permissions = clean_permissions(manifest_perms)
         app.permissions.set(permissions)
     return app
+
+
+def _make_product_variant_with_code(code: str):
+    from ....attribute import AttributeType
+    from ....attribute.models import Attribute, AttributeValue
+    from ....attribute.utils import associate_attribute_values_to_instance
+    from ....product.models import Product, ProductType, ProductVariant
+
+    attr, _ = Attribute.objects.get_or_create(
+        slug="product-code",
+        defaults={"name": "Product Code", "type": AttributeType.PRODUCT_TYPE},
+    )
+    attr_value, _ = AttributeValue.objects.get_or_create(
+        attribute=attr,
+        slug=code.lower(),
+        defaults={"name": code},
+    )
+    product_type, _ = ProductType.objects.get_or_create(
+        slug="fixture-product-type",
+        defaults={"name": "Fixture Product Type", "has_variants": True},
+    )
+    product_type.product_attributes.add(attr)
+    product = Product.objects.create(
+        name="Fixture Widget",
+        slug="fixture-widget",
+        product_type=product_type,
+    )
+    associate_attribute_values_to_instance(product, {attr.pk: [attr_value]})
+    return ProductVariant.objects.create(product=product, sku="FIXTURE-001")
 
 
 def _make_order(channel: Channel) -> Order:

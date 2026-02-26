@@ -268,6 +268,11 @@ def _clean_webhooks(manifest_data, errors):
 
         subscription_query = SubscriptionQuery(webhook["query"])
         if not subscription_query.is_valid:
+            logger.debug(
+                "[MANIFEST VALIDATION] Webhook %r subscription query invalid: %s",
+                webhook.get("name"),
+                subscription_query.error_msg,
+            )
             errors["webhooks"].append(
                 ValidationError(
                     "Subscription query is not valid: " + subscription_query.error_msg,

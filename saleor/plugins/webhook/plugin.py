@@ -1608,32 +1608,6 @@ class WebhookPlugin(BasePlugin):
             )
         return previous_value
 
-    def fulfillment_approved(
-        self,
-        fulfillment: "Fulfillment",
-        notify_customer: bool | None = True,
-        previous_value: None = None,
-    ) -> None:
-        if not self.active:
-            return previous_value
-        event_type = WebhookEventAsyncType.FULFILLMENT_APPROVED
-        if webhooks := get_webhooks_for_event(event_type):
-            fulfillment_data_generator = partial(
-                generate_fulfillment_payload, fulfillment, self.requestor
-            )
-            self.trigger_webhooks_async(
-                None,
-                event_type,
-                webhooks,
-                {
-                    "fulfillment": fulfillment,
-                    "notify_customer": notify_customer,
-                },
-                self.requestor,
-                legacy_data_generator=fulfillment_data_generator,
-            )
-        return previous_value
-
     def fulfillment_metadata_updated(
         self, fulfillment: "Fulfillment", previous_value: None
     ) -> None:
@@ -3854,6 +3828,9 @@ class WebhookPlugin(BasePlugin):
         return previous_value
 
     def xero_fulfillment_created(self, fulfillment, previous_value: None) -> None:
+        from ...invoice import InvoiceType
+        from ...invoice.models import Invoice
+
         if fulfillment.order.origin == OrderOrigin.CHECKOUT:
             return previous_value
         webhooks = get_webhooks_for_event(WebhookEventSyncType.XERO_FULFILLMENT_CREATED)
@@ -3876,15 +3853,48 @@ class WebhookPlugin(BasePlugin):
                 fulfillment.xero_quote_number = xero_quote_number
                 update_fields.append("xero_quote_number")
             if xero_proforma_prepayment_id := response_data.get(
-                "xeroProformaPrepaymentId"
+                "xeroProformaBankTransactionId"
             ):
                 fulfillment.xero_proforma_prepayment_id = xero_proforma_prepayment_id
                 update_fields.append("xero_proforma_prepayment_id")
             if quote_pdf_url := response_data.get("quotePdfUrl"):
-                fulfillment.quote_pdf_url = quote_pdf_url
-                update_fields.append("quote_pdf_url")
+                Invoice.objects.filter(
+                    fulfillment=fulfillment, type=InvoiceType.PROFORMA
+                ).update(external_url=quote_pdf_url)
             if update_fields:
                 fulfillment.save(update_fields=update_fields)
+        return previous_value
+
+    def xero_fulfillment_approved(self, fulfillment, previous_value: None) -> None:
+        from ...invoice import InvoiceType
+        from ...invoice.models import Invoice
+
+        if fulfillment.order.origin == OrderOrigin.CHECKOUT:
+            return previous_value
+        webhooks = get_webhooks_for_event(
+            WebhookEventSyncType.XERO_FULFILLMENT_APPROVED
+        )
+        for webhook in webhooks:
+            response_data = trigger_webhook_sync(
+                event_type=WebhookEventSyncType.XERO_FULFILLMENT_APPROVED,
+                payload="",
+                webhook=webhook,
+                allow_replica=False,
+                subscribable_object=fulfillment,
+                requestor=self.requestor,
+            )
+            if response_data is None:
+                continue
+            Invoice.objects.update_or_create(
+                fulfillment=fulfillment,
+                type=InvoiceType.FINAL,
+                defaults={
+                    "order": fulfillment.order,
+                    "external_url": response_data.get("invoicePdfUrl"),
+                    "xero_invoice_id": response_data.get("xeroInvoiceId"),
+                    "number": response_data.get("xeroInvoiceNumber"),
+                },
+            )
         return previous_value
 
     def xero_list_bank_accounts(self, domain: str, previous_value: list) -> list:

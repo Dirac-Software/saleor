@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 from copy import deepcopy
 from decimal import Decimal
+from functools import partial
 from typing import TYPE_CHECKING, Optional, TypedDict
 from uuid import UUID
 
@@ -69,6 +70,7 @@ from .notifications import (
     send_order_confirmed,
     send_order_refunded_confirmation,
     send_payment_confirmation,
+    send_proforma_confirmation_to_customer,
 )
 from .utils import (
     clean_order_line_quantities,
@@ -698,7 +700,7 @@ def order_fulfilled(
 
         if order_fulfilled or manually_approved:
             for fulfillment in fulfillments:
-                call_event(manager.fulfillment_approved, fulfillment, notify_customer)
+                call_event(manager.xero_fulfillment_approved, fulfillment)
 
         call_order_events(
             manager,
@@ -1506,14 +1508,37 @@ def create_fulfillments(
             from .proforma import (
                 calculate_deposit_allocation,
                 calculate_fulfillment_total,
+                calculate_proportional_shipping,
+                generate_proforma_invoice,
             )
 
+            order_lines_total = sum(
+                line.unit_price_gross_amount * line.quantity
+                for line in order.lines.all()
+            )
             for fulfillment in fulfillments:
                 fulfillment_total = calculate_fulfillment_total(fulfillment)
-                deposit_credit = calculate_deposit_allocation(order, fulfillment_total)
+                shipping_gross = order.shipping_price_gross_amount or Decimal(0)
+                proportional_shipping = calculate_proportional_shipping(
+                    shipping_gross, fulfillment_total, order_lines_total
+                )
+                deposit_credit = calculate_deposit_allocation(
+                    order, fulfillment_total + proportional_shipping
+                )
                 fulfillment.deposit_allocated_amount = deposit_credit
                 fulfillment.save(update_fields=["deposit_allocated_amount"])
+                generate_proforma_invoice(fulfillment, manager)
                 call_event(manager.xero_fulfillment_created, fulfillment)
+                transaction.on_commit(
+                    partial(
+                        send_proforma_confirmation_to_customer,
+                        order,
+                        fulfillment,
+                        user,
+                        app,
+                        manager,
+                    )
+                )
                 auto_create_pick_for_fulfillment(fulfillment, user)
             order_awaits_fulfillment_approval(
                 fulfillments,
@@ -2397,9 +2422,12 @@ def try_auto_approve_fulfillment(fulfillment, user=None, enabled=True):
 
     order = fulfillment.order
     if order.origin != OrderOrigin.CHECKOUT:
-        if not order.payments.filter(
-            psp_reference=fulfillment.xero_proforma_prepayment_id
-        ).exists():
+        if (
+            not fulfillment.xero_proforma_prepayment_id
+            or not order.payments.filter(
+                psp_reference=fulfillment.xero_proforma_prepayment_id
+            ).exists()
+        ):
             return False
 
     from ..plugins.manager import get_plugins_manager

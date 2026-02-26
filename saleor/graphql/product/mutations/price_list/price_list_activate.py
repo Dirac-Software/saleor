@@ -26,8 +26,8 @@ class PriceListActivate(BaseMutation):
     class Meta:
         description = (
             "Trigger activation of a processed price list. "
-            "If another price list is currently active for the same warehouse, "
-            "it will be replaced automatically. Runs asynchronously."
+            "Multiple price lists can be active simultaneously for the same warehouse. "
+            "Runs asynchronously."
         )
         doc_category = DOC_CATEGORY_PRODUCTS
         permissions = (ProductPermissions.MANAGE_PRODUCTS,)

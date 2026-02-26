@@ -103,13 +103,12 @@
             <tr>
               <td align="left" style="font-size: 0px; padding: 10px 25px; word-break: break-word;">
 
-      <div style="font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:13px;line-height:1;text-align:left;color:#000000;">{{#if order.order_details_url}}
-              Thank you for your order. Below is the list of fulfilled products. To see your order details please visit:
-               <a href="{{ order.order_details_url }}">{{ order.order_details_url }}</a>
+      <div style="font-family:Ubuntu, Helvetica, Arial, sans-serif;font-size:13px;line-height:1;text-align:left;color:#000000;">We have packed your order and arranged shipment.
+          {{#if invoice_url}}
+              Please see your final invoice (<a href="{{invoice_url}}">{{#if invoice_number}}Invoice {{invoice_number}}{{else}}download here{{/if}}</a> — also attached) and size breakdown below.
           {{else}}
-              Thank you for your order. Below is the list of fulfilled products.
+              Please see the size breakdown of your order below.
           {{/if}}
-            Thank you for your order. Below is the list of fulfilled products.
           {{#if fulfillment.tracking_number}}
             {{#if fulfillment.is_tracking_number_url}}
                 You can track your shipment with

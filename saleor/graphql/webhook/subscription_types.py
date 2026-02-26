@@ -1354,6 +1354,10 @@ class FulfillmentApproved(SubscriptionObjectType, FulfillmentBase):
         description="If true, send a notification to the customer.",
         required=True,
     )
+    calculated_amounts = graphene.Field(
+        lambda: XeroFulfillmentCreatedCalculatedAmounts,
+        description="Pre-computed line amounts and tax codes for Xero invoice creation.",
+    )
 
     class Meta:
         root_type = None
@@ -1376,6 +1380,13 @@ class FulfillmentApproved(SubscriptionObjectType, FulfillmentBase):
     def resolve_notify_customer(root, _info: ResolveInfo):
         _, data = root
         return data["notify_customer"]
+
+    @staticmethod
+    def resolve_calculated_amounts(root, _info: ResolveInfo):
+        _, data = root
+        return XeroFulfillmentCreated.resolve_calculated_amounts(
+            (None, data["fulfillment"]), _info
+        )
 
 
 class FulfillmentMetadataUpdated(SubscriptionObjectType, FulfillmentBase):
@@ -1618,6 +1629,10 @@ class XeroFulfillmentCreatedCalculatedAmounts(graphene.ObjectType):
     shipping_xero_tax_code = graphene.String(
         description="Snapshotted Xero tax code for shipping (null for DAP/zero-rated).",
     )
+    order_total_gross = graphene.Field(
+        Money,
+        description="Order total gross, safe to read in sync webhook context.",
+    )
     lines = graphene.List(
         graphene.NonNull(XeroFulfillmentLineAmounts),
         required=True,
@@ -1682,19 +1697,59 @@ class XeroFulfillmentCreated(SubscriptionObjectType, FulfillmentBase):
                 )
             )
 
+        from saleor.order.proforma import calculate_proportional_shipping
+
         shipping_gross = order.shipping_price_gross_amount or Decimal(0)
         shipping_net = order.shipping_price_net_amount or Decimal(0)
+        # Use all order lines as denominator so shipping splits correctly across
+        # partial fulfillments (each fulfillment gets its proportional share).
+        order_all_lines_total = sum(
+            line.unit_price_gross_amount * line.quantity for line in order.lines.all()
+        )
+        prop_shipping_gross = calculate_proportional_shipping(
+            shipping_gross, fulfillment_total, order_all_lines_total
+        ).quantize(Decimal("0.01"))
+        prop_shipping_net = calculate_proportional_shipping(
+            shipping_net, fulfillment_total, order_all_lines_total
+        ).quantize(Decimal("0.01"))
         deposit_credit = fulfillment.deposit_allocated_amount or Decimal(0)
-        proforma_amount = fulfillment_total + shipping_gross - deposit_credit
+        proforma_amount = fulfillment_total + prop_shipping_gross - deposit_credit
 
         return XeroFulfillmentCreatedCalculatedAmounts(
             proforma_amount=Money(amount=proforma_amount, currency=order.currency),
             deposit_amount=Money(amount=deposit_credit, currency=order.currency),
-            shipping_cost=Money(amount=shipping_gross, currency=order.currency),
-            shipping_net=Money(amount=shipping_net, currency=order.currency),
+            shipping_cost=Money(amount=prop_shipping_gross, currency=order.currency),
+            shipping_net=Money(amount=prop_shipping_net, currency=order.currency),
             shipping_xero_tax_code=order.shipping_xero_tax_code,
             lines=lines,
         )
+
+
+class XeroFulfillmentApproved(SubscriptionObjectType, FulfillmentBase):
+    calculated_amounts = graphene.Field(
+        XeroFulfillmentCreatedCalculatedAmounts,
+        description="Pre-computed line amounts and tax codes for Xero invoice creation.",
+    )
+
+    class Meta:
+        root_type = "Fulfillment"
+        enable_dry_run = False
+        interfaces = (Event,)
+        description = (
+            "Sync event sent when a fulfillment is approved. "
+            "Dirac should return the Xero invoice ID, number and PDF URL."
+        )
+        doc_category = DOC_CATEGORY_ORDERS
+
+    @staticmethod
+    def resolve_calculated_amounts(root, _info: ResolveInfo):
+        _, fulfillment = root
+        result = XeroFulfillmentCreated.resolve_calculated_amounts(root, _info)
+        order = fulfillment.order
+        result.order_total_gross = Money(
+            amount=order.total_gross_amount, currency=order.currency
+        )
+        return result
 
 
 class XeroCheckPrepaymentStatus(SubscriptionObjectType):
@@ -3396,6 +3451,7 @@ ASYNC_WEBHOOK_TYPES_MAP = {
     WebhookEventAsyncType.FULFILLMENT_PROFORMA_INVOICE_GENERATED: FulfillmentProformaInvoiceGenerated,  # noqa: E501
     WebhookEventSyncType.XERO_ORDER_CONFIRMED: XeroOrderConfirmed,
     WebhookEventSyncType.XERO_FULFILLMENT_CREATED: XeroFulfillmentCreated,
+    WebhookEventSyncType.XERO_FULFILLMENT_APPROVED: XeroFulfillmentApproved,
     WebhookEventSyncType.XERO_CHECK_PREPAYMENT_STATUS: XeroCheckPrepaymentStatus,
     WebhookEventAsyncType.CUSTOMER_CREATED: CustomerCreated,
     WebhookEventAsyncType.CUSTOMER_UPDATED: CustomerUpdated,

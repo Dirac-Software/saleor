@@ -36,9 +36,9 @@ class Invoice(ModelWithMetadata, Job):
         blank=True,
         on_delete=models.SET_NULL,
     )
-    fulfillment = models.OneToOneField(
+    fulfillment = models.ForeignKey(
         "order.Fulfillment",
-        related_name="proforma_invoice",
+        related_name="invoices",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
@@ -79,6 +79,13 @@ class Invoice(ModelWithMetadata, Job):
         indexes = [
             *ModelWithMetadata.Meta.indexes,
             BTreeIndex(fields=["created_at"], name="invoice_created_at_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["fulfillment", "type"],
+                condition=models.Q(fulfillment__isnull=False),
+                name="unique_invoice_per_fulfillment_type",
+            )
         ]
 
 

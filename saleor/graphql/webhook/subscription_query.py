@@ -79,18 +79,29 @@ class SubscriptionQuery:
         return is_invalid
 
     def validate_query(self) -> list[GraphQLSyntaxError | ValidationError]:
+        import logging
+
         from ..api import schema
 
+        logger = logging.getLogger(__name__)
         graphql_backend = get_default_backend()
         try:
             document = graphql_backend.document_from_string(schema, self.query)
             self.ast = document.document_ast
             errors = validate(schema, self.ast)
         except GraphQLSyntaxError as e:
+            logger.debug(
+                "[SUBSCRIPTION QUERY] Syntax error: %s | query: %s", e, self.query
+            )
             self.error_code = WebhookErrorCode.SYNTAX.value
             return [e]
 
         if errors:
+            logger.debug(
+                "[SUBSCRIPTION QUERY] GraphQL validation errors: %s | query: %s",
+                [str(e) for e in errors],
+                self.query,
+            )
             self.error_code = WebhookErrorCode.GRAPHQL_ERROR.value
             return errors
 

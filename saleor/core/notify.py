@@ -34,6 +34,7 @@ class UserNotifyEvent:
     ORDER_PAYMENT_CONFIRMATION = "order_payment_confirmation"
     ORDER_CANCELED = "order_canceled"
     ORDER_REFUND_CONFIRMATION = "order_refund_confirmation"
+    ORDER_PROFORMA_CONFIRMATION = "order_proforma_confirmation"
     SEND_GIFT_CARD = "send_gift_card"
 
     CHOICES = [
@@ -51,6 +52,7 @@ class UserNotifyEvent:
         ORDER_PAYMENT_CONFIRMATION,
         ORDER_CANCELED,
         ORDER_REFUND_CONFIRMATION,
+        ORDER_PROFORMA_CONFIRMATION,
         SEND_GIFT_CARD,
     ]
 

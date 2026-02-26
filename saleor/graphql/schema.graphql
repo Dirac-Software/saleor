@@ -2552,6 +2552,7 @@ enum WebhookEventTypeEnum @doc(category: "Webhooks") {
   XERO_LIST_TAX_CODES
   XERO_ORDER_CONFIRMED
   XERO_FULFILLMENT_CREATED
+  XERO_FULFILLMENT_APPROVED
   XERO_CHECK_PREPAYMENT_STATUS
 }
 
@@ -2623,6 +2624,7 @@ enum WebhookEventTypeSyncEnum @doc(category: "Webhooks") {
   XERO_LIST_TAX_CODES
   XERO_ORDER_CONFIRMED
   XERO_FULFILLMENT_CREATED
+  XERO_FULFILLMENT_APPROVED
   XERO_CHECK_PREPAYMENT_STATUS
 }
 
@@ -17582,7 +17584,7 @@ type Mutation {
   priceListCreate(input: PriceListCreateInput!): PriceListCreate @doc(category: "Products")
 
   """
-  Trigger activation of a processed price list. If another price list is currently active for the same warehouse, it will be replaced automatically. Runs asynchronously. 
+  Trigger activation of a processed price list. Multiple price lists can be active simultaneously for the same warehouse. Runs asynchronously. 
   
   Requires one of the following permissions: MANAGE_PRODUCTS.
   """
@@ -18314,7 +18316,6 @@ type Mutation {
   - FULFILLMENT_CREATED (async): A new fulfillment is created.
   - ORDER_FULFILLED (async): Order is fulfilled.
   - FULFILLMENT_TRACKING_NUMBER_UPDATED (async): Sent when fulfillment tracking number is updated.
-  - FULFILLMENT_APPROVED (async): A fulfillment is approved.
   """
   orderFulfill(
     """Fields required to create a fulfillment."""
@@ -18322,7 +18323,7 @@ type Mutation {
 
     """ID of the order to be fulfilled."""
     order: ID
-  ): OrderFulfill @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [FULFILLMENT_CREATED, ORDER_FULFILLED, FULFILLMENT_TRACKING_NUMBER_UPDATED, FULFILLMENT_APPROVED], syncEvents: [])
+  ): OrderFulfill @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [FULFILLMENT_CREATED, ORDER_FULFILLED, FULFILLMENT_TRACKING_NUMBER_UPDATED], syncEvents: [])
 
   """
   Cancels existing fulfillment and optionally restocks items. 
@@ -18341,9 +18342,6 @@ type Mutation {
   Approve existing fulfillment. 
   
   Requires one of the following permissions: MANAGE_ORDERS.
-  
-  Triggers the following webhook events:
-  - FULFILLMENT_APPROVED (async): Fulfillment is approved.
   """
   orderFulfillmentApprove(
     """True if stock could be exceeded."""
@@ -18354,7 +18352,7 @@ type Mutation {
 
     """True if confirmation email should be send."""
     notifyCustomer: Boolean!
-  ): FulfillmentApprove @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [FULFILLMENT_APPROVED], syncEvents: [])
+  ): FulfillmentApprove @doc(category: "Orders")
 
   """
   Updates a fulfillment for an order. 
@@ -25207,7 +25205,7 @@ input PriceListColumnMapInput @doc(category: "Products") {
 }
 
 """
-Trigger activation of a processed price list. If another price list is currently active for the same warehouse, it will be replaced automatically. Runs asynchronously. 
+Trigger activation of a processed price list. Multiple price lists can be active simultaneously for the same warehouse. Runs asynchronously. 
 
 Requires one of the following permissions: MANAGE_PRODUCTS.
 """
@@ -26865,9 +26863,8 @@ Triggers the following webhook events:
 - FULFILLMENT_CREATED (async): A new fulfillment is created.
 - ORDER_FULFILLED (async): Order is fulfilled.
 - FULFILLMENT_TRACKING_NUMBER_UPDATED (async): Sent when fulfillment tracking number is updated.
-- FULFILLMENT_APPROVED (async): A fulfillment is approved.
 """
-type OrderFulfill @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [FULFILLMENT_CREATED, ORDER_FULFILLED, FULFILLMENT_TRACKING_NUMBER_UPDATED, FULFILLMENT_APPROVED], syncEvents: []) {
+type OrderFulfill @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [FULFILLMENT_CREATED, ORDER_FULFILLED, FULFILLMENT_TRACKING_NUMBER_UPDATED], syncEvents: []) {
   """List of created fulfillments."""
   fulfillments: [Fulfillment!]
 
@@ -26933,11 +26930,8 @@ input FulfillmentCancelInput @doc(category: "Orders") {
 Approve existing fulfillment. 
 
 Requires one of the following permissions: MANAGE_ORDERS.
-
-Triggers the following webhook events:
-- FULFILLMENT_APPROVED (async): Fulfillment is approved.
 """
-type FulfillmentApprove @doc(category: "Orders") @webhookEventsInfo(asyncEvents: [FULFILLMENT_APPROVED], syncEvents: []) {
+type FulfillmentApprove @doc(category: "Orders") {
   """An approved fulfillment."""
   fulfillment: Fulfillment
 
@@ -35795,6 +35789,53 @@ type FulfillmentApproved implements Event @doc(category: "Orders") {
 
   """If true, send a notification to the customer."""
   notifyCustomer: Boolean!
+
+  """Pre-computed line amounts and tax codes for Xero invoice creation."""
+  calculatedAmounts: XeroFulfillmentCreatedCalculatedAmounts
+}
+
+type XeroFulfillmentCreatedCalculatedAmounts {
+  """Fulfillment total plus shipping minus deposit credit."""
+  proformaAmount: Money!
+
+  """Deposit credit allocated to this fulfillment."""
+  depositAmount: Money!
+
+  """Shipping gross for this order."""
+  shippingCost: Money!
+
+  """Shipping net for this order (pass to Xero)."""
+  shippingNet: Money!
+
+  """Snapshotted Xero tax code for shipping (null for DAP/zero-rated)."""
+  shippingXeroTaxCode: String
+
+  """Order total gross, safe to read in sync webhook context."""
+  orderTotalGross: Money
+
+  """Per-line stored amounts, safe to read in sync webhook context."""
+  lines: [XeroFulfillmentLineAmounts!]!
+}
+
+type XeroFulfillmentLineAmounts {
+  """ID of the order line."""
+  orderLineId: String!
+
+  """Quantity fulfilled."""
+  quantity: Int!
+  productName: String!
+  variantName: String!
+  productSku: String
+
+  """Value of the configured invoice product code attribute."""
+  productCode: String
+
+  """Snapshotted Xero tax code for this line (null for DAP/zero-rated)."""
+  xeroTaxCode: String
+  unitPriceGross: Money!
+  unitPriceNet: Money!
+  totalPriceGross: Money!
+  totalPriceNet: Money!
 }
 
 """Event sent when a fulfillment is marked as fulfilled."""
@@ -35967,45 +36008,30 @@ type XeroFulfillmentCreated implements Event @doc(category: "Orders") {
   calculatedAmounts: XeroFulfillmentCreatedCalculatedAmounts!
 }
 
-type XeroFulfillmentCreatedCalculatedAmounts {
-  """Fulfillment total plus shipping minus deposit credit."""
-  proformaAmount: Money!
+"""
+Sync event sent when a fulfillment is approved. Dirac should return the Xero invoice ID, number and PDF URL.
+"""
+type XeroFulfillmentApproved implements Event @doc(category: "Orders") {
+  """Time of the event."""
+  issuedAt: DateTime
 
-  """Deposit credit allocated to this fulfillment."""
-  depositAmount: Money!
+  """Saleor version that triggered the event."""
+  version: String
 
-  """Shipping gross for this order."""
-  shippingCost: Money!
+  """The user or application that triggered the event."""
+  issuingPrincipal: IssuingPrincipal
 
-  """Shipping net for this order (pass to Xero)."""
-  shippingNet: Money!
+  """The application receiving the webhook."""
+  recipient: App
 
-  """Snapshotted Xero tax code for shipping (null for DAP/zero-rated)."""
-  shippingXeroTaxCode: String
+  """The fulfillment the event relates to."""
+  fulfillment: Fulfillment
 
-  """Per-line stored amounts, safe to read in sync webhook context."""
-  lines: [XeroFulfillmentLineAmounts!]!
-}
+  """The order the fulfillment belongs to."""
+  order: Order
 
-type XeroFulfillmentLineAmounts {
-  """ID of the order line."""
-  orderLineId: String!
-
-  """Quantity fulfilled."""
-  quantity: Int!
-  productName: String!
-  variantName: String!
-  productSku: String
-
-  """Value of the configured invoice product code attribute."""
-  productCode: String
-
-  """Snapshotted Xero tax code for this line (null for DAP/zero-rated)."""
-  xeroTaxCode: String
-  unitPriceGross: Money!
-  unitPriceNet: Money!
-  totalPriceGross: Money!
-  totalPriceNet: Money!
+  """Pre-computed line amounts and tax codes for Xero invoice creation."""
+  calculatedAmounts: XeroFulfillmentCreatedCalculatedAmounts
 }
 
 """Sync event to check whether a Xero prepayment has been paid."""

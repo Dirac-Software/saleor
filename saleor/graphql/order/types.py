@@ -1084,10 +1084,16 @@ class Fulfillment(
     def resolve_proforma_invoice(
         root: SyncWebhookControlContext[models.Fulfillment], _info
     ):
-        try:
-            return root.node.proforma_invoice
-        except models.Fulfillment.proforma_invoice.RelatedObjectDoesNotExist:
-            return None
+        from ...invoice import InvoiceType
+
+        return root.node.invoices.filter(type=InvoiceType.PROFORMA).first()
+
+    @staticmethod
+    def resolve_quote_pdf_url(
+        root: SyncWebhookControlContext[models.Fulfillment], _info
+    ):
+        inv = Fulfillment.resolve_proforma_invoice(root, _info)
+        return inv.external_url if inv else None
 
     @staticmethod
     def resolve_is_paid(root: SyncWebhookControlContext[models.Fulfillment], _info):

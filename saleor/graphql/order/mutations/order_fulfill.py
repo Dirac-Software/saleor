@@ -118,10 +118,6 @@ class OrderFulfill(BaseMutation):
                 type=WebhookEventAsyncType.FULFILLMENT_TRACKING_NUMBER_UPDATED,
                 description="Sent when fulfillment tracking number is updated.",
             ),
-            WebhookEventInfo(
-                type=WebhookEventAsyncType.FULFILLMENT_APPROVED,
-                description="A fulfillment is approved.",
-            ),
         ]
 
     @classmethod

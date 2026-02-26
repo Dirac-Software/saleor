@@ -38,6 +38,7 @@ from .notify_events import (
     send_order_confirmed,
     send_order_refund,
     send_payment_confirmation,
+    send_proforma_fulfillment_confirmation,
 )
 
 if TYPE_CHECKING:
@@ -62,6 +63,7 @@ def get_user_event_map():
         UserNotifyEvent.ORDER_CONFIRMED: send_order_confirmed,
         UserNotifyEvent.ORDER_FULFILLMENT_CONFIRMATION: send_fulfillment_confirmation,
         UserNotifyEvent.ORDER_FULFILLMENT_UPDATE: send_fulfillment_update,
+        UserNotifyEvent.ORDER_PROFORMA_CONFIRMATION: send_proforma_fulfillment_confirmation,
         UserNotifyEvent.ORDER_PAYMENT_CONFIRMATION: send_payment_confirmation,
         UserNotifyEvent.ORDER_CANCELED: send_order_canceled,
         UserNotifyEvent.ORDER_REFUND_CONFIRMATION: send_order_refund,
@@ -176,6 +178,14 @@ class UserEmailPlugin(BasePlugin):
         },
         {
             "name": constants.ORDER_REFUND_CONFIRMATION_TEMPLATE_FIELD,
+            "value": DEFAULT_EMAIL_VALUE,
+        },
+        {
+            "name": constants.ORDER_PROFORMA_CONFIRMATION_SUBJECT_FIELD,
+            "value": constants.ORDER_PROFORMA_CONFIRMATION_DEFAULT_SUBJECT,
+        },
+        {
+            "name": constants.ORDER_PROFORMA_CONFIRMATION_TEMPLATE_FIELD,
             "value": DEFAULT_EMAIL_VALUE,
         },
         {
@@ -328,6 +338,16 @@ class UserEmailPlugin(BasePlugin):
             "type": ConfigurationTypeField.MULTILINE,
             "help_text": DEFAULT_TEMPLATE_HELP_TEXT,
             "label": "Order refund - template",
+        },
+        constants.ORDER_PROFORMA_CONFIRMATION_SUBJECT_FIELD: {
+            "type": ConfigurationTypeField.STRING,
+            "help_text": DEFAULT_SUBJECT_HELP_TEXT,
+            "label": "Proforma invoice confirmation - subject",
+        },
+        constants.ORDER_PROFORMA_CONFIRMATION_TEMPLATE_FIELD: {
+            "type": ConfigurationTypeField.MULTILINE,
+            "help_text": DEFAULT_TEMPLATE_HELP_TEXT,
+            "label": "Proforma invoice confirmation - template",
         },
         constants.SEND_GIFT_CARD_SUBJECT_FIELD: {
             "type": ConfigurationTypeField.MULTILINE,

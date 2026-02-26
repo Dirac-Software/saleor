@@ -669,19 +669,6 @@ def activate_price_list_task(price_list_id: int):
                     f"Warehouse {price_list.warehouse_id} is owned; cannot activate price list"
                 )
 
-            # Auto-replace: if another list is active for this warehouse, delegate to replace.
-            existing_active_id = (
-                PriceList.objects.filter(
-                    status=PriceListStatus.ACTIVE, warehouse=price_list.warehouse
-                )
-                .exclude(pk=price_list_id)
-                .values_list("pk", flat=True)
-                .first()
-            )
-            if existing_active_id is not None:
-                replace_price_list_task.delay(existing_active_id, price_list_id)
-                return
-
             items = list(price_list.items.filter(is_valid=True))
 
             unresolved = [i for i in items if i.product_id is None]

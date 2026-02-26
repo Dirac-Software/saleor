@@ -24,6 +24,7 @@ from ..discount import DiscountType
 from ..graphql.core.utils import to_global_id_or_none
 from ..product import ProductMediaTypes
 from ..product.models import DigitalContentUrl, Product, ProductMedia, ProductVariant
+from ..site.models import SiteSettings
 from ..thumbnail import THUMBNAIL_SIZES
 from ..thumbnail.utils import get_image_or_proxy_url
 from .models import FulfillmentLine, Order, OrderLine
@@ -235,6 +236,63 @@ def get_lines_payload(
     return payload
 
 
+def _get_product_code_from_attribute_data(
+    line: "OrderLine", attribute_data: AttributeData, product_code_slug: str
+) -> str | None:
+    if not line.variant_id or not line.variant:
+        return None
+    product = line.variant.product
+    attribute_ids = attribute_data.product_type_id_to_attribute_id_map.get(
+        product.product_type_id, []
+    )
+    for attr_id in attribute_ids:
+        attr = attribute_data.attribute_map.get(attr_id)
+        if attr and attr.slug == product_code_slug:
+            value_ids = attribute_data.assigned_product_attribute_values_map.get(
+                product.id, []
+            )
+            for value_id in value_ids:
+                value = attribute_data.attribute_value_map.get(value_id)
+                if value and value.attribute_id == attr_id:
+                    return value.name
+    return None
+
+
+def compress_lines_payload(
+    lines_payload: list[dict], product_codes: list[str | None], currency: str
+) -> list[dict]:
+    seen_codes: dict[str, int] = {}
+    result: list[dict] = []
+
+    for code, payload in zip(product_codes, lines_payload, strict=False):
+        if code is None:
+            result.append(payload)
+        elif code not in seen_codes:
+            seen_codes[code] = len(result)
+            merged = dict(payload)
+            merged["product_name"] = code
+            merged["variant_name"] = None
+            result.append(merged)
+        else:
+            existing = result[seen_codes[code]]
+            existing["quantity"] += payload["quantity"]
+            existing["total_gross_amount"] = quantize_price(
+                existing["total_gross_amount"] + payload["total_gross_amount"], currency
+            )
+            existing["total_net_amount"] = quantize_price(
+                existing["total_net_amount"] + payload["total_net_amount"], currency
+            )
+            total_qty = existing["quantity"]
+            existing["unit_price_gross_amount"] = quantize_price(
+                existing["total_gross_amount"] / total_qty, currency
+            )
+            existing["unit_price_net_amount"] = quantize_price(
+                existing["total_net_amount"] / total_qty, currency
+            )
+
+    return result
+
+
 ADDRESS_MODEL_FIELDS = [
     "first_name",
     "last_name",
@@ -423,6 +481,19 @@ def get_default_fulfillment_payload(order, fulfillment):
         "recipient_email": order.get_customer_email(),
         **get_site_context(),
     }
+
+    from ..invoice import InvoiceType
+
+    invoice = fulfillment.invoices.filter(type=InvoiceType.PROFORMA).first()
+    if invoice:
+        payload["invoice_id"] = invoice.pk
+        payload["invoice_url"] = invoice.url
+        payload["invoice_number"] = invoice.number
+    else:
+        payload["invoice_id"] = None
+        payload["invoice_url"] = None
+        payload["invoice_number"] = None
+
     return payload
 
 
@@ -477,8 +548,37 @@ def send_order_confirmed(order, user, app, manager):
     """Send email which tells customer that order has been confirmed."""
 
     def _generate_payload():
+        site_settings = SiteSettings.objects.first()
+        product_code_slug = (
+            site_settings.invoice_product_code_attribute
+            if site_settings
+            else "product-code"
+        )
+
+        lines = list(
+            order.lines.prefetch_related(
+                "variant__media",
+                "variant__product__media",
+                "variant__product__product_type",
+            ).all()
+        )
+        attribute_data = get_attribute_data_from_order_lines(lines)
+        product_codes = [
+            _get_product_code_from_attribute_data(
+                line, attribute_data, product_code_slug
+            )
+            for line in lines
+        ]
+
+        order_payload = get_default_order_payload(
+            order, order.redirect_url, lines=lines, attribute_data=attribute_data
+        )
+        order_payload["lines"] = compress_lines_payload(
+            order_payload["lines"], product_codes, order.currency
+        )
+
         payload = {
-            "order": get_default_order_payload(order, order.redirect_url),
+            "order": order_payload,
             "recipient_email": order.get_customer_email(),
             **get_site_context(),
         }
@@ -503,6 +603,26 @@ def send_fulfillment_confirmation_to_customer(order, fulfillment, user, app, man
 
     manager.notify(
         NotifyEventType.ORDER_FULFILLMENT_CONFIRMATION,
+        payload_func=handler.payload,
+        channel_slug=order.channel.slug,
+    )
+
+
+def send_proforma_confirmation_to_customer(order, fulfillment, user, app, manager):
+    def _generate_payload():
+        from ..invoice import InvoiceType
+
+        _payload = get_default_fulfillment_payload(order, fulfillment)
+        proforma_inv = fulfillment.invoices.filter(type=InvoiceType.PROFORMA).first()
+        _payload["quote_pdf_url"] = proforma_inv.external_url if proforma_inv else None
+        _payload["xero_quote_number"] = fulfillment.xero_quote_number
+        attach_requester_payload_data(_payload, user, app)
+        return _payload
+
+    handler = NotifyHandler(_generate_payload)
+
+    manager.notify(
+        NotifyEventType.ORDER_PROFORMA_CONFIRMATION,
         payload_func=handler.payload,
         channel_slug=order.channel.slug,
     )

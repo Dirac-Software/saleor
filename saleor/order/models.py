@@ -987,11 +987,6 @@ class Fulfillment(ModelWithMetadata):
         blank=True,
         help_text="Xero prepayment UUID for the proforma payment on this fulfillment.",
     )
-    quote_pdf_url = models.URLField(
-        null=True,
-        blank=True,
-        help_text="URL to the quote PDF hosted by the Xero integration app.",
-    )
 
     class Meta(ModelWithMetadata.Meta):
         ordering = ("pk",)
@@ -1137,11 +1132,16 @@ class Fulfillment(ModelWithMetadata):
         if not self.shipment_id:
             return False
 
-        if self.lines.exists():
-            order = self.order
-            if not order.payments.filter(
-                psp_reference=self.xero_proforma_prepayment_id
-            ).exists():
+        from . import OrderOrigin
+
+        order = self.order
+        if order.origin != OrderOrigin.CHECKOUT:
+            if (
+                not self.xero_proforma_prepayment_id
+                or not order.payments.filter(
+                    psp_reference=self.xero_proforma_prepayment_id
+                ).exists()
+            ):
                 return False
 
         return True

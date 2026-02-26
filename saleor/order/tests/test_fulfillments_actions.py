@@ -11,7 +11,7 @@ from ..actions import create_fulfillments
 from ..models import FulfillmentLine, OrderStatus
 
 
-@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.plugins.manager.PluginsManager.xero_fulfillment_approved")
 @patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
 def test_create_fulfillments(
     mock_email_fulfillment,
@@ -80,10 +80,10 @@ def test_create_fulfillments(
     mock_email_fulfillment.assert_called_once_with(
         order, order.fulfillments.get(), staff_user, None, manager
     )
-    mock_fulfillment_approved.assert_called_once_with(fulfillment, notify_customer)
+    mock_fulfillment_approved.assert_called_once_with(fulfillment)
 
 
-@patch("saleor.plugins.manager.PluginsManager.fulfillment_approved")
+@patch("saleor.plugins.manager.PluginsManager.xero_fulfillment_approved")
 @patch("saleor.order.actions.send_fulfillment_confirmation_to_customer", autospec=True)
 def test_create_fulfillments_require_approval(
     mock_email_fulfillment,

@@ -16,6 +16,7 @@ from .tasks import (
     send_order_refund_email_task,
     send_password_reset_email_task,
     send_payment_confirmation_email_task,
+    send_proforma_fulfillment_confirmation_email_task,
     send_request_email_change_email_task,
     send_set_user_password_email_task,
     send_user_change_email_notification_task,
@@ -382,4 +383,33 @@ def send_order_confirmed(
     )
     send_order_confirmed_email_task.delay(
         recipient_email, payload, config, subject, template
+    )
+
+
+def send_proforma_fulfillment_confirmation(
+    payload_func: Callable[[], dict], config: dict, plugin: "UserEmailPlugin"
+):
+    template = get_email_template_or_default(
+        plugin,
+        constants.ORDER_PROFORMA_CONFIRMATION_TEMPLATE_FIELD,
+        constants.ORDER_PROFORMA_CONFIRMATION_DEFAULT_TEMPLATE,
+        constants.DEFAULT_EMAIL_TEMPLATES_PATH,
+    )
+    if not template:
+        return
+    payload = payload_func()
+    recipient_email = payload["recipient_email"]
+    subject = get_email_subject(
+        plugin.configuration,
+        constants.ORDER_PROFORMA_CONFIRMATION_SUBJECT_FIELD,
+        constants.ORDER_PROFORMA_CONFIRMATION_DEFAULT_SUBJECT,
+    )
+    send_proforma_fulfillment_confirmation_email_task.delay(
+        recipient_email,
+        payload,
+        config,
+        subject,
+        template,
+        payload.get("quote_pdf_url"),
+        payload.get("xero_quote_number"),
     )
