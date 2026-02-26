@@ -8,7 +8,9 @@ from ....core.prices import quantize_price
 from ....order import models
 from ....order.actions import call_order_event
 from ....order.error_codes import OrderErrorCode
+from ....order.utils import get_order_country
 from ....permission.enums import OrderPermissions
+from ....tax.models import TaxClassCountryRate
 from ....tax.utils import (
     get_tax_country_for_order,
     get_zero_rated_export_tax_class,
@@ -160,6 +162,32 @@ class OrderUpdateShippingCost(EditableOrderValidationMixin, BaseMutation):
                     )
                 }
             )
+
+        if inco_term == IncoTerm.DDP:
+            country = get_order_country(order)
+            line_tax_class_ids = {
+                line.tax_class_id
+                for line in order.lines.all()
+                if line.tax_class_id is not None
+            }
+            if line_tax_class_ids:
+                existing = set(
+                    TaxClassCountryRate.objects.filter(
+                        tax_class_id__in=line_tax_class_ids,
+                        country=country,
+                    ).values_list("tax_class_id", flat=True)
+                )
+                missing = line_tax_class_ids - existing
+                if missing:
+                    raise ValidationError(
+                        {
+                            "inco_term": ValidationError(
+                                f"Cannot set inco_term to DDP: no tax rate configured for "
+                                f"country '{country}' on {len(missing)} tax class(es).",
+                                code=OrderErrorCode.TAX_ERROR.value,
+                            )
+                        }
+                    )
 
         # Resolve explicit tax class from input (may be overridden below for exports).
         tax_class_id = input.get("tax_class")

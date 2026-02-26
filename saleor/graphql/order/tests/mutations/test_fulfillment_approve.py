@@ -814,6 +814,18 @@ def test_fulfillment_approve_draft_order_prepayment_paid(
         update_pick_item(pick_item, quantity_picked=pick_item.quantity_to_pick)
     complete_pick(pick)
 
+    from .....invoice import InvoiceType
+    from .....invoice.models import Invoice
+
+    def create_final_invoice(f):
+        Invoice.objects.update_or_create(
+            fulfillment=f,
+            type=InvoiceType.FINAL,
+            defaults={"order": f.order},
+        )
+
+    mock_fulfillment_approved.side_effect = create_final_invoice
+
     # when
     query = APPROVE_FULFILLMENT_MUTATION
     fulfillment_id = graphene.Node.to_global_id("Fulfillment", fulfillment.id)

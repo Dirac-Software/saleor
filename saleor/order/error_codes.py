@@ -43,6 +43,7 @@ class OrderErrorCode(Enum):
     VAT_INVALID_FORMAT = "vat_invalid_format"
     VAT_INVALID = "vat_invalid"
     VAT_SERVICE_UNAVAILABLE = "vat_service_unavailable"
+    XERO_SYNC_FAILED = "xero_sync_failed"
 
 
 class OrderGrantRefundCreateErrorCode(Enum):

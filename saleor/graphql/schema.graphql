@@ -13118,6 +13118,7 @@ enum OrderErrorCode @doc(category: "Orders") {
   VAT_INVALID_FORMAT
   VAT_INVALID
   VAT_SERVICE_UNAVAILABLE
+  XERO_SYNC_FAILED
 }
 
 enum AddressTypeEnum {

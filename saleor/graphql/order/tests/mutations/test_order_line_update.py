@@ -1516,6 +1516,44 @@ def test_order_line_update_with_custom_price_on_draft_order(
     assert line.undiscounted_unit_price_gross_amount == new_price
 
 
+def test_order_line_update_with_custom_price_on_unconfirmed_order(
+    staff_api_client,
+    permission_group_manage_orders,
+    order_with_lines,
+):
+    permission_group_manage_orders.user_set.add(staff_api_client.user)
+    order = order_with_lines
+    order.status = OrderStatus.UNCONFIRMED
+    order.save(update_fields=["status"])
+
+    line = order.lines.first()
+    original_price = line.unit_price_gross_amount
+    new_price = Decimal("99.99")
+    assert original_price != new_price
+
+    line_id = graphene.Node.to_global_id("OrderLine", line.id)
+    variables = {"lineId": line_id, "quantity": line.quantity, "price": str(new_price)}
+
+    response = staff_api_client.post_graphql(
+        ORDER_LINE_UPDATE_WITH_PRICE_MUTATION, variables
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["orderLineUpdate"]
+
+    assert not data["errors"]
+    assert data["orderLine"]["quantity"] == line.quantity
+    assert Decimal(data["orderLine"]["unitPrice"]["gross"]["amount"]) == pytest.approx(
+        new_price, rel=Decimal("0.0001")
+    )
+    assert Decimal(
+        data["orderLine"]["undiscountedUnitPrice"]["gross"]["amount"]
+    ) == pytest.approx(new_price, rel=Decimal("0.0001"))
+
+    line.refresh_from_db()
+    assert line.unit_price_gross_amount == new_price
+    assert line.undiscounted_unit_price_gross_amount == new_price
+
+
 def test_order_line_update_with_custom_price_on_confirmed_order_fails(
     staff_api_client,
     permission_group_manage_orders,

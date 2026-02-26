@@ -58,11 +58,13 @@ class OrderLineUpdate(
             )
 
         # Check price validation before general order validation to give more specific error
-        if "price" in data and not instance.order.is_draft():
+        if "price" in data and not (
+            instance.order.is_draft() or instance.order.is_unconfirmed()
+        ):
             raise ValidationError(
                 {
                     "price": ValidationError(
-                        "Price can only be changed on draft orders.",
+                        "Price can only be changed on draft or unconfirmed orders.",
                         code=OrderErrorCode.CANNOT_DISCOUNT.value,
                     )
                 }
