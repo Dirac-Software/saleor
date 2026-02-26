@@ -445,31 +445,19 @@ def test_get_shipping_tax_rate_for_order_when_weighted_tax_is_disabled(
 # --- get_tax_country_for_order ---
 
 
-def test_get_tax_country_for_order_dap_returns_none():
+@pytest.mark.parametrize(
+    "inco_term", ["DAP", "EXW", "FCA", "CPT", "CIP", "DPU", "FAS", "FOB", "CFR", "CIF"]
+)
+def test_get_tax_country_for_order_non_ddp_returns_channel_country(inco_term):
     order = Mock()
-    order.inco_term = "DAP"
-
-    assert get_tax_country_for_order(order) is None
-
-
-def test_get_tax_country_for_order_exw_returns_channel_default_country():
-    order = Mock()
-    order.inco_term = "EXW"
+    order.inco_term = inco_term
     order.channel.default_country.code = "US"
 
     assert get_tax_country_for_order(order) == "US"
 
 
-def test_get_tax_country_for_order_fca_returns_channel_default_country():
-    order = Mock()
-    order.inco_term = "FCA"
-    order.channel.default_country.code = "DE"
-
-    assert get_tax_country_for_order(order) == "DE"
-
-
 def test_get_tax_country_for_order_ddp_returns_order_country(order_with_lines):
-    # DDP (the default) uses the shipping address country via get_order_country.
+    # DDP uses the shipping address country via get_order_country.
     order = order_with_lines
     order.inco_term = "DDP"
 
@@ -481,13 +469,17 @@ def test_get_tax_country_for_order_ddp_returns_order_country(order_with_lines):
 # --- resolve_tax_class_country_rate ---
 
 
-def test_resolve_tax_class_country_rate_dap_returns_none(db):
-    # DAP → no country lookup at all; always None.
+def test_resolve_tax_class_country_rate_dap_uses_channel_country(db):
+    # DAP → uses channel default country, not destination country.
     order = Mock()
     order.inco_term = "DAP"
+    order.channel.default_country.code = "US"
     tax_class = TaxClass.objects.create(name="Standard")
+    rate = TaxClassCountryRate.objects.create(
+        tax_class=tax_class, country="US", rate=10
+    )
 
-    assert resolve_tax_class_country_rate(order, tax_class) is None
+    assert resolve_tax_class_country_rate(order, tax_class) == rate
 
 
 def test_resolve_tax_class_country_rate_returns_specific_rate(db):

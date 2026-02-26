@@ -429,13 +429,11 @@ def is_zero_rated_export(order: "Order") -> bool:
     return bool(shipping_country and shipping_country != channel_country)
 
 
-def get_tax_country_for_order(order: "Order") -> str | None:
+def get_tax_country_for_order(order: "Order") -> str:
     from ..shipping import IncoTerm
 
     inco_term = getattr(order, "inco_term", None)
-    if inco_term == IncoTerm.DAP:
-        return None
-    if inco_term in (IncoTerm.EXW, IncoTerm.FCA):
+    if inco_term and inco_term != IncoTerm.DDP:
         return order.channel.default_country.code
     from ..order.utils import get_order_country
 
