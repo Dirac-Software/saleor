@@ -170,7 +170,7 @@ def get_product_code_for_line(line: "OrderLine", attribute_slug: str) -> str | N
         .filter(value__attribute__slug=attribute_slug)
         .first()
     )
-    return av.value.value if av else None
+    return av.value.name if av else None
 
 
 def serialize_variant_attributes(variant: "ProductVariant") -> list[dict]:

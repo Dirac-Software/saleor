@@ -688,15 +688,6 @@ class BasePlugin:
     # Webhook-related functionality will be moved from the plugin to core modules.
     fulfillment_canceled: Callable[["Fulfillment", Any], Any]
 
-    # Trigger when fulfillment is approved.
-    #
-    # Overwrite this method if you need to trigger specific logic when a fulfillment is
-    # approved.
-    #
-    # Note: This method is deprecated and will be removed in a future release.
-    # Webhook-related functionality will be moved from the plugin to core modules.
-    fulfillment_approved: Callable[["Fulfillment", Any], Any]
-
     # Trigger when fulfillment metadata is updated.
     #
     # Overwrite this method if you need to trigger specific logic when a fulfillment
@@ -1934,6 +1925,9 @@ class BasePlugin:
         return NotImplemented
 
     def xero_fulfillment_created(self, fulfillment, previous_value: None) -> None:
+        return NotImplemented
+
+    def xero_fulfillment_approved(self, fulfillment, previous_value: None) -> None:
         return NotImplemented
 
     def xero_check_prepayment_status(

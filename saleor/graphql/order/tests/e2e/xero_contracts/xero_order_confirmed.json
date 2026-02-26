@@ -1,7 +1,7 @@
 {
   "order": {
-    "id": "T3JkZXI6ZTBkNDFjODgtYTljNi00ZGY4LTk3ZTItZjk3N2MwMDA0YmJi",
-    "number": "2013",
+    "id": "T3JkZXI6ZjlhOWIxZWMtNjc2NS00YjcxLThiNjQtYWE3Mzk0NjQ0NThm",
+    "number": "2052",
     "userEmail": "fixture@example.com",
     "xeroBankAccountCode": "090",
     "billingAddress": {
@@ -34,10 +34,10 @@
     "shippingXeroTaxCode": "RRINPUT",
     "lines": [
       {
-        "orderLineId": "6bd07828-2df6-47dc-ba49-3ee9e48e143c",
+        "orderLineId": "a29a4694-d699-4c12-aeb8-a82450019cb9",
         "quantity": 5,
         "productSku": "FIXTURE-001",
-        "productCode": null,
+        "productCode": "FIXTURE-CODE",
         "xeroTaxCode": "RROUTPUT",
         "unitPriceGross": {
           "amount": 60.0,

@@ -5,18 +5,16 @@ from django.core.exceptions import ValidationError
 
 from ....account.models import User
 from ....core.exceptions import InsufficientStock
-from ....order import FulfillmentStatus, PickStatus
+from ....order import FulfillmentStatus, OrderOrigin, PickStatus
 from ....order.actions import approve_fulfillment
 from ....order.error_codes import OrderErrorCode
 from ....permission.enums import OrderPermissions
-from ....webhook.event_types import WebhookEventAsyncType
 from ...app.dataloaders import get_app_promise
 from ...core import ResolveInfo
 from ...core.context import SyncWebhookControlContext
 from ...core.doc_category import DOC_CATEGORY_ORDERS
 from ...core.mutations import BaseMutation
 from ...core.types import OrderError
-from ...core.utils import WebhookEventInfo
 from ...plugins.dataloaders import get_plugin_manager_promise
 from ...site.dataloaders import get_site_promise
 from ..types import Fulfillment, Order
@@ -43,12 +41,7 @@ class FulfillmentApprove(BaseMutation):
         permissions = (OrderPermissions.MANAGE_ORDERS,)
         error_type_class = OrderError
         error_type_field = "order_errors"
-        webhook_events_info = [
-            WebhookEventInfo(
-                type=WebhookEventAsyncType.FULFILLMENT_APPROVED,
-                description="Fulfillment is approved.",
-            ),
-        ]
+        webhook_events_info = []
 
     @classmethod
     def clean_input(cls, info: ResolveInfo, fulfillment):
@@ -79,21 +72,17 @@ class FulfillmentApprove(BaseMutation):
             )
 
         OrderFulfill.check_lines_for_preorder([line.order_line for line in fulfillment])
-        site = get_site_promise(info.context).get()
 
-        if not site.settings.fulfillment_allow_unpaid:
-            from ....order.proforma import calculate_fulfillment_total
-
-            order = fulfillment.order
-            prior_total = sum(
-                calculate_fulfillment_total(f)
-                for f in order.fulfillments.exclude(pk=fulfillment.pk)
-                if f.status != FulfillmentStatus.CANCELED
-            )
-            current_total = calculate_fulfillment_total(fulfillment)
-            if order.total_deposit_paid < prior_total + current_total:
+        order = fulfillment.order
+        if order.origin != OrderOrigin.CHECKOUT:
+            if (
+                not fulfillment.xero_proforma_prepayment_id
+                or not order.payments.filter(
+                    psp_reference=fulfillment.xero_proforma_prepayment_id
+                ).exists()
+            ):
                 raise ValidationError(
-                    "Cannot fulfill: cumulative payments do not cover fulfillment totals.",
+                    "Cannot fulfill: prepayment has not been paid.",
                     code=OrderErrorCode.CANNOT_FULFILL_UNPAID_ORDER.value,
                 )
 

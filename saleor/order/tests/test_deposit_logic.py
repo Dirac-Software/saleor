@@ -172,7 +172,7 @@ def test_deposit_threshold_met_when_no_percentage(order_with_lines):
         (True, "completed", True, True, "waiting_for_approval", True),
         (True, "not_started", True, True, "waiting_for_approval", False),
         (True, "completed", False, True, "waiting_for_approval", False),
-        (True, "completed", True, False, "waiting_for_approval", False),
+        (True, "completed", True, False, "waiting_for_approval", True),
         (True, "completed", True, True, "fulfilled", False),
         (False, None, True, True, "waiting_for_approval", False),
     ],

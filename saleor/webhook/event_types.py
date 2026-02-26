@@ -850,6 +850,7 @@ class WebhookEventSyncType:
     XERO_LIST_TAX_CODES = "xero_list_tax_codes"
     XERO_ORDER_CONFIRMED = "xero_order_confirmed"
     XERO_FULFILLMENT_CREATED = "xero_fulfillment_created"
+    XERO_FULFILLMENT_APPROVED = "xero_fulfillment_approved"
     XERO_CHECK_PREPAYMENT_STATUS = "xero_check_prepayment_status"
 
     EVENT_MAP: dict[str, dict[str, Any]] = {
@@ -963,6 +964,10 @@ class WebhookEventSyncType:
         },
         XERO_FULFILLMENT_CREATED: {
             "name": "Xero: fulfillment created — create quote and proforma prepayment.",
+            "permission": OrderPermissions.MANAGE_ORDERS,
+        },
+        XERO_FULFILLMENT_APPROVED: {
+            "name": "Xero: fulfillment approved — create final invoice and reconcile prepayments.",
             "permission": OrderPermissions.MANAGE_ORDERS,
         },
         XERO_CHECK_PREPAYMENT_STATUS: {

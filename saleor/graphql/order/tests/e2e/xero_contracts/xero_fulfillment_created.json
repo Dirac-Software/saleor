@@ -1,11 +1,11 @@
 {
   "fulfillment": {
-    "id": "RnVsZmlsbG1lbnQ6MTg=",
+    "id": "RnVsZmlsbG1lbnQ6MzA=",
     "privateMetadata": []
   },
   "order": {
-    "id": "T3JkZXI6ZDRjOTcyYWQtOTkyYS00ZGQ4LTkzZmEtZjZhMGZjYWZlZTNh",
-    "number": "2014",
+    "id": "T3JkZXI6YjVkM2RhN2MtYzk1Ni00YmZkLWFlZDgtM2YzMjk3ODI3ZGY5",
+    "number": "2053",
     "userEmail": "fixture@example.com",
     "xeroBankAccountCode": "090",
     "billingAddress": {
@@ -49,12 +49,12 @@
     "shippingXeroTaxCode": "RRINPUT",
     "lines": [
       {
-        "orderLineId": "9b72a900-8ae5-4bb5-8c17-886d09a41246",
+        "orderLineId": "b83c7ce7-7d94-40bc-ab08-888f0dd39395",
         "quantity": 10,
         "productName": "Fixture Widget",
         "variantName": "Standard",
         "productSku": "FIXTURE-001",
-        "productCode": null,
+        "productCode": "FIXTURE-CODE",
         "xeroTaxCode": "RROUTPUT",
         "unitPriceNet": {
           "amount": 25.0,

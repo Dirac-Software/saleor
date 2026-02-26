@@ -2,6 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ....invoice import InvoiceType
+from ....invoice.models import Invoice
 from ....order import OrderOrigin
 from ....plugins.manager import get_plugins_manager
 from ....webhook.event_types import WebhookEventSyncType
@@ -14,6 +16,7 @@ from ....webhook.event_types import WebhookEventSyncType
     [
         ("xero_order_confirmed", WebhookEventSyncType.XERO_ORDER_CONFIRMED),
         ("xero_fulfillment_created", WebhookEventSyncType.XERO_FULFILLMENT_CREATED),
+        ("xero_fulfillment_approved", WebhookEventSyncType.XERO_FULFILLMENT_APPROVED),
     ],
 )
 def test_xero_sync_webhooks_skip_checkout_orders(
@@ -30,8 +33,10 @@ def test_xero_sync_webhooks_skip_checkout_orders(
     # when
     if method == "xero_order_confirmed":
         manager.xero_order_confirmed(order)
-    else:
+    elif method == "xero_fulfillment_created":
         manager.xero_fulfillment_created(fulfillment)
+    else:
+        manager.xero_fulfillment_approved(fulfillment)
 
     # then - get_webhooks_for_event never called; Xero sync skipped entirely
     mock_get_webhooks.assert_not_called()
@@ -182,3 +187,166 @@ def test_xero_list_tax_codes_no_webhooks_returns_empty(mock_get_webhooks, settin
 
     # then
     assert result == []
+
+
+@pytest.mark.django_db
+@patch("saleor.plugins.webhook.plugin.get_webhooks_for_event", return_value=[])
+def test_xero_fulfillment_approved_proceeds_for_draft_order(
+    mock_get_webhooks, fulfillment, settings
+):
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager(allow_replica=False)
+
+    # given
+    order = fulfillment.order
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
+
+    # when
+    manager.xero_fulfillment_approved(fulfillment)
+
+    # then - webhook lookup was attempted
+    mock_get_webhooks.assert_called_once_with(
+        WebhookEventSyncType.XERO_FULFILLMENT_APPROVED
+    )
+
+
+@pytest.mark.django_db
+@patch("saleor.plugins.webhook.plugin.trigger_webhook_sync")
+@patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+def test_xero_fulfillment_approved_creates_final_invoice(
+    mock_get_webhooks, mock_trigger, fulfillment, settings
+):
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager(allow_replica=False)
+
+    # given
+    order = fulfillment.order
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
+
+    fake_webhook = MagicMock()
+    mock_get_webhooks.return_value = [fake_webhook]
+    mock_trigger.return_value = {
+        "invoicePdfUrl": "https://example.com/invoice.pdf",
+        "xeroInvoiceId": "XERO-INV-001",
+        "xeroInvoiceNumber": "INV-0042",
+    }
+
+    # when
+    manager.xero_fulfillment_approved(fulfillment)
+
+    # then - FINAL invoice created with returned data
+    invoice = Invoice.objects.get(fulfillment=fulfillment, type=InvoiceType.FINAL)
+    assert invoice.external_url == "https://example.com/invoice.pdf"
+    assert invoice.xero_invoice_id == "XERO-INV-001"
+    assert invoice.number == "INV-0042"
+    assert invoice.order == order
+
+
+@pytest.mark.django_db
+@patch("saleor.plugins.webhook.plugin.trigger_webhook_sync")
+@patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+def test_xero_fulfillment_approved_idempotent_on_repeat_call(
+    mock_get_webhooks, mock_trigger, fulfillment, settings
+):
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager(allow_replica=False)
+
+    # given
+    order = fulfillment.order
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
+
+    fake_webhook = MagicMock()
+    mock_get_webhooks.return_value = [fake_webhook]
+    mock_trigger.return_value = {
+        "invoicePdfUrl": "https://example.com/invoice-v2.pdf",
+        "xeroInvoiceId": "XERO-INV-001",
+        "xeroInvoiceNumber": "INV-0042",
+    }
+
+    # pre-create the FINAL invoice (simulates prior approval)
+    Invoice.objects.create(
+        fulfillment=fulfillment,
+        order=order,
+        type=InvoiceType.FINAL,
+        external_url="https://example.com/invoice-v1.pdf",
+        xero_invoice_id="XERO-INV-001",
+        number="INV-0042",
+    )
+
+    # when - second approval call (idempotent update)
+    manager.xero_fulfillment_approved(fulfillment)
+
+    # then - still only one FINAL invoice, URL updated
+    assert (
+        Invoice.objects.filter(fulfillment=fulfillment, type=InvoiceType.FINAL).count()
+        == 1
+    )
+    invoice = Invoice.objects.get(fulfillment=fulfillment, type=InvoiceType.FINAL)
+    assert invoice.external_url == "https://example.com/invoice-v2.pdf"
+
+
+@pytest.mark.django_db
+@patch("saleor.plugins.webhook.plugin.trigger_webhook_sync")
+@patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+def test_xero_fulfillment_approved_handles_none_response(
+    mock_get_webhooks, mock_trigger, fulfillment, settings
+):
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager(allow_replica=False)
+
+    # given
+    order = fulfillment.order
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
+
+    fake_webhook = MagicMock()
+    mock_get_webhooks.return_value = [fake_webhook]
+    mock_trigger.return_value = None
+
+    # when
+    manager.xero_fulfillment_approved(fulfillment)
+
+    # then - no invoice created when webhook returns None
+    assert not Invoice.objects.filter(
+        fulfillment=fulfillment, type=InvoiceType.FINAL
+    ).exists()
+
+
+@pytest.mark.django_db
+@patch("saleor.plugins.webhook.plugin.trigger_webhook_sync")
+@patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+def test_xero_fulfillment_created_stores_quote_pdf_on_proforma_invoice(
+    mock_get_webhooks, mock_trigger, fulfillment, settings
+):
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager(allow_replica=False)
+
+    # given
+    order = fulfillment.order
+    order.origin = OrderOrigin.DRAFT
+    order.save(update_fields=["origin"])
+
+    proforma_inv = Invoice.objects.create(
+        fulfillment=fulfillment,
+        order=order,
+        type=InvoiceType.PROFORMA,
+        number="Q-001",
+    )
+
+    fake_webhook = MagicMock()
+    mock_get_webhooks.return_value = [fake_webhook]
+    mock_trigger.return_value = {
+        "xeroQuoteId": "QUOTE-123",
+        "xeroQuoteNumber": "Q-001",
+        "quotePdfUrl": "https://example.com/quote.pdf",
+    }
+
+    # when
+    manager.xero_fulfillment_created(fulfillment)
+
+    # then - proforma invoice external_url updated with PDF link
+    proforma_inv.refresh_from_db()
+    assert proforma_inv.external_url == "https://example.com/quote.pdf"

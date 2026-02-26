@@ -1,11 +1,31 @@
+import logging
+from email.headerregistry import Address
+
+import pybars
+from django.core.mail import EmailMultiAlternatives
+from django.core.mail.backends.smtp import EmailBackend
+
 from ...account import events as account_events
 from ...celeryconf import app
 from ...core.db.connection import allow_writer
+from ...core.http_client import HTTPClient
 from ...giftcard import events as gift_card_events
 from ...graphql.core.utils import from_global_id_or_none
 from ...invoice import events as invoice_events
 from ...order import events as order_events
-from ..email_common import EmailConfig, send_email
+from ..email_common import (
+    DEFAULT_EMAIL_TIMEOUT,
+    EmailConfig,
+    compare,
+    format_address,
+    format_datetime,
+    get_plain_text_message_for_email,
+    get_product_image_thumbnail,
+    price,
+    send_email,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @app.task(compression="zlib")
@@ -192,13 +212,65 @@ def send_fulfillment_confirmation_email_task(
     recipient_email, payload, config, subject, template
 ):
     email_config = EmailConfig(**config)
-    send_email(
-        config=email_config,
-        recipient_list=[recipient_email],
-        context=payload,
-        subject=subject,
-        template_str=template,
+
+    compiler = pybars.Compiler()
+    helpers = {
+        "format_address": format_address,
+        "price": price,
+        "format_datetime": format_datetime,
+        "get_product_image_thumbnail": get_product_image_thumbnail,
+        "compare": compare,
+    }
+    html_message = str(compiler.compile(template)(payload, helpers=helpers))
+    subject_message = str(compiler.compile(subject)(payload, helpers))
+    plain_text = get_plain_text_message_for_email(html_message)
+
+    from_email = str(
+        Address(email_config.sender_name or "", addr_spec=email_config.sender_address)
     )
+    backend = EmailBackend(
+        host=email_config.host,
+        port=email_config.port,
+        username=email_config.username,
+        password=email_config.password,
+        use_ssl=email_config.use_ssl,
+        use_tls=email_config.use_tls,
+        timeout=DEFAULT_EMAIL_TIMEOUT,
+    )
+
+    email = EmailMultiAlternatives(
+        subject=subject_message,
+        body=plain_text,
+        from_email=from_email,
+        to=[recipient_email],
+        connection=backend,
+    )
+    email.attach_alternative(html_message, "text/html")
+
+    invoice_id = payload.get("invoice_id")
+    if invoice_id:
+        try:
+            from ...invoice.models import Invoice
+
+            invoice = Invoice.objects.get(pk=invoice_id)
+            invoice_number = payload.get("invoice_number")
+            filename = (
+                f"invoice-{invoice_number}.pdf" if invoice_number else "invoice.pdf"
+            )
+            if invoice.invoice_file:
+                pdf_bytes = invoice.invoice_file.read()
+                email.attach(filename, pdf_bytes, "application/pdf")
+            elif invoice.external_url:
+                response = HTTPClient.send_request("GET", invoice.external_url)
+                response.raise_for_status()
+                email.attach(filename, response.content, "application/pdf")
+        except Exception:
+            logger.warning(
+                "Failed to attach invoice PDF for invoice %s", invoice_id, exc_info=True
+            )
+
+    email.send()
+
     with allow_writer():
         order_events.event_fulfillment_confirmed_notification(
             order_id=from_global_id_or_none(payload["order"]["id"]),
@@ -304,6 +376,78 @@ def send_order_confirmed_email_task(
         order_events.event_order_confirmed_notification(
             order_id=from_global_id_or_none(payload.get("order", {}).get("id")),
             user_id=from_global_id_or_none(payload.get("requester_user_id")),
+            app_id=from_global_id_or_none(payload["requester_app_id"]),
+            customer_email=recipient_email,
+        )
+
+
+@app.task(compression="zlib")
+def send_proforma_fulfillment_confirmation_email_task(
+    recipient_email, payload, config, subject, template, quote_pdf_url, quote_number
+):
+    email_config = EmailConfig(**config)
+
+    compiler = pybars.Compiler()
+    helpers = {
+        "format_address": format_address,
+        "price": price,
+        "format_datetime": format_datetime,
+        "get_product_image_thumbnail": get_product_image_thumbnail,
+        "compare": compare,
+    }
+    html_message = str(compiler.compile(template)(payload, helpers=helpers))
+    subject_message = str(compiler.compile(subject)(payload, helpers))
+    plain_text = get_plain_text_message_for_email(html_message)
+
+    from_email = str(
+        Address(email_config.sender_name or "", addr_spec=email_config.sender_address)
+    )
+    backend = EmailBackend(
+        host=email_config.host,
+        port=email_config.port,
+        username=email_config.username,
+        password=email_config.password,
+        use_ssl=email_config.use_ssl,
+        use_tls=email_config.use_tls,
+        timeout=DEFAULT_EMAIL_TIMEOUT,
+    )
+
+    email = EmailMultiAlternatives(
+        subject=subject_message,
+        body=plain_text,
+        from_email=from_email,
+        to=[recipient_email],
+        connection=backend,
+    )
+    email.attach_alternative(html_message, "text/html")
+
+    if quote_pdf_url:
+        try:
+            logger.debug("Fetching proforma PDF from %s", quote_pdf_url)
+            response = HTTPClient.send_request("GET", quote_pdf_url)
+            response.raise_for_status()
+            pdf_bytes = response.content
+            logger.debug(
+                "Fetched proforma PDF: %d bytes (status %s)",
+                len(pdf_bytes),
+                response.status_code,
+            )
+            filename = f"quote-{quote_number}.pdf" if quote_number else "proforma.pdf"
+            email.attach(filename, pdf_bytes, "application/pdf")
+            logger.debug("Attached PDF as %s", filename)
+        except Exception:
+            logger.warning(
+                "Failed to fetch proforma PDF from %s", quote_pdf_url, exc_info=True
+            )
+    else:
+        logger.debug("No quote_pdf_url set, skipping PDF attachment")
+
+    email.send()
+
+    with allow_writer():
+        order_events.event_fulfillment_confirmed_notification(
+            order_id=from_global_id_or_none(payload["order"]["id"]),
+            user_id=from_global_id_or_none(payload["requester_user_id"]),
             app_id=from_global_id_or_none(payload["requester_app_id"]),
             customer_email=recipient_email,
         )

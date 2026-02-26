@@ -1321,20 +1321,6 @@ class PluginsManager(PaymentInterface):
 
     # Note: this method is deprecated and will be removed in a future release.
     # Webhook-related functionality will be moved from plugin to core modules.
-    def fulfillment_approved(
-        self, fulfillment: "Fulfillment", notify_customer: bool | None = True
-    ):
-        default_value = None
-        return self.__run_method_on_plugins(
-            "fulfillment_approved",
-            default_value,
-            fulfillment,
-            channel_slug=fulfillment.order.channel.slug,
-            notify_customer=notify_customer,
-        )
-
-    # Note: this method is deprecated and will be removed in a future release.
-    # Webhook-related functionality will be moved from plugin to core modules.
     def fulfillment_metadata_updated(self, fulfillment: "Fulfillment"):
         default_value = None
         return self.__run_method_on_plugins(
@@ -2978,6 +2964,11 @@ class PluginsManager(PaymentInterface):
     def xero_fulfillment_created(self, fulfillment) -> None:
         self.__run_method_on_plugins(
             "xero_fulfillment_created", None, fulfillment, channel_slug=None
+        )
+
+    def xero_fulfillment_approved(self, fulfillment) -> None:
+        self.__run_method_on_plugins(
+            "xero_fulfillment_approved", None, fulfillment, channel_slug=None
         )
 
     def xero_check_prepayment_status(self, prepayment_id: str) -> dict | None:

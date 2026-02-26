@@ -32,6 +32,7 @@ from ..notify_events import (
     send_order_confirmed,
     send_order_refund,
     send_payment_confirmation,
+    send_proforma_fulfillment_confirmation,
 )
 from ..plugin import get_user_event_map
 
@@ -55,6 +56,7 @@ def test_event_map():
         NotifyEventType.ORDER_REFUND_CONFIRMATION: send_order_refund,
         NotifyEventType.ORDER_CONFIRMED: send_order_confirmed,
         NotifyEventType.SEND_GIFT_CARD: send_gift_card,
+        NotifyEventType.ORDER_PROFORMA_CONFIRMATION: send_proforma_fulfillment_confirmation,
     }
 
 

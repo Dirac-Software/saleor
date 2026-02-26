@@ -37,6 +37,28 @@ def calculate_deposit_allocation(order, fulfillment_total):
     return deposit_credit
 
 
+def calculate_proportional_shipping(
+    shipping_amount, fulfillment_lines_total, order_lines_total
+):
+    """Calculate this fulfillment's proportional share of order shipping cost.
+
+    Splits shipping by the fulfillment's share of the total order line value so that
+    shipping is charged exactly once across all partial fulfillments.
+
+    Args:
+        shipping_amount: Full order shipping cost (gross or net)
+        fulfillment_lines_total: Gross value of lines in this fulfillment
+        order_lines_total: Gross value of all order lines
+
+    Returns:
+        Decimal: Proportional shipping amount (unrounded)
+
+    """
+    if not order_lines_total:
+        return Decimal(0)
+    return shipping_amount * fulfillment_lines_total / order_lines_total
+
+
 def calculate_fulfillment_total(fulfillment):
     """Calculate total value of a fulfillment.
 

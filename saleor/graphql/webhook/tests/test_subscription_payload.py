@@ -662,6 +662,83 @@ def test_xero_fulfillment_created_calculated_amounts_serializes_as_decimal(
         assert line["unitPriceNet"]["amount"] == pytest.approx(80.0)
 
 
+def test_xero_fulfillment_created_partial_fulfillment_splits_shipping_proportionally(
+    order_with_lines, app
+):
+    # given - partial fulfillment covering only the first order line
+    order = order_with_lines
+    order.shipping_price_gross_amount = Decimal("12.00")
+    order.shipping_price_net_amount = Decimal("10.00")
+    order.shipping_xero_tax_code = "OUTPUT2"
+    order.currency = "GBP"
+    order.save(
+        update_fields=[
+            "shipping_price_gross_amount",
+            "shipping_price_net_amount",
+            "shipping_xero_tax_code",
+            "currency",
+        ]
+    )
+
+    all_lines = list(order.lines.all())
+    for line in all_lines:
+        line.unit_price_gross_amount = Decimal("50.00")
+        line.unit_price_net_amount = Decimal("40.00")
+        line.quantity = 1
+        line.save(
+            update_fields=[
+                "unit_price_gross_amount",
+                "unit_price_net_amount",
+                "quantity",
+            ]
+        )
+
+    # Only the first line is in this fulfillment
+    partial = order.fulfillments.create()
+    partial.lines.create(order_line=all_lines[0], quantity=1)
+    partial.deposit_allocated_amount = Decimal("5.00")
+    partial.save(update_fields=["deposit_allocated_amount"])
+
+    request = initialize_request(app=app)
+
+    # when
+    payload = generate_payload_from_subscription(
+        event_type=WebhookEventSyncType.XERO_FULFILLMENT_CREATED,
+        subscribable_object=partial,
+        subscription_query=XERO_FULFILLMENT_CREATED_QUERY,
+        request=request,
+    )
+
+    # then
+    assert "errors" not in payload
+    amounts = payload["calculatedAmounts"]
+
+    n_lines = len(all_lines)
+    order_lines_total = Decimal("50.00") * n_lines  # all lines
+    fulfillment_lines_total = Decimal("50.00")  # one line
+
+    expected_shipping_gross = (
+        Decimal("12.00") * fulfillment_lines_total / order_lines_total
+    ).quantize(Decimal("0.01"))
+    expected_shipping_net = (
+        Decimal("10.00") * fulfillment_lines_total / order_lines_total
+    ).quantize(Decimal("0.01"))
+
+    assert amounts["shippingCost"]["amount"] == pytest.approx(
+        float(expected_shipping_gross)
+    )
+    assert amounts["shippingNet"]["amount"] == pytest.approx(
+        float(expected_shipping_net)
+    )
+    # Shipping must be strictly less than the full amount for a partial fulfillment
+    assert amounts["shippingCost"]["amount"] < 12.0
+
+    expected_proforma = float(
+        fulfillment_lines_total + expected_shipping_gross - Decimal("5.00")
+    )
+    assert amounts["proformaAmount"]["amount"] == pytest.approx(expected_proforma)
+
+
 def test_xero_fulfillment_created_line_amounts_use_stored_values(fulfillment, app):
     # given - set known stored amounts on a fulfillment line
     order = fulfillment.order
