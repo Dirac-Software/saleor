@@ -7,7 +7,7 @@ from django.conf import settings
 from prices import TaxedMoney
 
 from ...core.prices import quantize_price
-from ...core.taxes import zero_taxed_money
+from ...core.taxes import TaxDataError, zero_taxed_money
 from ...order import base_calculations
 from ..models import TaxClassCountryRate
 from ..utils import (
@@ -62,16 +62,19 @@ def update_order_prices_with_flat_rates(
     )
 
     # Calculate order line taxes.
-    _, undiscounted_subtotal = update_taxes_for_order_lines(
-        order,
-        lines,
-        country_code,
-        default_tax_rate,
-        prices_entered_with_tax,
-        export_tax_class=export_tax_class,
-        stale_export_class_pk=stale_export_class_pk,
-        database_connection_name=database_connection_name,
-    )
+    try:
+        _, undiscounted_subtotal = update_taxes_for_order_lines(
+            order,
+            lines,
+            country_code,
+            default_tax_rate,
+            prices_entered_with_tax,
+            export_tax_class=export_tax_class,
+            stale_export_class_pk=stale_export_class_pk,
+            database_connection_name=database_connection_name,
+        )
+    except ValueError as e:
+        raise TaxDataError(str(e)) from e
 
     # Calculate order shipping.
     if export_tax_class:

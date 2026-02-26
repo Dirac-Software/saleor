@@ -308,7 +308,9 @@ class Order(ModelWithMetadata, ModelWithExternalReference):
 
     inco_term = models.CharField(
         max_length=3,
-        default=IncoTerm.DDP,
+        null=True,
+        blank=True,
+        default=None,
         choices=IncoTerm.CHOICES,
     )
 

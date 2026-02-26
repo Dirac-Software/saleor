@@ -9,6 +9,7 @@ from uuid import UUID
 import graphene
 from django.conf import settings
 from django.contrib.sites.models import Site
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F
 from django.utils.timezone import now
@@ -55,6 +56,7 @@ from . import (
     utils,
 )
 from .calculations import fetch_order_prices_if_expired
+from .error_codes import OrderErrorCode
 from .events import (
     draft_order_created_from_replace_event,
     fulfillment_refunded_event,
@@ -700,7 +702,7 @@ def order_fulfilled(
 
         if order_fulfilled or manually_approved:
             for fulfillment in fulfillments:
-                call_event(manager.xero_fulfillment_approved, fulfillment)
+                manager.xero_fulfillment_approved(fulfillment)
 
         call_order_events(
             manager,
@@ -1038,6 +1040,17 @@ def approve_fulfillment(
             notify_customer,
             manually_approved=True,
         )
+        if order.origin != OrderOrigin.CHECKOUT:
+            from ..invoice import InvoiceType
+            from ..invoice.models import Invoice
+
+            if not Invoice.objects.filter(
+                fulfillment=fulfillment, type=InvoiceType.FINAL
+            ).exists():
+                raise ValidationError(
+                    "Xero sync failed: could not create final invoice.",
+                    code=OrderErrorCode.XERO_SYNC_FAILED.value,
+                )
         call_event(manager.fulfillment_fulfilled, fulfillment)
 
     return fulfillment
@@ -1528,7 +1541,14 @@ def create_fulfillments(
                 fulfillment.deposit_allocated_amount = deposit_credit
                 fulfillment.save(update_fields=["deposit_allocated_amount"])
                 generate_proforma_invoice(fulfillment, manager)
-                call_event(manager.xero_fulfillment_created, fulfillment)
+                manager.xero_fulfillment_created(fulfillment)
+                if order.origin != OrderOrigin.CHECKOUT:
+                    fulfillment.refresh_from_db(fields=["xero_proforma_prepayment_id"])
+                    if not fulfillment.xero_proforma_prepayment_id:
+                        raise ValidationError(
+                            "Xero sync failed: could not create proforma prepayment.",
+                            code=OrderErrorCode.XERO_SYNC_FAILED.value,
+                        )
                 transaction.on_commit(
                     partial(
                         send_proforma_confirmation_to_customer,
