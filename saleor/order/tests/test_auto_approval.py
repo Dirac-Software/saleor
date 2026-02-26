@@ -227,6 +227,9 @@ def test_auto_approve_when_proforma_paid(
     shipment_for_fulfillment,
     staff_user,
 ):
+    from saleor.invoice import InvoiceType
+    from saleor.invoice.models import Invoice
+
     fulfillment = full_fulfillment_awaiting_approval
     order = fulfillment.order
 
@@ -238,6 +241,7 @@ def test_auto_approve_when_proforma_paid(
     fulfillment.save(update_fields=["xero_proforma_prepayment_id", "shipment"])
 
     _create_xero_payment(order, psp_reference="PREPAY-001")
+    Invoice.objects.create(fulfillment=fulfillment, type=InvoiceType.FINAL)
 
     pick = auto_create_pick_for_fulfillment(fulfillment, user=staff_user)
     start_pick(pick, user=staff_user)

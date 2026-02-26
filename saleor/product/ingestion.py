@@ -486,7 +486,8 @@ def get_products_by_code_and_brand(
         )
 
     matching_codes = AttributeValue.objects.filter(
-        attribute=product_code_attr, name__in=product_codes
+        attribute=product_code_attr,
+        name__iregex=r"^(" + "|".join(map(re.escape, product_codes)) + r")$",
     ).prefetch_related("productvalueassignment__product")
 
     # Collect all (product, code_name) pairs via the prefetch
@@ -509,7 +510,7 @@ def get_products_by_code_and_brand(
     }
 
     return {
-        (code_name, brand_map[product.pk]): product
+        (code_name.lower(), brand_map[product.pk].lower()): product
         for product, code_name in product_code_pairs
         if product.pk in brand_map
     }

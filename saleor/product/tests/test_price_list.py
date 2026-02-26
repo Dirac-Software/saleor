@@ -362,8 +362,8 @@ def test_process_task(db, warehouse, hk_excel):
     assert price_list.processing_failed_at is None
     assert PriceListItem.objects.filter(price_list=price_list).count() == len(HK_ROWS)
 
-    is1637 = PriceListItem.objects.get(price_list=price_list, product_code="IS1637")
-    assert is1637.brand == "Adidas"
+    is1637 = PriceListItem.objects.get(price_list=price_list, product_code="is1637")
+    assert is1637.brand == "adidas"
     assert is1637.description == "TIRO24 C TRPNTW"
     assert is1637.category == "Apparel"
     assert is1637.rrp == Decimal(40)
@@ -374,10 +374,10 @@ def test_process_task(db, warehouse, hk_excel):
     assert is1637.validation_errors == []
     assert is1637.sizes_and_qty == {"XS": 20, "M": 50, "L": 50, "XL": 50, "3XL": 20}
 
-    h59015 = PriceListItem.objects.get(price_list=price_list, product_code="H59015")
+    h59015 = PriceListItem.objects.get(price_list=price_list, product_code="h59015")
     assert h59015.sizes_and_qty == {"32": 58, "34": 34, "36": 23, "38": 11, "40": 12}
 
-    hk5015 = PriceListItem.objects.get(price_list=price_list, product_code="HK5015")
+    hk5015 = PriceListItem.objects.get(price_list=price_list, product_code="hk5015")
     assert hk5015.sizes_and_qty == {
         "XS": 25,
         "S": 14,
@@ -884,12 +884,9 @@ def test_replace_respects_allocations(db, warehouse):
 # ---------------------------------------------------------------------------
 
 
-def test_activate_auto_replaces_existing_active_list(db, warehouse):
-    """Activating a new list when another is active dispatches replace task instead."""
-    from unittest.mock import patch
-
+def test_activate_proceeds_directly_when_another_list_is_active(db, warehouse):
+    """Activating a new list when another is active proceeds with direct activation."""
     from saleor.product import PriceListStatus
-    from saleor.product.tasks import replace_price_list_task
 
     product, _, _ = _make_product_with_variant_and_stock(warehouse)
 
@@ -899,13 +896,12 @@ def test_activate_auto_replaces_existing_active_list(db, warehouse):
 
     new_pl, _ = _make_processed_price_list(warehouse, product=product)
 
-    with patch.object(replace_price_list_task, "delay") as mock_delay:
-        activate_price_list_task(new_pl.pk)
-
-    mock_delay.assert_called_once_with(old_pl.pk, new_pl.pk)
+    activate_price_list_task(new_pl.pk)
 
     new_pl.refresh_from_db()
-    assert new_pl.status == PriceListStatus.INACTIVE
+    assert new_pl.status == PriceListStatus.ACTIVE
+    old_pl.refresh_from_db()
+    assert old_pl.status == PriceListStatus.ACTIVE
 
 
 def test_activate_no_auto_replace_when_no_active_list(db, warehouse):
