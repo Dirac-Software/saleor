@@ -74,6 +74,8 @@ class PurchaseOrder(models.Model):
         default=PurchaseOrderStatus.DRAFT,
     )
 
+    auto_reallocate_variants = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

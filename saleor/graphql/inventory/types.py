@@ -43,6 +43,11 @@ class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
         description="Items in this purchase order.",
     )
 
+    auto_reallocate_variants = graphene.Boolean(
+        required=True,
+        description="Whether variants are automatically reallocated on receipt.",
+    )
+
     class Meta:
         description = "Represents a purchase order from a supplier."
         model = models.PurchaseOrder
@@ -186,6 +191,9 @@ class PurchaseOrderCreateInput(BaseInputObjectType):
         PurchaseOrderItemInput,
         required=True,
         description="Line items to order.",
+    )
+    auto_reallocate_variants = graphene.Boolean(
+        description="Whether variants are automatically reallocated on receipt. Defaults to True.",
     )
     metadata = NonNullList(
         MetadataInput,

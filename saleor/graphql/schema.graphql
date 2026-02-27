@@ -12516,6 +12516,9 @@ type PurchaseOrder implements Node {
 
   """Items in this purchase order."""
   items: [PurchaseOrderItem]!
+
+  """Whether variants are automatically reallocated on receipt."""
+  autoReallocateVariants: Boolean!
 }
 
 enum PurchaseOrderStatusEnum @doc(category: "Products") {
@@ -28694,6 +28697,11 @@ input PurchaseOrderCreateInput @doc(category: "Products") {
 
   """Line items to order."""
   items: [PurchaseOrderItemInput!]!
+
+  """
+  Whether variants are automatically reallocated on receipt. Defaults to True.
+  """
+  autoReallocateVariants: Boolean
 
   """Public metadata (e.g., supplier PO number)."""
   metadata: [MetadataInput!]
