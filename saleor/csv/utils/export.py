@@ -203,6 +203,7 @@ ORDER_LINE_HEADERS = [
     "Product Name",
     "Variant Name",
     "SKU",
+    "Product Code",
     "Quantity",
     "Unit Price Net",
     "Unit Price Gross",
@@ -236,7 +237,7 @@ def _format_address(address) -> str:
     return ", ".join(p for p in parts if p)
 
 
-def _build_order_rows(order) -> tuple[dict, list[dict]]:
+def _build_order_rows(order, product_code_slug: str) -> tuple[dict, list[dict]]:
     billing = _format_address(order.billing_address)
     shipping_addr = _format_address(order.shipping_address)
     customer_name = ""
@@ -270,12 +271,19 @@ def _build_order_rows(order) -> tuple[dict, list[dict]]:
         tax_class_country = ""
         if line.tax_class_country_rate_id and line.tax_class_country_rate:
             tax_class_country = str(line.tax_class_country_rate.country)
+        product_code = ""
+        if line.variant_id and line.variant:
+            for av in line.variant.product.attributevalues.all():
+                if av.value.attribute.slug == product_code_slug:
+                    product_code = av.value.name
+                    break
         line_rows.append(
             {
                 "Number": str(order.number),
                 "Product Name": line.product_name,
                 "Variant Name": line.variant_name,
                 "SKU": line.product_sku or "",
+                "Product Code": product_code,
                 "Quantity": line.quantity,
                 "Unit Price Net": str(line.unit_price_net_amount),
                 "Unit Price Gross": str(line.unit_price_gross_amount),
@@ -304,6 +312,7 @@ def _order_batch_queryset(batch_pks):
         .prefetch_related(
             "lines",
             "lines__tax_class_country_rate",
+            "lines__variant__product__attributevalues__value__attribute",
         )
         .order_by("pk")
     )
@@ -316,16 +325,24 @@ def export_orders(
     delimiter: str = ",",
 ):
     from ...graphql.order.filters import OrderFilter
+    from ...site.models import SiteSettings
 
     file_name = get_filename("order", file_type)
     queryset = get_queryset(Order, OrderFilter, scope)
+
+    site_settings = SiteSettings.objects.first()
+    product_code_slug = (
+        site_settings.invoice_product_code_attribute
+        if site_settings
+        else "product-code"
+    )
 
     if file_type == FileTypes.XLSX:
         summary_rows: list[dict] = []
         lines_rows: list[dict] = []
         for batch_pks in queryset_in_batches(queryset, BATCH_SIZE):
             for order in _order_batch_queryset(batch_pks):
-                summary, line_rows = _build_order_rows(order)
+                summary, line_rows = _build_order_rows(order, product_code_slug)
                 summary_rows.append(summary)
                 lines_rows.extend(line_rows)
 
@@ -336,7 +353,7 @@ def export_orders(
         temporary_file = create_file_with_headers(
             ORDER_EXPORT_HEADERS, delimiter, file_type
         )
-        export_orders_in_batches(queryset, delimiter, temporary_file)
+        export_orders_in_batches(queryset, delimiter, temporary_file, product_code_slug)
 
     save_csv_file_in_export_file(export_file, temporary_file, file_name)
     temporary_file.close()
@@ -364,11 +381,12 @@ def export_orders_in_batches(
     queryset: "QuerySet",
     delimiter: str,
     temporary_file: Any,
+    product_code_slug: str = "product-code",
 ):
     for batch_pks in queryset_in_batches(queryset, BATCH_SIZE):
         export_data: list[dict] = []
         for order in _order_batch_queryset(batch_pks):
-            summary, line_rows = _build_order_rows(order)
+            summary, line_rows = _build_order_rows(order, product_code_slug)
             if not line_rows:
                 export_data.append(
                     {**summary, **{h: "" for h in ORDER_LINE_HEADERS if h != "Number"}}
