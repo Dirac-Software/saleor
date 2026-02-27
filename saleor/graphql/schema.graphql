@@ -12533,6 +12533,7 @@ enum PurchaseOrderItemStatusEnum @doc(category: "Products") {
   CONFIRMED
   RECEIVED
   CANCELLED
+  REQUIRES_ATTENTION
 }
 
 """Represents a goods receipt for an inbound shipment."""
@@ -13101,6 +13102,7 @@ enum OrderErrorCode @doc(category: "Orders") {
   CANNOT_REFUND
   CANNOT_FULFILL_UNPAID_ORDER
   CANNOT_FULFILL_UNRECEIVED_STOCK
+  CANNOT_FULFILL_POI_REQUIRES_ATTENTION
   CAPTURE_INACTIVE_PAYMENT
   GIFT_CARD_LINE
   NOT_EDITABLE

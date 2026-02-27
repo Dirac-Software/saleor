@@ -21,12 +21,14 @@ class PurchaseOrderItemStatus:
     CONFIRMED = "confirmed"  # Ordered from supplier, in transit
     RECEIVED = "received"  # Physically arrived in the warehouse
     CANCELLED = "cancelled"  # Cancelled
+    REQUIRES_ATTENTION = "requires_attention"
 
     CHOICES = [
         (DRAFT, "Draft"),
         (CONFIRMED, "Confirmed"),
         (RECEIVED, "Received"),
         (CANCELLED, "Cancelled"),
+        (REQUIRES_ATTENTION, "requires_attention"),
     ]
 
     # Statuses that contribute to available inventory for allocation
