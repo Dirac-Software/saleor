@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ..core.exceptions import InsufficientStock, InsufficientStockData
-from ..warehouse.models import Allocation, Stock
+from ..warehouse.models import Allocation, AllocationSource, Stock
 from . import PurchaseOrderItemStatus
 from .events import (
     adjustment_created_event,
@@ -156,7 +156,7 @@ def confirm_purchase_order_item(poi: PurchaseOrderItem, user=None, app=None):
 
     quantity = poi.quantity_ordered
 
-    assert source.warehouse.is_owned
+    assert not source.warehouse.is_owned
     assert destination.warehouse.is_owned
     if quantity > source.quantity + source.quantity_allocated:
         raise ValueError(
@@ -321,7 +321,6 @@ def process_adjustment(
     """
     from ..order import OrderStatus
     from ..warehouse.management import can_confirm_order, deallocate_sources
-    from ..warehouse.models import AllocationSource
 
     if adjustment.processed_at is not None:
         raise AdjustmentAlreadyProcessed(adjustment)
@@ -561,6 +560,7 @@ def complete_receipt(receipt, user=None, manager=None):
 
     Finalizes the receiving process:
     1. Compares quantity_received vs quantity_ordered for each POI
+    2. Perform variant reallocation on all valid orders so as to minimize changes
     2. Creates PurchaseOrderItemAdjustments for discrepancies
     3. Processes adjustments (updates stock, handles allocations)
     4. Marks shipment as arrived
@@ -587,6 +587,10 @@ def complete_receipt(receipt, user=None, manager=None):
 
     Raises:
         ValueError: If receipt is not in progress
+
+    Reallocation:
+    1. Remove all orderlines where we have variant expected <= variant received.
+    2. Use Hamiltons method to reallocate surplus
 
     """
     from ..core.notify import AdminNotifyEvent, NotifyHandler
@@ -668,7 +672,7 @@ def complete_receipt(receipt, user=None, manager=None):
 
     # Transition PO status based on how many items are now received.
     # A PO can span multiple shipments, so RECEIVED only when the last one arrives.
-    po_ids = pois.values_list("order_id", flat=True).distinct()
+    po_ids = list({poi.order_id for poi in pois})
     for po in PurchaseOrder.objects.filter(pk__in=po_ids).select_for_update():
         unreceived = po.items.exclude(status=PurchaseOrderItemStatus.RECEIVED)
         if not unreceived.exists():

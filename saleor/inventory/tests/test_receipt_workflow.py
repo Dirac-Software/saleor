@@ -11,7 +11,12 @@ from ..exceptions import (
     ReceiptLineNotInProgress,
     ReceiptNotInProgress,
 )
-from ..models import PurchaseOrderItem, Receipt, ReceiptLine
+from ..models import (
+    PurchaseOrderItem,
+    PurchaseOrderRequestedAllocation,
+    Receipt,
+    ReceiptLine,
+)
 from ..stock_management import (
     complete_receipt,
     confirm_purchase_order_item,
@@ -458,7 +463,7 @@ def order_with_poi_and_receipt(
         defaults={"quantity": 100, "quantity_allocated": 0},
     )
 
-    Allocation.objects.create(
+    allocation = Allocation.objects.create(
         order_line=line,
         stock=source_stock,
         quantity_allocated=5,
@@ -474,6 +479,10 @@ def order_with_poi_and_receipt(
         currency="USD",
         shipment=shipment,
         country_of_origin="US",
+    )
+
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=poi.order, allocation=allocation
     )
 
     receipt = Receipt.objects.create(

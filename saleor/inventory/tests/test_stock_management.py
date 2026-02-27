@@ -9,7 +9,7 @@ from ...shipping import IncoTerm, ShipmentType
 from ...warehouse.models import Allocation, Stock
 from .. import PurchaseOrderItemStatus
 from ..exceptions import InvalidPurchaseOrderItemStatus
-from ..models import PurchaseOrderItem
+from ..models import PurchaseOrderItem, PurchaseOrderRequestedAllocation
 from ..stock_management import confirm_purchase_order_item
 
 
@@ -119,6 +119,9 @@ def test_confirm_poi_with_existing_allocations(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=allocation
     )
 
     # when - confirm POI
@@ -249,7 +252,9 @@ def test_confirm_poi_verifies_source_stock_state(
         quantity_allocated=5,
     )
 
-    Allocation.objects.create(order_line=order_line, stock=source, quantity_allocated=5)
+    allocation = Allocation.objects.create(
+        order_line=order_line, stock=source, quantity_allocated=5
+    )
 
     from ...shipping.models import Shipment
 
@@ -273,6 +278,9 @@ def test_confirm_poi_verifies_source_stock_state(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=allocation
     )
 
     # when - confirm POI
@@ -326,7 +334,7 @@ def test_confirm_poi_with_split_allocation(
         is_gift_card=False,
     )
 
-    Allocation.objects.create(
+    allocation = Allocation.objects.create(
         order_line=order_line, stock=source, quantity_allocated=10
     )
 
@@ -354,6 +362,9 @@ def test_confirm_poi_with_split_allocation(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=allocation
     )
 
     # when - confirm POI
@@ -500,6 +511,15 @@ def test_confirm_poi_with_multiple_allocations_fifo(
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
     )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=alloc1
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=alloc2
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=alloc3
+    )
 
     # when - confirm POI
     confirm_purchase_order_item(poi)
@@ -590,6 +610,9 @@ def test_confirm_poi_auto_confirms_order(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=allocation
     )
 
     # Verify order cannot be confirmed before POI confirmation
@@ -735,7 +758,9 @@ def test_confirm_poi_auto_confirm_sends_order_confirmed_email(
         is_gift_card=False,
     )
 
-    Allocation.objects.create(order_line=order_line, stock=source, quantity_allocated=5)
+    allocation = Allocation.objects.create(
+        order_line=order_line, stock=source, quantity_allocated=5
+    )
 
     shipment = Shipment.objects.create(
         source=nonowned_warehouse.address,
@@ -758,6 +783,9 @@ def test_confirm_poi_auto_confirm_sends_order_confirmed_email(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=purchase_order, allocation=allocation
     )
 
     # when

@@ -40,7 +40,7 @@ from django.utils import timezone
 from prices import Money
 
 from ...inventory import PurchaseOrderItemStatus
-from ...inventory.models import PurchaseOrderItem
+from ...inventory.models import PurchaseOrderItem, PurchaseOrderRequestedAllocation
 from ...shipping import IncoTerm, ShipmentType
 from ..models import Stock
 
@@ -884,6 +884,10 @@ def test_invariant_when_confirming_poi_moves_allocations_from_supplier(
         status=PurchaseOrderItemStatus.DRAFT,
     )
 
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=poi.order, allocation=allocation
+    )
+
     # when - confirm POI (this should move allocations)
     confirm_purchase_order_item(poi)
 
@@ -1019,6 +1023,12 @@ def test_invariant_when_multiple_customer_orders_then_confirm_poi(
         status=PurchaseOrderItemStatus.DRAFT,
     )
 
+    allocations = Allocation.objects.filter(order_line__in=order_lines)
+    for alloc in allocations:
+        PurchaseOrderRequestedAllocation.objects.create(
+            purchase_order=poi.order, allocation=alloc
+        )
+
     confirm_purchase_order_item(poi)
 
     # then - all allocations moved to owned warehouse
@@ -1123,6 +1133,15 @@ def test_invariant_when_poi_quantity_less_than_allocations(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    from ..models import Allocation as _Allocation
+
+    source_allocation = _Allocation.objects.get(
+        order_line=order_line, stock__warehouse=nonowned_warehouse
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=poi.order, allocation=source_allocation
     )
 
     confirm_purchase_order_item(poi)
@@ -1235,6 +1254,15 @@ def test_invariant_when_order_auto_confirms_after_poi_confirmation(
         shipment=shipment,
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
+    )
+
+    from ..models import Allocation as _Allocation
+
+    source_allocation = _Allocation.objects.get(
+        order_line=order_line, stock__warehouse=nonowned_warehouse
+    )
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=poi.order, allocation=source_allocation
     )
 
     confirm_purchase_order_item(poi)
@@ -1415,6 +1443,10 @@ def test_invariant_with_mixed_allocations_owned_and_nonowned(
         status=PurchaseOrderItemStatus.DRAFT,
     )
 
+    PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=poi2.order, allocation=supplier_alloc
+    )
+
     # Check state BEFORE confirming POI2
     Stock.objects.get(warehouse=owned_warehouse, product_variant=variant)
 
@@ -1527,6 +1559,17 @@ def test_invariant_stress_test_realistic_daily_operations(
         country_of_origin="US",
         status=PurchaseOrderItemStatus.DRAFT,
     )
+
+    from ..models import Allocation as _Allocation
+
+    for day1_line in order_lines:
+        day1_alloc = _Allocation.objects.get(
+            order_line=day1_line, stock__warehouse=nonowned_warehouse
+        )
+        PurchaseOrderRequestedAllocation.objects.create(
+            purchase_order=poi1.order, allocation=day1_alloc
+        )
+
     confirm_purchase_order_item(poi1)
 
     # Invariant after POI confirmation

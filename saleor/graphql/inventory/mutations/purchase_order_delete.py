@@ -1,7 +1,7 @@
 import graphene
 from django.core.exceptions import ValidationError
 
-from ....inventory import PurchaseOrderStatus, models
+from ....inventory import PurchaseOrderItemStatus, PurchaseOrderStatus, models
 from ....inventory.error_codes import PurchaseOrderErrorCode
 from ....permission.enums import WarehousePermissions
 from ...core import ResolveInfo
@@ -43,6 +43,19 @@ class PurchaseOrderDelete(ModelDeleteMutation):
                 {
                     "id": ValidationError(
                         f"Cannot delete a {purchase_order.status} purchase order.",
+                        code=PurchaseOrderErrorCode.INVALID.value,
+                    )
+                }
+            )
+
+        non_draft_item = purchase_order.items.exclude(
+            status=PurchaseOrderItemStatus.DRAFT
+        ).first()
+        if non_draft_item:
+            raise ValidationError(
+                {
+                    "id": ValidationError(
+                        f"Cannot delete purchase order with {non_draft_item.status} items.",
                         code=PurchaseOrderErrorCode.INVALID.value,
                     )
                 }
