@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ..core.exceptions import InsufficientStock, InsufficientStockData
-from ..warehouse.models import Stock
+from ..warehouse.models import Allocation, Stock
 from . import PurchaseOrderItemStatus
 from .events import (
     adjustment_created_event,
@@ -16,18 +16,92 @@ from .exceptions import (
     AdjustmentAffectsPaidOrders,
     AdjustmentAlreadyProcessed,
     AdjustmentRequiresManualResolution,
-    AllocationInvariantViolation,
     InvalidPurchaseOrderItemStatus,
     ReceiptLineNotInProgress,
     ReceiptNotInProgress,
 )
-from .models import PurchaseOrderItem, PurchaseOrderItemAdjustment
+from .models import (
+    PurchaseOrder,
+    PurchaseOrderItem,
+    PurchaseOrderItemAdjustment,
+    PurchaseOrderRequestedAllocation,
+)
 
 
 @transaction.atomic
-def confirm_purchase_order_item(
-    purchase_order_item: PurchaseOrderItem, user=None, app=None
-):
+def add_allocation_to_draft_purchase_order_item(
+    a: Allocation, poi: PurchaseOrderItem
+) -> PurchaseOrderRequestedAllocation:
+    """Link an allocation to a draft PO as a requested allocation (PORA).
+
+    Records intent to fulfill this allocation when the PO is confirmed. On confirmation,
+    PORAs are consumed FIFO by order line creation time to create AllocationSources.
+    """
+    from ..order import OrderStatus
+    from . import PurchaseOrderStatus
+
+    po = poi.order
+
+    assert po.status == PurchaseOrderStatus.DRAFT
+    assert a.stock.warehouse_id == po.source_warehouse_id
+    assert a.stock.product_variant_id == poi.product_variant_id
+    assert a.order_line.order.status == OrderStatus.UNCONFIRMED
+    assert not PurchaseOrderRequestedAllocation.objects.filter(
+        purchase_order=po, allocation=a
+    ).exists()
+
+    if PurchaseOrderRequestedAllocation.objects.filter(allocation=a).exists():
+        import warnings
+
+        warnings.warn(
+            f"Allocation {a.pk} is already requested by another purchase order.",
+            stacklevel=2,
+        )
+
+    return PurchaseOrderRequestedAllocation.objects.create(
+        purchase_order=po,
+        allocation=a,
+    )
+
+
+@transaction.atomic
+def add_order_to_purchase_order(
+    order, po: PurchaseOrder
+) -> list[PurchaseOrderRequestedAllocation]:
+    """Add all allocations from an order to a draft PO as PORAs where PO.source_warehouse = allocations warehouse, creating POIs where necessary."""
+    from ..order import OrderStatus
+    from . import PurchaseOrderStatus
+
+    assert po.status == PurchaseOrderStatus.DRAFT
+    assert order.status == OrderStatus.UNCONFIRMED
+
+    allocations = Allocation.objects.filter(
+        order_line__order=order,
+        stock__warehouse=po.source_warehouse,
+    ).select_related("order_line", "stock")
+
+    poras = []
+    for allocation in allocations:
+        poi, _ = PurchaseOrderItem.objects.get_or_create(
+            order=po,
+            product_variant=allocation.stock.product_variant,
+            defaults={
+                "quantity_ordered": 0,
+                "total_price_amount": 0,
+                "currency": "",
+                "country_of_origin": "",
+                "status": PurchaseOrderItemStatus.DRAFT,
+            },
+        )
+        poi.quantity_ordered += allocation.quantity_allocated
+        poi.save(update_fields=["quantity_ordered"])
+        poras.append(add_allocation_to_draft_purchase_order_item(allocation, poi))
+
+    return poras
+
+
+@transaction.atomic
+def confirm_purchase_order_item(poi: PurchaseOrderItem, user=None, app=None):
     """Confirm purchase order item and move stock from supplier to owned warehouse.
 
     This is THE ONLY WAY stock enters owned warehouses. When a POI is confirmed,
@@ -35,29 +109,27 @@ def confirm_purchase_order_item(
 
     The function:
     1. Moves physical stock from source to destination
-    2. Tries to attach existing allocations (if any) to the stock
+    2. Moves existing order allocations via FIFO on PORAs on the POI.
     3. Creates AllocationSources to link allocations to this POI (batch tracking)
-    4. Logs the confirmation event for audit trail
+    4. The rest becomes unallocated stock.
+    5. Logs the confirmation event for audit trail
 
     See `saleor/warehouse/tests/test_stock_invariants.py` for description of how Stock
-    must be updated and relevant tests
+    conservation works
     """
 
-    from ..warehouse.management import allocate_sources
-    from ..warehouse.models import Allocation
+    from ..warehouse.management import _allocate_sources_incremental
 
-    if purchase_order_item.status != PurchaseOrderItemStatus.DRAFT:
-        raise InvalidPurchaseOrderItemStatus(
-            purchase_order_item, PurchaseOrderItemStatus.DRAFT
-        )
+    if poi.status != PurchaseOrderItemStatus.DRAFT:
+        raise InvalidPurchaseOrderItemStatus(poi, PurchaseOrderItemStatus.DRAFT)
 
     # Get source and destination (locked via select_for_update)
     source = (
         Stock.objects.select_for_update()
         .select_related("warehouse")
         .get(
-            warehouse=purchase_order_item.order.source_warehouse,
-            product_variant=purchase_order_item.product_variant,
+            warehouse=poi.order.source_warehouse,
+            product_variant=poi.product_variant,
         )
     )
 
@@ -65,19 +137,20 @@ def confirm_purchase_order_item(
         Stock.objects.select_for_update()
         .select_related("warehouse")
         .get_or_create(
-            warehouse=purchase_order_item.order.destination_warehouse,
-            product_variant=purchase_order_item.product_variant,
+            warehouse=poi.order.destination_warehouse,
+            product_variant=poi.product_variant,
             defaults={"quantity": 0, "quantity_allocated": 0},
         )
     )
 
-    quantity = purchase_order_item.quantity_ordered
+    # maintain the draft invariants
+    assert poi.quantity_allocated == 0
+    assert poi.quantity_fulfilled == 0
 
-    # Validation
-    if source.warehouse.is_owned:
-        raise ValueError("Source warehouse must be non-owned")
-    if not destination.warehouse.is_owned:
-        raise ValueError("Destination warehouse must be owned")
+    quantity = poi.quantity_ordered
+
+    assert source.warehouse.is_owned
+    assert destination.warehouse.is_owned
     if quantity > source.quantity + source.quantity_allocated:
         raise ValueError(
             f"Insufficient stock at source: need {quantity}, "
@@ -85,33 +158,20 @@ def confirm_purchase_order_item(
             f"(quantity={source.quantity}, allocated={source.quantity_allocated})"
         )
 
-    # Get allocations to potentially move (FIFO by order line creation time)
-    # Only consider allocations with quantity > 0 (ignore orphaned empty records)
-    allocations = (
-        source.allocations.select_for_update()
-        .select_related("order_line")
-        .filter(quantity_allocated__gt=0)
-        .order_by("order_line__created_at")
+    poras = (
+        PurchaseOrderRequestedAllocation.objects.select_for_update()
+        .select_related("allocation__order_line__order", "allocation__stock")
+        .filter(
+            purchase_order=poi.order,
+            allocation__stock__product_variant=poi.product_variant,
+        )
+        .order_by("allocation__order_line__created_at")
     )
 
-    # Collect orders to check for auto-confirmation (before deleting any allocations)
     from ..order import OrderStatus
     from ..warehouse.management import can_confirm_order
 
     orders_to_check = set()
-    for allocation in allocations:
-        order = allocation.order_line.order
-        if order.status == OrderStatus.UNCONFIRMED:
-            orders_to_check.add(order)
-        else:
-            # INVARIANT VIOLATION: Non-owned warehouses should only have allocations
-            # for UNCONFIRMED orders. Once confirmed, allocations must be in owned
-            # warehouses with AllocationSources.
-            raise AllocationInvariantViolation(
-                warehouse_name=source.warehouse.name,
-                order_number=str(order.number),
-                order_status=order.status,
-            )
 
     # Move physical stock from source to destination
     # Note: Stock locks ensure these moves are isolated
@@ -128,34 +188,34 @@ def confirm_purchase_order_item(
 
     # Confirm POI status before moving allocations
     # allocate_sources() needs POI to be CONFIRMED to find it
-    purchase_order_item.status = PurchaseOrderItemStatus.CONFIRMED
-    purchase_order_item.confirmed_at = timezone.now()
-    purchase_order_item.save(update_fields=["status", "confirmed_at"])
+    poi.status = PurchaseOrderItemStatus.CONFIRMED
+    poi.confirmed_at = timezone.now()
+    poi.save(update_fields=["status", "confirmed_at"])
 
-    # Move allocations from source to destination and create AllocationSources
-    for allocation in allocations:
+    # Move PORA-scoped allocations from source to destination and create AllocationSources.
+    # Delete each PORA after its allocation is processed - they are consumed on confirmation.
+    for pora in poras:
+        allocation = pora.allocation
         available = destination.quantity - destination.quantity_allocated
         if available >= allocation.quantity_allocated:
-            # Move entire allocation to an owned warehouse
+            # Move entire allocation to owned warehouse
             allocation.stock = destination
             allocation.save(update_fields=["stock"])
 
             try:
-                allocate_sources(allocation)
+                _allocate_sources_incremental(
+                    allocation, allocation.quantity_allocated, poi=poi
+                )
             except InsufficientStock:
-                # Invariant violation - allocation moved but can't create sources
-                # Transaction will rollback everything
                 raise
 
-            # Update quantity_allocated (quantity already moved)
             destination.quantity_allocated += allocation.quantity_allocated
             source.quantity_allocated -= allocation.quantity_allocated
+            orders_to_check.add(allocation.order_line.order)
         else:
-            # Split allocation: partial to destination, rest stays at source
-            available = destination.quantity - destination.quantity_allocated
-            move_quantity = min(available, allocation.quantity_allocated)
+            # POI exhausted - split: move what fits, rest stays at source
+            move_quantity = available
 
-            # Create new allocation at destination for the moved portion
             moved_allocation = Allocation.objects.create(
                 order_line=allocation.order_line,
                 stock=destination,
@@ -163,24 +223,22 @@ def confirm_purchase_order_item(
             )
 
             try:
-                allocate_sources(moved_allocation)
+                _allocate_sources_incremental(moved_allocation, move_quantity, poi=poi)
             except InsufficientStock:
-                # again this would break the stock invariant so raise it
                 raise
 
-            # Update quantity_allocated (quantity already moved)
             destination.quantity_allocated += move_quantity
             source.quantity_allocated -= move_quantity
 
-            # Reduce original allocation (stays at source)
             allocation.quantity_allocated -= move_quantity
             if allocation.quantity_allocated == 0:
                 allocation.delete()
             else:
                 allocation.save(update_fields=["quantity_allocated"])
 
-            # No more room at destination, stop moving allocations
-            break
+            orders_to_check.add(allocation.order_line.order)
+
+        pora.delete()
 
     source.save(update_fields=["quantity", "quantity_allocated"])
     destination.save(update_fields=["quantity", "quantity_allocated"])
@@ -206,7 +264,7 @@ def confirm_purchase_order_item(
 
     # Log event for audit trail
     purchase_order_item_confirmed_event(
-        purchase_order_item=purchase_order_item,
+        purchase_order_item=poi,
         user=user,
         app=app,
     )
@@ -528,9 +586,10 @@ def complete_receipt(receipt, user=None, manager=None):
     from . import (
         PurchaseOrderItemAdjustmentReason,
         PurchaseOrderItemStatus,
+        PurchaseOrderStatus,
         ReceiptStatus,
     )
-    from .models import PurchaseOrderItemAdjustment
+    from .models import PurchaseOrder, PurchaseOrderItemAdjustment
 
     # Validate receipt status
     if receipt.status != ReceiptStatus.IN_PROGRESS:
@@ -599,6 +658,19 @@ def complete_receipt(receipt, user=None, manager=None):
     receipt.completed_at = timezone.now()
     receipt.completed_by = user
     receipt.save(update_fields=["status", "completed_at", "completed_by"])
+
+    # Transition PO status based on how many items are now received.
+    # A PO can span multiple shipments, so RECEIVED only when the last one arrives.
+    po_ids = pois.values_list("order_id", flat=True).distinct()
+    for po in PurchaseOrder.objects.filter(pk__in=po_ids).select_for_update():
+        unreceived = po.items.exclude(status=PurchaseOrderItemStatus.RECEIVED)
+        if not unreceived.exists():
+            new_status = PurchaseOrderStatus.RECEIVED
+        else:
+            new_status = PurchaseOrderStatus.PARTIALLY_RECEIVED
+        if po.status != new_status:
+            po.status = new_status
+            po.save(update_fields=["status", "updated_at"])
 
     # Create fulfillments for UNFULFILLED orders whose stock has now physically arrived.
     # Skip if there are pending adjustments: unresolved shortages mean the order state

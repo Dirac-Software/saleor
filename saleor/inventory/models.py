@@ -16,6 +16,7 @@ from . import (
     PurchaseOrderEvents,
     PurchaseOrderItemAdjustmentReason,
     PurchaseOrderItemStatus,
+    PurchaseOrderStatus,
     ReceiptStatus,
 )
 
@@ -65,8 +66,52 @@ class PurchaseOrder(models.Model):
         related_name="destination_purchase_orders",
     )
 
+    status = models.CharField(
+        max_length=32,
+        choices=PurchaseOrderStatus.CHOICES,
+        default=PurchaseOrderStatus.DRAFT,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class PurchaseOrderRequestedAllocation(models.Model):
+    """PORA for short. The allocations we want to confirm for this purchase order.
+
+    We may not be able to confirm the entire allocation. Should only exist when PO has
+    draft state.
+
+    In order to confirm orders stock must move, via a PO, to an owned warehouse. We know
+    how much stock a warehouse should confirm to an order by looking at the Allocations on
+    the Order (which must be in the unconfirmed state).
+
+    On confirmation we will only confirm stock from these Allocations, FIFO by order line
+    creation time:
+        for poi in PurchaseOrderItem:
+            allocation_candidates = (
+                PurchaseOrderRequestedAllocation.objects
+                .filter(purchase_order=my_po)
+                .order_by("allocation__order_line__created_at")
+            )
+            for pora in allocation_candidates:
+                allocate_as_much_as_possible(pora)
+                if poi exhausted: break
+    """
+
+    purchase_order = models.ForeignKey(
+        PurchaseOrder,
+        on_delete=models.CASCADE,
+        related_name="requested_allocations",
+    )
+    allocation = models.ForeignKey(
+        "warehouse.Allocation",
+        on_delete=models.CASCADE,
+        related_name="purchase_order_requested_allocations",
+    )
+
+    class Meta:
+        unique_together = [["purchase_order", "allocation"]]
 
 
 class PurchaseOrderItemQuerySet(models.QuerySet):

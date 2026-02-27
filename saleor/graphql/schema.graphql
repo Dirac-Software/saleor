@@ -12508,8 +12508,18 @@ type PurchaseOrder implements Node {
   """Destination warehouse (owned)."""
   destinationWarehouse: Warehouse!
 
+  """Current status of the purchase order."""
+  status: PurchaseOrderStatusEnum!
+
   """Items in this purchase order."""
   items: [PurchaseOrderItem]!
+}
+
+enum PurchaseOrderStatusEnum @doc(category: "Products") {
+  DRAFT
+  CONFIRMED
+  PARTIALLY_RECEIVED
+  RECEIVED
 }
 
 enum PurchaseOrderItemStatusEnum @doc(category: "Products") {

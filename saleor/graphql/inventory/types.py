@@ -16,6 +16,7 @@ from .enums import (
     PurchaseOrderItemAdjustmentReasonEnum,
     PurchaseOrderItemAdjustmentStatusEnum,
     PurchaseOrderItemStatusEnum,
+    PurchaseOrderStatusEnum,
 )
 
 
@@ -30,6 +31,10 @@ class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
         "saleor.graphql.warehouse.types.Warehouse",
         required=True,
         description="Destination warehouse (owned).",
+    )
+
+    status = PurchaseOrderStatusEnum(
+        required=True, description="Current status of the purchase order."
     )
 
     items = graphene.List(

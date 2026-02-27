@@ -1,3 +1,19 @@
+class PurchaseOrderStatus:
+    """Status of a purchase order through its lifecycle."""
+
+    DRAFT = "draft"  # Being built; stock has not moved; PORAs may exist
+    CONFIRMED = "confirmed"  # Committed to supplier; stock moved to owned warehouse
+    PARTIALLY_RECEIVED = "partially_received"  # Some shipments arrived, not all
+    RECEIVED = "received"  # All goods physically arrived; all receipts completed
+
+    CHOICES = [
+        (DRAFT, "Draft"),
+        (CONFIRMED, "Confirmed"),
+        (PARTIALLY_RECEIVED, "Partially Received"),
+        (RECEIVED, "Received"),
+    ]
+
+
 class PurchaseOrderItemStatus:
     """Status of a purchase order item through its lifecycle."""
 
