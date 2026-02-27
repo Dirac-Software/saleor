@@ -11604,6 +11604,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """
   depositThresholdMetOverride: Boolean!
 
+  """Whether variants may be substituted during PO receipt reallocation."""
+  allowVariantReallocation: Boolean!
+
   """Date and time when deposit threshold was met."""
   depositPaidAt: DateTime
 
@@ -26654,6 +26657,11 @@ input DraftOrderCreateInput @doc(category: "Orders") {
   """Bank account number for the selected Xero bank account."""
   xeroBankAccountNumber: String
 
+  """
+  Whether variants may be substituted during PO receipt reallocation. Defaults to True.
+  """
+  allowVariantReallocation: Boolean
+
   """Variant line input consisting of variant ID and quantity of products."""
   lines: [OrderLineCreateInput!]
 }
@@ -26820,6 +26828,11 @@ input DraftOrderInput @doc(category: "Orders") {
 
   """Bank account number for the selected Xero bank account."""
   xeroBankAccountNumber: String
+
+  """
+  Whether variants may be substituted during PO receipt reallocation. Defaults to True.
+  """
+  allowVariantReallocation: Boolean
 }
 
 """
@@ -27638,6 +27651,9 @@ input OrderUpdateInput @doc(category: "Orders") {
   Added in Saleor 3.21.
   """
   languageCode: LanguageCodeEnum
+
+  """Whether variants may be substituted during PO receipt reallocation."""
+  allowVariantReallocation: Boolean
 }
 
 """
