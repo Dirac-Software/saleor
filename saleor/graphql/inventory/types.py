@@ -16,6 +16,7 @@ from .enums import (
     PurchaseOrderItemAdjustmentReasonEnum,
     PurchaseOrderItemAdjustmentStatusEnum,
     PurchaseOrderItemStatusEnum,
+    PurchaseOrderStatusEnum,
 )
 
 
@@ -32,10 +33,19 @@ class PurchaseOrder(ModelObjectType[models.PurchaseOrder]):
         description="Destination warehouse (owned).",
     )
 
+    status = PurchaseOrderStatusEnum(
+        required=True, description="Current status of the purchase order."
+    )
+
     items = graphene.List(
         lambda: PurchaseOrderItem,
         required=True,
         description="Items in this purchase order.",
+    )
+
+    auto_reallocate_variants = graphene.Boolean(
+        required=True,
+        description="Whether variants are automatically reallocated on receipt.",
     )
 
     class Meta:
@@ -77,7 +87,7 @@ class PurchaseOrderItem(ModelObjectType[models.PurchaseOrderItem]):
         Money, required=True, description="Unit cost (buy price)."
     )
     country_of_origin = graphene.String(
-        required=True, description="Country of origin (ISO 2-letter code)."
+        description="Country of origin (ISO 2-letter code)."
     )
     status = PurchaseOrderItemStatusEnum(
         required=True, description="Status of this purchase order item."
@@ -181,6 +191,9 @@ class PurchaseOrderCreateInput(BaseInputObjectType):
         PurchaseOrderItemInput,
         required=True,
         description="Line items to order.",
+    )
+    auto_reallocate_variants = graphene.Boolean(
+        description="Whether variants are automatically reallocated on receipt. Defaults to True.",
     )
     metadata = NonNullList(
         MetadataInput,

@@ -1912,6 +1912,10 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         required=True,
         description="Whether the deposit threshold has been manually overridden by an admin.",
     )
+    allow_variant_reallocation = graphene.Boolean(
+        required=True,
+        description="Whether variants may be substituted during PO receipt reallocation.",
+    )
     deposit_paid_at = DateTime(
         description="Date and time when deposit threshold was met."
     )
@@ -3479,6 +3483,12 @@ class Order(SyncWebhookControlContextModelObjectType[ModelObjectType[models.Orde
         root: SyncWebhookControlContext[models.Order], _info
     ):
         return root.node.deposit_threshold_met_override
+
+    @staticmethod
+    def resolve_allow_variant_reallocation(
+        root: SyncWebhookControlContext[models.Order], _info
+    ):
+        return root.node.allow_variant_reallocation
 
     @staticmethod
     def __resolve_references(roots: list["Order"], info):

@@ -214,6 +214,10 @@ class PurchaseOrderCreate(DeprecatedModelMutation):
             # Save the purchase order instance with warehouses
             instance.source_warehouse = cleaned_input["source_warehouse"]
             instance.destination_warehouse = cleaned_input["destination_warehouse"]
+            if "auto_reallocate_variants" in cleaned_input:
+                instance.auto_reallocate_variants = cleaned_input[
+                    "auto_reallocate_variants"
+                ]
             instance.save()
 
             # Create purchase order items

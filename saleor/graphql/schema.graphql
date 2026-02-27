@@ -11604,6 +11604,9 @@ type Order implements Node & ObjectWithMetadata @doc(category: "Orders") {
   """
   depositThresholdMetOverride: Boolean!
 
+  """Whether variants may be substituted during PO receipt reallocation."""
+  allowVariantReallocation: Boolean!
+
   """Date and time when deposit threshold was met."""
   depositPaidAt: DateTime
 
@@ -12491,7 +12494,7 @@ type PurchaseOrderItem implements Node {
   unitPrice: Money!
 
   """Country of origin (ISO 2-letter code)."""
-  countryOfOrigin: String!
+  countryOfOrigin: String
 
   """Status of this purchase order item."""
   status: PurchaseOrderItemStatusEnum!
@@ -12508,8 +12511,21 @@ type PurchaseOrder implements Node {
   """Destination warehouse (owned)."""
   destinationWarehouse: Warehouse!
 
+  """Current status of the purchase order."""
+  status: PurchaseOrderStatusEnum!
+
   """Items in this purchase order."""
   items: [PurchaseOrderItem]!
+
+  """Whether variants are automatically reallocated on receipt."""
+  autoReallocateVariants: Boolean!
+}
+
+enum PurchaseOrderStatusEnum @doc(category: "Products") {
+  DRAFT
+  CONFIRMED
+  PARTIALLY_RECEIVED
+  RECEIVED
 }
 
 enum PurchaseOrderItemStatusEnum @doc(category: "Products") {
@@ -12517,6 +12533,7 @@ enum PurchaseOrderItemStatusEnum @doc(category: "Products") {
   CONFIRMED
   RECEIVED
   CANCELLED
+  REQUIRES_ATTENTION
 }
 
 """Represents a goods receipt for an inbound shipment."""
@@ -13085,6 +13102,7 @@ enum OrderErrorCode @doc(category: "Orders") {
   CANNOT_REFUND
   CANNOT_FULFILL_UNPAID_ORDER
   CANNOT_FULFILL_UNRECEIVED_STOCK
+  CANNOT_FULFILL_POI_REQUIRES_ATTENTION
   CAPTURE_INACTIVE_PAYMENT
   GIFT_CARD_LINE
   NOT_EDITABLE
@@ -26644,6 +26662,11 @@ input DraftOrderCreateInput @doc(category: "Orders") {
   """Bank account number for the selected Xero bank account."""
   xeroBankAccountNumber: String
 
+  """
+  Whether variants may be substituted during PO receipt reallocation. Defaults to True.
+  """
+  allowVariantReallocation: Boolean
+
   """Variant line input consisting of variant ID and quantity of products."""
   lines: [OrderLineCreateInput!]
 }
@@ -26810,6 +26833,11 @@ input DraftOrderInput @doc(category: "Orders") {
 
   """Bank account number for the selected Xero bank account."""
   xeroBankAccountNumber: String
+
+  """
+  Whether variants may be substituted during PO receipt reallocation. Defaults to True.
+  """
+  allowVariantReallocation: Boolean
 }
 
 """
@@ -27628,6 +27656,9 @@ input OrderUpdateInput @doc(category: "Orders") {
   Added in Saleor 3.21.
   """
   languageCode: LanguageCodeEnum
+
+  """Whether variants may be substituted during PO receipt reallocation."""
+  allowVariantReallocation: Boolean
 }
 
 """
@@ -28668,6 +28699,11 @@ input PurchaseOrderCreateInput @doc(category: "Products") {
 
   """Line items to order."""
   items: [PurchaseOrderItemInput!]!
+
+  """
+  Whether variants are automatically reallocated on receipt. Defaults to True.
+  """
+  autoReallocateVariants: Boolean
 
   """Public metadata (e.g., supplier PO number)."""
   metadata: [MetadataInput!]
