@@ -12491,7 +12491,7 @@ type PurchaseOrderItem implements Node {
   unitPrice: Money!
 
   """Country of origin (ISO 2-letter code)."""
-  countryOfOrigin: String!
+  countryOfOrigin: String
 
   """Status of this purchase order item."""
   status: PurchaseOrderItemStatusEnum!

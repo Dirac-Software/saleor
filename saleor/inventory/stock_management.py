@@ -87,9 +87,9 @@ def add_order_to_purchase_order(
             product_variant=allocation.stock.product_variant,
             defaults={
                 "quantity_ordered": 0,
-                "total_price_amount": 0,
-                "currency": "",
-                "country_of_origin": "",
+                "total_price_amount": None,
+                "currency": None,
+                "country_of_origin": None,
                 "status": PurchaseOrderItemStatus.DRAFT,
             },
         )
@@ -122,6 +122,13 @@ def confirm_purchase_order_item(poi: PurchaseOrderItem, user=None, app=None):
 
     if poi.status != PurchaseOrderItemStatus.DRAFT:
         raise InvalidPurchaseOrderItemStatus(poi, PurchaseOrderItemStatus.DRAFT)
+
+    if not (
+        poi.currency and poi.country_of_origin and poi.total_price_amount is not None
+    ):
+        raise ValueError(
+            f"POI {poi.pk} must have currency, country_of_origin, and total_price_amount set before confirmation"
+        )
 
     # Get source and destination (locked via select_for_update)
     source = (

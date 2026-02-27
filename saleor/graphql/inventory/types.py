@@ -82,7 +82,7 @@ class PurchaseOrderItem(ModelObjectType[models.PurchaseOrderItem]):
         Money, required=True, description="Unit cost (buy price)."
     )
     country_of_origin = graphene.String(
-        required=True, description="Country of origin (ISO 2-letter code)."
+        description="Country of origin (ISO 2-letter code)."
     )
     status = PurchaseOrderItemStatusEnum(
         required=True, description="Status of this purchase order item."

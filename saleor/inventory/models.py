@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.contrib.postgres.indexes import BTreeIndex
 from django.db import models
@@ -225,13 +227,13 @@ class PurchaseOrderItem(models.Model):
         """
         from django.db.models import Sum
 
-        if self.quantity_ordered == 0:
+        if self.quantity_ordered == 0 or self.total_price_amount is None:
             return 0
 
         base_unit_price = self.total_price_amount / self.quantity_ordered
 
         # Adjust COST only for supplier credits/charges (affects_payable)
-        payable_adjustment = (
+        payable_adjustment = Decimal(
             self.adjustments.filter(
                 affects_payable=True, processed_at__isnull=False
             ).aggregate(total=Sum("quantity_change"))["total"]
@@ -261,11 +263,15 @@ class PurchaseOrderItem(models.Model):
     total_price_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
-        help_text="Total invoice amount for this POI (quantity × unit price)",
+        null=True,
+        blank=True,
+        help_text="Total invoice amount. Null until set from price list.",
     )
 
     currency = models.CharField(
         max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH,
+        null=True,
+        blank=True,
     )
 
     shipment = models.ForeignKey(
@@ -276,7 +282,7 @@ class PurchaseOrderItem(models.Model):
         blank=True,
     )
 
-    country_of_origin = CountryField()
+    country_of_origin = CountryField(null=True, blank=True)
 
     status = models.CharField(
         max_length=32,
@@ -397,7 +403,7 @@ class PurchaseOrderItemAdjustment(models.Model):
         poi = self.purchase_order_item
         original_unit_price = (
             poi.total_price_amount / poi.quantity_ordered
-            if poi.quantity_ordered > 0
+            if poi.quantity_ordered > 0 and poi.total_price_amount is not None
             else 0
         )
         return self.quantity_change * original_unit_price
